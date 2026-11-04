@@ -3,6 +3,7 @@
 Quét mã vạch trên bao bì → xem dinh dưỡng, thành phần, dị ứng (dữ liệu Open Food Facts).
 
 ## Chạy thử
+Cần Node.js 20.19 trở lên (hoặc 22.12 trở lên) vì Vite 7 đòi vậy.
 ```
 npm install
 cp .env.example .env
