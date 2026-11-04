@@ -145,7 +145,7 @@ def prepare(src: pathlib.Path) -> pathlib.Path:
     img.save(dst, "JPEG", quality=90)
     return dst
 
-# ---------- 5 công cụ: mỗi hàm nhận đường dẫn ảnh, trả về chuỗi text ----------
+# ---------- 4 công cụ: mỗi hàm nhận đường dẫn ảnh, trả về chuỗi text ----------
 def ocr_tesseract(path):
     import pytesseract
     cmd = os.environ.get("TESSERACT_CMD")
