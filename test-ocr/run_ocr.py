@@ -32,6 +32,7 @@ FREE_PER_MONTH = {
 }
 CAP_RATIO = 0.8                   # chỉ dùng tới 80% mức miễn phí
 USAGE = OUT / "api_usage.json"    # {"google": {"YYYY-MM": n}, "azure": {...}}, không commit
+LOCK = OUT / "api_usage.lock"     # file khóa: chỉ 1 lần chạy được gọi google / azure tại một thời điểm, không commit
 # Azure F0 giới hạn 20 lượt / phút (cùng nguồn trên): giữ khoảng cách 60/20 + 0,1 = 3,1 giây giữa 2 lần gọi
 AZURE_PER_MINUTE = 20
 AZURE_MIN_GAP = 60 / AZURE_PER_MINUTE + 0.1
@@ -67,8 +68,33 @@ def save_usage(usage):
     tmp.write_text(json.dumps(usage, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, USAGE)
 
-def take_paid_call(usage, tool, month):
-    """Gọi trước MỖI lần gọi dịch vụ trả phí. Còn dưới trần: tăng 1, ghi file ngay, trả True. Hết lượt: trả False."""
+def acquire_lock():
+    """Tạo file khóa LOCK (chỉ tạo được nếu chưa có). Tạo được: trả True. Đã có / không tạo được: in cảnh báo, trả False."""
+    try:
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        print(f"CẢNH BÁO: đã có file khóa {LOCK}: đang có lần chạy khác hoặc lần trước bị tắt ngang. "
+              f"Lần này KHÔNG gọi google / azure (tesseract / easyocr vẫn chạy). "
+              f"Nếu chắc chắn không có lần chạy nào khác thì xóa file này rồi chạy lại.")
+        return False
+    except OSError as e:
+        print(f"CẢNH BÁO: không tạo được file khóa {LOCK} ({e}). Lần này KHÔNG gọi google / azure.")
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(f"pid={os.getpid()} bat_dau={datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
+    return True
+
+def release_lock():
+    """Xóa file khóa (chỉ gọi khi chính lần chạy này đã tạo nó)."""
+    try:
+        LOCK.unlink()
+    except FileNotFoundError:
+        pass
+
+def take_paid_call(tool, month):
+    """Gọi trước MỖI lần gọi dịch vụ trả phí. Đọc lại bộ đếm từ file (không tin số cũ trong bộ nhớ).
+    Còn dưới trần: tăng 1, ghi file ngay, trả True. Hết lượt / file hỏng: trả False."""
+    usage = load_usage()
     if usage is None:
         print(f"[{tool}] bộ đếm {USAGE} không đọc được, coi như đã chạm trần, ngừng gọi dịch vụ này.")
         return False
@@ -164,49 +190,59 @@ def main():
     print(f"Có {len(photos)} ảnh của {len({p.parent.name for p in photos})} sản phẩm.")
 
     OUT.mkdir(exist_ok=True)
-    usage, month = load_usage(), month_key()
-    times_path = OUT / "times.csv"
-    new_file = not times_path.exists()
-    with open(times_path, "a", newline="", encoding="utf-8") as tf:
-        tw = csv.writer(tf)
-        if new_file:
-            tw.writerow(["tool", "code", "image", "seconds", "status"])
+    month = month_key()
+    # Dịch vụ trả phí sẽ chạy (có trong --tools và có key): giữ file khóa để 2 lần chạy cùng lúc không đếm thiếu
+    paid = [t for t in wanted if t in FREE_PER_MONTH and t in TOOLS and TOOLS[t][1]()]
+    locked = acquire_lock() if paid else False
+    try:
+        times_path = OUT / "times.csv"
+        new_file = not times_path.exists()
+        with open(times_path, "a", newline="", encoding="utf-8") as tf:
+            tw = csv.writer(tf)
+            if new_file:
+                tw.writerow(["tool", "code", "image", "seconds", "status"])
 
-        for tool in wanted:
-            if tool == "claude":
-                print("[claude] không dùng (quy tắc dự án: không gọi API Claude / Anthropic), bỏ qua."); continue
-            if tool not in TOOLS:
-                print(f"[{tool}] không biết công cụ này, bỏ qua."); continue
-            fn, available = TOOLS[tool]
-            if not available():
-                print(f"[{tool}] thiếu key trong .env, bỏ qua."); continue
-            out_dir = OUT / tool
-            print(f"\n=== {tool} ===")
-            for src in photos:
-                code, name = src.parent.name, src.stem
-                out_file = out_dir / f"{code}__{name}.txt"
-                if out_file.exists():
-                    continue  # đã chạy rồi
-                img = prepare(src)
-                if tool in FREE_PER_MONTH:
-                    # dịch vụ trả phí: hết lượt thì dừng hẳn công cụ này, ảnh còn lại không ghi gì (tháng sau chạy tiếp)
-                    if not take_paid_call(usage, tool, month):
-                        break
-                    if tool == "azure":
-                        wait_for_azure()
-                t0 = time.perf_counter()
-                try:
-                    text = fn(img) or ""
-                    status = "ok"
-                except Exception as e:
-                    text, status = "", f"error: {e}"
-                    traceback.print_exc(limit=1)
-                secs = round(time.perf_counter() - t0, 2)
-                out_dir.mkdir(exist_ok=True)
-                out_file.write_text(text, encoding="utf-8")
-                tw.writerow([tool, code, name, secs, status]); tf.flush()
-                print(f"  {code}/{name}: {secs}s {status} ({len(text)} ký tự)")
+            for tool in wanted:
+                if tool == "claude":
+                    print("[claude] không dùng (quy tắc dự án: không gọi API Claude / Anthropic), bỏ qua."); continue
+                if tool not in TOOLS:
+                    print(f"[{tool}] không biết công cụ này, bỏ qua."); continue
+                fn, available = TOOLS[tool]
+                if not available():
+                    print(f"[{tool}] thiếu key trong .env, bỏ qua."); continue
+                if tool in FREE_PER_MONTH and not locked:
+                    print(f"[{tool}] không giữ được file khóa {LOCK}, bỏ qua (xem cảnh báo ở trên)."); continue
+                out_dir = OUT / tool
+                print(f"\n=== {tool} ===")
+                for src in photos:
+                    code, name = src.parent.name, src.stem
+                    out_file = out_dir / f"{code}__{name}.txt"
+                    if out_file.exists():
+                        continue  # đã chạy rồi
+                    img = prepare(src)
+                    if tool in FREE_PER_MONTH:
+                        # dịch vụ trả phí: hết lượt thì dừng hẳn công cụ này, ảnh còn lại không ghi gì (tháng sau chạy tiếp)
+                        if not take_paid_call(tool, month):
+                            break
+                        if tool == "azure":
+                            wait_for_azure()
+                    t0 = time.perf_counter()
+                    try:
+                        text = fn(img) or ""
+                        status = "ok"
+                    except Exception as e:
+                        text, status = "", f"error: {e}"
+                        traceback.print_exc(limit=1)
+                    secs = round(time.perf_counter() - t0, 2)
+                    out_dir.mkdir(exist_ok=True)
+                    out_file.write_text(text, encoding="utf-8")
+                    tw.writerow([tool, code, name, secs, status]); tf.flush()
+                    print(f"  {code}/{name}: {secs}s {status} ({len(text)} ký tự)")
+    finally:
+        if locked:
+            release_lock()   # chỉ xóa khóa do chính lần chạy này tạo (kể cả khi lỗi / bấm Ctrl+C)
 
+    usage = load_usage()
     print(f"\nLượt gọi dịch vụ trả phí (bộ đếm {USAGE}, trần = 80% mức miễn phí):")
     print("  dịch vụ   tháng     đã dùng / trần")
     for svc in FREE_PER_MONTH:
