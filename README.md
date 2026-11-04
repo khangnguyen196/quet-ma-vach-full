@@ -15,6 +15,12 @@ Máy tính: mở `https://localhost:5173`. Điện thoại cùng Wi-Fi: mở đ�
 ```
 npm run build
 ```
-Thư mục `dist/` kéo thả vào https://app.netlify.com/drop là có link HTTPS.
+Thư mục `dist/` kéo thả vào https://app.netlify.com/drop là có link HTTPS (cách thay thế, không cần GitHub).
+
+## Đưa lên GitHub Pages
+- Repo trên GitHub phải để công khai (public).
+- Vào Settings → Pages → Source chọn **GitHub Actions**, làm việc này TRƯỚC khi push nhánh `main` có file `.github/workflows/deploy.yml`.
+- Từ đó mỗi lần push `main`, workflow tự chạy `npm ci` + `npm run build` rồi đưa `dist/` lên Pages; xem tiến độ ở tab Actions.
+- Link app có dạng https://khangnguyen196.github.io/quet-ma-vach-full/
 
 Kế hoạch chi tiết: xem `PLAN.md`.
