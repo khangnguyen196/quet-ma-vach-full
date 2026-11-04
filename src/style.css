@@ -106,8 +106,10 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
 .btn.primary.live { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btn input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .btn:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
-/* Nút bị khóa trong lúc đang đọc ảnh / mở camera */
-.btn:disabled, .btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+/* Nút bị khóa trong lúc đang đọc ảnh / mở camera.
+   Tách 2 rule: trình duyệt cũ không hiểu :has() sẽ bỏ cả rule chứa nó, rule :disabled vẫn còn. */
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 form.manual { display: flex; gap: 8px; margin-top: 14px; }
 form.manual input {

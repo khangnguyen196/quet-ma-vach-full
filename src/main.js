@@ -72,7 +72,7 @@ btnCam.addEventListener("click", async () => {
     setMsg("Đưa mã vạch vào khung, giữ máy yên khoảng 1–2 giây.");
   } catch (e) {
     placeholder("Không mở được camera ở đây.");
-    setMsg(`Không mở được camera (${e?.message || e}). Bấm “Chụp ảnh mã” hoặc nhập số bên dưới.`, true);
+    setMsg(`Không mở được camera (${errorText(e)}). Bấm “Chụp ảnh mã” hoặc nhập số bên dưới.`, true);
   } finally {
     setBusy(false);
   }
