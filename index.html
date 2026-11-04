@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Quét mã vạch đồ ăn</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="appName">Quét mã vạch đồ ăn</h1>
+    <p>Quét mã trên gói mì, chai nước, hộp bánh… để xem thành phần và dinh dưỡng.</p>
+  </header>
+
+  <section aria-label="Quét mã">
+    <div id="reader" class="viewfinder"></div>
+    <div class="actions">
+      <button id="btnCam" class="btn primary" type="button">Bật camera</button>
+      <label class="btn">Chụp ảnh mã<input id="file" type="file" accept="image/*" capture="environment"></label>
+    </div>
+    <form id="manual" class="manual" autocomplete="off">
+      <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" placeholder="Hoặc nhập số dưới mã vạch" aria-label="Số mã vạch">
+      <button class="btn" type="submit">Tra cứu</button>
+    </form>
+    <p class="try">Thử nhanh:
+      <button type="button" data-code="8934563163150">8934563163150</button> (mì chay Hảo Hảo),
+      <button type="button" data-code="8934563612146">8934563612146</button> (Handy Hảo Hảo)
+    </p>
+    <p id="msg" class="msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <section id="result" aria-live="polite"></section>
+
+  <section id="history" aria-label="Đã quét gần đây">
+    <h2>Đã quét gần đây</h2>
+    <ul id="historyList"></ul>
+  </section>
+
+  <footer>
+    Dữ liệu: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (cộng đồng đóng góp, có thể thiếu hoặc sai)
+  </footer>
+</main>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

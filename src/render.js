@@ -1,0 +1,75 @@
+// Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
+import { NOVA_VI, NUTRIENT_ROWS } from "./off.js";
+
+export const esc = (s) => String(s == null ? "" : s)
+  .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const fmt = (v) => Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 });
+
+/** Dòng "nhãn: giá trị", bỏ qua nếu trống. */
+const infoRow = (label, value) =>
+  value ? `<tr><td>${esc(label)}</td><td>${esc(value)}</td></tr>` : "";
+
+export function renderProduct(p) {
+  const meta = [p.brand, p.quantity, p.category].filter(Boolean).join(" – ");
+
+  const rows = NUTRIENT_ROWS.map(([key, label, unit, cls]) => {
+    const v = p.nutriments[key];
+    return `<tr class="${cls}"><td>${esc(label)}</td><td>${v == null ? '<span class="empty">—</span>' : fmt(v) + " " + unit}</td></tr>`;
+  }).join("");
+
+  const ns = ["a", "b", "c", "d", "e"]
+    .map((g) => `<b class="${g}${p.nutriscore === g ? " on" : ""}">${g.toUpperCase()}</b>`).join("");
+  const nsText = p.nutriscore
+    ? `Chất lượng dinh dưỡng: ${p.nutriscore.toUpperCase()} (A tốt nhất, E kém nhất)`
+    : "Chưa đủ dữ liệu để tính điểm";
+
+  const chips = (list, cls = "") => list.map((x) => `<span class="chip ${cls}">${esc(x)}</span>`).join("");
+
+  // Giai đoạn 2: xuất xứ / sản xuất / bảo quản – chỉ hiện dòng có dữ liệu
+  const extra = infoRow("Xuất xứ nguyên liệu", p.origins)
+    + infoRow("Nơi sản xuất", p.manufacturingPlaces)
+    + infoRow("Nước bán", p.countries)
+    + infoRow("Bảo quản", p.storage)
+    + infoRow("Cách dùng", p.preparation)
+    + infoRow("Nhãn chứng nhận", p.labels)
+    + infoRow("Bao bì", p.packaging);
+
+  return `
+<article class="label">
+  <div class="label-head">
+    <div class="text">
+      <h2>${esc(p.name)}</h2>
+      ${meta ? `<p class="meta">${esc(meta)}</p>` : ""}
+      <p class="code">Mã ${esc(p.code)} · <a href="https://world.openfoodfacts.org/product/${esc(p.code)}" target="_blank" rel="noopener">xem trên Open Food Facts</a></p>
+    </div>
+    ${p.image ? `<img src="${esc(p.image)}" alt="" onerror="this.remove()">` : ""}
+  </div>
+  <div class="scores">
+    <div><span class="k">Nutri-Score</span><div class="ns">${ns}</div><small>${esc(nsText)}</small></div>
+    <div><span class="k">Mức chế biến (NOVA)</span><br><span class="nova-chip nova-${p.nova || 0}">${p.nova || "?"}</span><small>${esc(p.nova ? NOVA_VI[p.nova] : "Chưa có dữ liệu")}</small></div>
+  </div>
+  <table class="facts"><caption>Giá trị dinh dưỡng trên 100 g</caption><tbody>${rows}</tbody></table>
+  ${!p.hasNutriments ? '<p class="src">Sản phẩm này chưa được ai nhập bảng dinh dưỡng.</p>' : ""}
+  <section class="block"><h3>Thành phần</h3>${p.ingredients ? `<p>${esc(p.ingredients)}</p>` : '<p class="empty">Chưa có dữ liệu thành phần.</p>'}</section>
+  <section class="block"><h3>Chất gây dị ứng</h3>
+    ${p.allergens.length ? `<div class="chips">${chips(p.allergens)}</div>` : '<p class="empty">Không ghi nhận chất gây dị ứng (hoặc chưa có dữ liệu).</p>'}
+    ${p.traces.length ? `<p class="src">Có thể lẫn vết: ${esc(p.traces.join(", "))}</p>` : ""}
+  </section>
+  <section class="block"><h3>Phụ gia${p.additives.length ? ` (${p.additives.length})` : ""}</h3>
+    ${p.additives.length ? `<div class="chips">${chips(p.additives, "soft")}</div>` : '<p class="empty">Không ghi nhận phụ gia (hoặc chưa có dữ liệu).</p>'}
+  </section>
+  ${extra ? `<section class="block"><h3>Xuất xứ và bảo quản</h3><table class="info"><tbody>${extra}</tbody></table></section>` : ""}
+  ${p.ecoscore ? `<p class="src">Green-Score (tác động môi trường): ${p.ecoscore.toUpperCase()}</p>` : ""}
+</article>`;
+}
+
+export function renderNotFound(code) {
+  return `<div class="notfound"><p class="big">Chưa có mã ${esc(code)} trong Open Food Facts</p>
+<p>Sản phẩm này chưa được ai thêm vào. Bạn có thể <a href="https://world.openfoodfacts.org/cgi/product.pl?type=add&code=${esc(code)}" target="_blank" rel="noopener">tự thêm bằng cách chụp bao bì</a>, hoặc thử mã khác.</p></div>`;
+}
+
+export function renderError(code) {
+  return `<div class="notfound"><p class="big">Không kết nối được tới Open Food Facts</p>
+<p>Kiểm tra mạng rồi tra lại mã ${esc(code)}.</p></div>`;
+}

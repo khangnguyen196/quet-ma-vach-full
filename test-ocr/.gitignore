@@ -1,0 +1,6 @@
+.venv/
+outputs/
+work/
+photos/
+.env
+*.json

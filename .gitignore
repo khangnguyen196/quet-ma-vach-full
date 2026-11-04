@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+*.log
+# Cài đặt riêng của Claude trên máy này
+.claude/settings.local.json
+# Worktree do bộ điều phối /dot tạo cho mỗi đợt
+.claude/worktrees/
