@@ -25,7 +25,8 @@ FREE_PER_MONTH = {
     # Nguồn: https://cloud.google.com/vision/pricing (đọc ngày 05/11/2026), bảng giá, dòng Document Text Detection:
     # "Document Text Detection 0 count to 1,000 count $0.00 (Free)"
     "google": 1000,
-    # Nguồn: https://azure.microsoft.com/en-us/pricing/details/computer-vision/ (đọc ngày 05/11/2026), Image Analysis:
+    # Nguồn: https://azure.microsoft.com/pricing/details/cognitive-services/computer-vision/ (tự chuyển tới
+    # https://azure.microsoft.com/en-us/pricing/details/computer-vision/; đọc ngày 05/11/2026), bảng Image Analysis:
     # "Free (F0) - Web/Container All 5,000 free transactions per month 20 transactions per minute"
     "azure": 5000,
 }

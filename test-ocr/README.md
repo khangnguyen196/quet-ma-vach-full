@@ -1,20 +1,19 @@
-# Test 5 công cụ OCR trên bao bì đồ ăn
+# Test 4 công cụ OCR trên bao bì đồ ăn
 
-Mục tiêu: chụp 30 sản phẩm, cho 5 công cụ OCR đọc cùng bộ ảnh, chấm xem công cụ nào lấy được **đầy đủ thông tin nhất** (tên, thương hiệu, khối lượng, thành phần, dinh dưỡng, nhà sản xuất, bảo quản, hạn sử dụng), kèm tốc độ và chi phí.
+Mục tiêu: chụp 30 sản phẩm, cho 4 công cụ OCR đọc cùng bộ ảnh, chấm xem công cụ nào lấy được **đầy đủ thông tin nhất** (tên, thương hiệu, khối lượng, thành phần, dinh dưỡng, nhà sản xuất, bảo quản, hạn sử dụng), kèm tốc độ và chi phí.
 
-## 5 công cụ
+## 4 công cụ
 
 | # | Công cụ | Kiểu | Cần gì | Tiếng Việt |
 |---|---|---|---|---|
 | 1 | Tesseract (qua `pytesseract`) | mã nguồn mở, chạy offline | cài Tesseract + file `vie.traineddata` | có, trung bình |
 | 2 | EasyOCR | mã nguồn mở, chạy offline (Python) | `pip install easyocr`, lần đầu tải model ~100 MB | có |
-| 3 | Google Cloud Vision (Document Text) | dịch vụ đám mây | tài khoản Google Cloud, file key JSON | tốt |
-| 4 | Azure AI Vision (Read) | dịch vụ đám mây | tài khoản Azure, endpoint + key | tốt |
-| 5 | Claude (API, đọc ảnh) | mô hình AI nhìn ảnh | **KHÔNG DÙNG** (xem dưới) | – |
+| 3 | Google Cloud Vision (Document Text) | dịch vụ đám mây, chỉ dùng mức miễn phí | tài khoản Google Cloud, file key JSON | tốt |
+| 4 | Azure AI Vision (Read) | dịch vụ đám mây, chỉ dùng gói F0 miễn phí | tài khoản Azure, endpoint + key | tốt |
 
 Không có key của dịch vụ nào thì script tự bỏ qua dịch vụ đó, vẫn chạy được các công cụ còn lại.
 
-**Không dùng công cụ "claude".** Dự án không gọi bất kỳ API nào của Claude / Anthropic (không có mức miễn phí). `run_ocr.py` đã bỏ "claude" khỏi danh sách chạy mặc định, kể cả khi `.env` có key; code của nó chỉ giữ lại để tham khảo. Không điền `ANTHROPIC_API_KEY`, không chạy `--tools claude`. Thực tế phần A so sánh 4 công cụ còn lại. Google và Azure chỉ dùng trong mức miễn phí.
+**Không dùng Claude.** Dự án không gọi bất kỳ API nào của Claude / Anthropic (không có mức miễn phí). Công cụ "claude" đã bị gỡ khỏi `run_ocr.py`: chạy `--tools claude` chỉ in "không dùng" rồi bỏ qua. Không điền `ANTHROPIC_API_KEY`. Google và Azure chỉ dùng trong mức miễn phí, có bộ đếm lượt gọi (xem "Bộ đếm lượt gọi" bên dưới).
 
 ## Bước 1 – Chọn 30 sản phẩm
 
@@ -32,7 +31,7 @@ photos/
     └── date.jpg    # chỗ in NSX / HSD (chụp sát)
 ```
 
-Cách chụp: đủ sáng, tránh bóng đèn phản chiếu, chụp thẳng góc, chữ chiếm gần hết khung, giữ máy yên. **Cả 5 công cụ dùng đúng bộ ảnh này**, không chụp lại cho từng công cụ.
+Cách chụp: đủ sáng, tránh bóng đèn phản chiếu, chụp thẳng góc, chữ chiếm gần hết khung, giữ máy yên. **Cả 4 công cụ dùng đúng bộ ảnh này**, không chụp lại cho từng công cụ.
 
 ## Bước 3 – Điền đáp án đúng (`truth.csv`)
 
@@ -66,21 +65,40 @@ Mở `truth.csv`, mỗi sản phẩm 1 dòng, chép đúng theo bao bì:
    pip install -r requirements.txt
    copy .env.example .env         (Windows)   |   cp .env.example .env
    ```
-4. Điền key vào `.env` (có cái nào điền cái đó):
-   - Google: tạo project tại https://console.cloud.google.com, bật Cloud Vision API, tạo service account, tải file JSON, ghi đường dẫn vào `GOOGLE_APPLICATION_CREDENTIALS`.
-   - Azure: tạo resource "Azure AI Vision" (gói F0 miễn phí) tại https://portal.azure.com, chép Endpoint và Key.
+4. Điền key vào `.env` (có cái nào điền cái đó; không có thì bỏ trống, script tự bỏ qua dịch vụ đó):
+   - Google: trang giá chính thức https://cloud.google.com/vision/pricing (đọc ngày 05/11/2026) ghi "Document Text Detection 0 count to 1,000 count $0.00 (Free)", tức 1.000 ảnh miễn phí mỗi tháng. Trang giá **không ghi** có phải bật billing (thanh toán) hay không. Cách làm: tạo project tại https://console.cloud.google.com, bật Cloud Vision API, tạo service account, tải file JSON, ghi đường dẫn vào `GOOGLE_APPLICATION_CREDENTIALS`. **Nếu Google đòi bật billing hoặc gắn thẻ thì KHÔNG làm, bỏ qua Google** (để trống key, script tự bỏ qua).
+   - Azure: trang giá chính thức https://azure.microsoft.com/pricing/details/cognitive-services/computer-vision/ (đọc ngày 05/11/2026) ghi gói "Free (F0) … 5,000 free transactions per month 20 transactions per minute". Tạo resource "Azure AI Vision" tại https://portal.azure.com, **chỉ chọn gói F0 (Free)**, chép Endpoint và Key. Trang giá không ghi có cần thẻ hay không; **nếu bị đòi thẻ hoặc chỉ có gói trả phí thì bỏ qua Azure** (Azure for Students thường không cần thẻ, nhưng phải tự kiểm lúc đăng ký).
    - Claude: **không dùng**, không cần key (dự án không gọi API Claude / Anthropic).
    - Ollama (cho extractor `llm` ở phần B): cài tại https://ollama.com, chạy `ollama pull qwen2.5:7b`. `.env` mặc định đã có `LLM_PROVIDER=ollama`.
 
 ## Bước 5 – Chạy
 
 ```
-python run_ocr.py            # chạy mọi công cụ có sẵn (trừ "claude"), kết quả vào outputs/<công cụ>/
+python run_ocr.py            # chạy mọi công cụ có sẵn, kết quả vào outputs/<công cụ>/
 python run_ocr.py --tools tesseract,easyocr   # chỉ chạy vài công cụ
 python score.py              # chấm điểm → outputs/results.csv và outputs/summary.md
 ```
 
-Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ qua. Muốn chạy lại từ đầu thì xóa thư mục `outputs/<công cụ>`.
+`--tools claude` sẽ bị từ chối (in "không dùng" rồi bỏ qua).
+
+Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ qua. Muốn chạy lại từ đầu thì xóa thư mục `outputs/<công cụ>` (chạy lại Google / Azure sẽ tốn thêm lượt gọi, xem bộ đếm dưới đây).
+
+## Bộ đếm lượt gọi (Google, Azure)
+
+Để không bao giờ bị tính tiền, `run_ocr.py` đếm số lần gọi Google và Azure theo từng tháng (giờ UTC) trong file `outputs/api_usage.json`, và chỉ dùng tới **80% mức miễn phí**:
+
+| Dịch vụ | Mức miễn phí / tháng (nguồn, ngày đọc) | Trần của script (80%) |
+|---|---|---|
+| Google Cloud Vision, Document Text Detection | 1.000 lượt: "Document Text Detection 0 count to 1,000 count $0.00 (Free)" (https://cloud.google.com/vision/pricing, 05/11/2026) | 800 |
+| Azure AI Vision, gói F0 | 5.000 lượt, 20 lượt / phút: "Free (F0) … 5,000 free transactions per month 20 transactions per minute" (https://azure.microsoft.com/pricing/details/cognitive-services/computer-vision/, 05/11/2026) | 4.000 (và cách nhau ít nhất 3,1 giây) |
+
+- Trước mỗi lần gọi, script cộng 1 và ghi file ngay (đếm cả lần gọi bị lỗi). Chạm trần thì ngừng gọi dịch vụ đó; ảnh còn lại không có kết quả, tháng sau chạy lại sẽ làm tiếp.
+- File `api_usage.json` hỏng (không đọc được) thì script coi như đã chạm trần, không gọi Google / Azure, và không ghi đè file đó: hãy tự sửa lại cho đúng dạng `{"google": {"2026-11": 12}, "azure": {"2026-11": 3}}`.
+- Cuối mỗi lần chạy, script in bảng: dịch vụ, tháng, đã dùng / trần.
+- File này **không commit** (nằm trong `outputs/`, đã có trong `.gitignore`).
+- Bộ đếm chỉ biết lượt gọi từ script này, trên máy này. Dùng cùng key ở nơi khác (máy khác, trang web của Google / Azure…) thì bộ đếm không biết, phải tự cộng vào.
+- **Đừng xóa file giữa tháng**: xóa là mất số đếm, script sẽ tưởng tháng này chưa gọi lần nào.
+- Mức miễn phí có thể đổi: trước khi chạy nhiều, mở lại 2 trang giá trên; số mới thấp hơn thì sửa `FREE_PER_MONTH` trong `run_ocr.py`.
 
 ## Bước 6 – Đọc kết quả
 
@@ -89,13 +107,13 @@ Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ 
 - Tỷ lệ đúng theo từng trường: sẽ thấy ví dụ "hạn sử dụng" thường thấp nhất vì in dạng chấm (dot-matrix).
 - Thời gian trung bình mỗi ảnh, số ảnh lỗi.
 
-Chọn công cụ theo 4 tiêu chí: điểm đầy đủ thông tin, tốc độ, chi phí mỗi ảnh (cloud tính tiền sau mức miễn phí), có chạy offline không. Với app sinh viên, thường kết luận là: dùng công cụ miễn phí cho tên/thành phần, và chỉ gọi AI cho ảnh hạn sử dụng.
+Chọn công cụ theo 4 tiêu chí: điểm đầy đủ thông tin, tốc độ, chi phí mỗi ảnh (cloud tính tiền sau mức miễn phí), có chạy offline không. Với app sinh viên, thường kết luận là: dùng công cụ chạy offline cho tên/thành phần, và dùng công cụ mạnh hơn, trong mức miễn phí, cho ảnh hạn sử dụng.
 
 ## Prompt dán vào Claude Code
 
 ```
 Đọc README.md và truth.csv trong thư mục test-ocr. Mình đã chụp ảnh vào photos/ và điền truth.csv.
-Giúp mình: (1) kiểm tra .env và thông báo công cụ nào thiếu key (không dùng công cụ "claude", không gọi API Claude / Anthropic),
+Giúp mình: (1) không mở .env; chạy script và báo công cụ nào bị bỏ qua vì thiếu key / chạm trần (không gọi API Claude / Anthropic),
 (2) chạy python run_ocr.py rồi python score.py,
 (3) đọc outputs/summary.md và viết nhận xét ngắn bằng tiếng Việt: công cụ nào tốt nhất về độ đầy đủ, trường nào
 hay sai, công cụ nào nên dùng cho app quét mã vạch (ưu tiên miễn phí, chạy trên điện thoại). Nếu script lỗi thì sửa
@@ -106,7 +124,7 @@ và nói rõ đã sửa gì.
 
 # Phần B – 5 keyword extractor và tổ hợp OCR × extractor
 
-OCR chỉ cho ra một đống chữ. Bước thứ hai là **rút trích**: từ đống chữ đó lấy ra đúng 11 trường. Phần B so 5 cách rút trích, chạy trên **mọi** kết quả OCR của phần A, nên ra được ma trận 4 × 5 = 20 tổ hợp (4 công cụ OCR đang dùng, không có "claude").
+OCR chỉ cho ra một đống chữ. Bước thứ hai là **rút trích**: từ đống chữ đó lấy ra đúng 11 trường. Phần B so 5 cách rút trích, chạy trên **mọi** kết quả OCR của phần A, nên ra được ma trận 4 × 5 = 20 tổ hợp (4 công cụ OCR × 5 extractor).
 
 | # | Extractor | Cách hoạt động | Mạnh | Yếu |
 |---|---|---|---|---|
