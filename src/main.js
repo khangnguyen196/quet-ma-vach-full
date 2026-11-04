@@ -97,7 +97,8 @@ async function lookup(raw) {
     console.error(e);
     if (id !== current) return;
     setMsg();
-    result.innerHTML = renderError(code, e?.kind || "network", e);
+    // Lỗi không có kind (ví dụ lỗi lập trình) thì báo "bất thường", không đổ cho mạng.
+    result.innerHTML = renderError(code, e?.kind || "unknown", e);
     return;
   }
   if (id !== current) return;
@@ -121,7 +122,6 @@ async function lookup(raw) {
     renderHistory(addHistory(code, product.name));
   } catch (e) {
     console.error(e);
-    if (id !== current) return;
   }
 }
 

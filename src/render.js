@@ -71,20 +71,25 @@ export function renderNotFound(code) {
 
 /**
  * Báo lỗi khi tra cứu.
- * kind: "timeout" | "network" | "server" | "display"; detail: lỗi gốc (Error), hiện name: message ở dòng chữ nhỏ.
+ * kind: "timeout" | "network" | "server" | "display" | "unknown" (kind lạ hoặc rỗng cũng coi là "unknown");
+ * detail: lỗi gốc (Error), hiện name: message ở dòng chữ nhỏ.
  */
 export function renderError(code, kind, detail) {
+  const c = esc(code);
   const status = detail?.status ? ` (HTTP ${detail.status})` : "";
-  const main = {
-    timeout: "Open Food Facts phản hồi chậm, thử lại.",
-    server: `Open Food Facts đang lỗi hoặc quá tải${status}, thử lại sau.`,
-    display: "Không hiển thị được dữ liệu sản phẩm này."
-  }[kind] || "Không kết nối được tới Open Food Facts";
-  const hint = kind === "display"
-    ? `Mã ${esc(code)} có trên Open Food Facts nhưng dữ liệu có dạng app chưa đọc được.`
-    : kind === "network" || !kind
-      ? `Kiểm tra mạng rồi tra lại mã ${esc(code)}.`
-      : `Tra lại mã ${esc(code)} sau ít giây.`;
+  // [câu chính, dòng gợi ý]
+  const MESSAGES = {
+    timeout: ["Open Food Facts phản hồi chậm, thử lại.", `Tra lại mã ${c} sau ít giây.`],
+    server: [`Open Food Facts đang lỗi hoặc quá tải${status}, thử lại sau.`, `Tra lại mã ${c} sau ít giây.`],
+    // Trang lỗi 503 không kèm header CORS làm Safari ném "TypeError: Load failed", giống hệt mất mạng.
+    network: ["Không kết nối được tới Open Food Facts",
+      `Kiểm tra mạng, hoặc Open Food Facts đang quá tải; tra lại mã ${c} sau ít giây.`],
+    display: ["Không hiển thị được dữ liệu sản phẩm này.",
+      `Mã ${c} có trên Open Food Facts nhưng dữ liệu có dạng app chưa đọc được.`],
+    unknown: ["Có lỗi bất thường khi tra cứu, thử lại.",
+      `Tra lại mã ${c}; nếu vẫn lỗi, chụp lại dòng chữ nhỏ bên dưới.`]
+  };
+  const [main, hint] = Object.hasOwn(MESSAGES, kind) ? MESSAGES[kind] : MESSAGES.unknown;
   const info = detail == null ? ""
     : typeof detail === "object" ? `${detail.name}: ${detail.message}` : String(detail);
   return `<div class="notfound"><p class="big">${esc(main)}</p>

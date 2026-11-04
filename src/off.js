@@ -72,7 +72,7 @@ function withKind(e, kind, status) {
  * Tra 1 sản phẩm theo mã vạch.
  * Trả về dữ liệu thô `product` của Open Food Facts (chưa normalize),
  * hoặc null nếu Open Food Facts không có mã này (HTTP 404, hoặc status khác 1).
- * Ném lỗi có `kind` = "network" | "timeout" | "server" (và `status` = mã HTTP nếu là lỗi máy chủ).
+ * Ném lỗi có `kind` = "network" | "timeout" | "server" (và `status` = mã HTTP khi máy chủ trả mã lỗi như 503, 429).
  */
 export async function getProduct(code) {
   const ctrl = new AbortController();
@@ -99,7 +99,8 @@ export async function getProduct(code) {
     } catch (e) {
       if (ctrl.signal.aborted) throw withKind(e, "timeout");
       if (res.status === 404) return null; // 404 mà nội dung không phải JSON: vẫn là không tìm thấy
-      throw withKind(e, "server", res.status); // 200 mà JSON hỏng
+      // Tới đây res.ok (200…): JSON hỏng. Không gắn status để câu báo không hiện "(HTTP 200)" gây hiểu lầm.
+      throw withKind(e, "server");
     }
     if (!data || data.status !== 1 || !data.product) return null;
     return data.product;
