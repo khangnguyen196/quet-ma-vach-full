@@ -40,6 +40,20 @@ const num = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v
 const tag = (t) => String(t).replace(/^[a-z]{2}:/, "");
 const grade = (g) => (/^[a-e]$/.test(String(g || "").toLowerCase()) ? String(g).toLowerCase() : null);
 
+/** Đổi giá trị API sang chuỗi: chuỗi → bỏ khoảng trắng 2 đầu; số → chuỗi; mảng → nối ", "; còn lại → "". */
+const str = (v) => {
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number") return String(v);
+  if (Array.isArray(v)) {
+    return v.filter((x) => typeof x === "string" || typeof x === "number")
+      .map((x) => String(x).trim()).filter(Boolean).join(", ");
+  }
+  return "";
+};
+
+/** Danh sách *_tags: chỉ nhận mảng, lấy phần tử là chuỗi. */
+const tags = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+
 // Chờ tối đa 9 giây. Đo trên máy tính (11/2026): mỗi lần gọi khoảng 0,7–0,9 giây.
 const TIMEOUT_MS = 9000;
 
@@ -96,34 +110,34 @@ export async function getProduct(code) {
 
 /** Đổi dữ liệu thô của Open Food Facts sang dạng app dùng. */
 export function normalize(p, code) {
-  const n = p.nutriments || {};
-  const cats = (p.categories || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const n = p.nutriments && typeof p.nutriments === "object" ? p.nutriments : {};
+  const cats = str(p.categories).split(",").map((s) => s.trim()).filter(Boolean);
   const nutriments = {};
   for (const [key] of NUTRIENT_ROWS) nutriments[key] = num(n[key]);
 
   return {
-    code: p.code || code,
-    name: p.product_name_vi || p.product_name || p.product_name_en || "Sản phẩm chưa có tên",
-    brand: p.brands || "",
-    quantity: p.quantity || "",
+    code: str(p.code) || code,
+    name: str(p.product_name_vi) || str(p.product_name) || str(p.product_name_en) || "Sản phẩm chưa có tên",
+    brand: str(p.brands),
+    quantity: str(p.quantity),
     category: cats.length ? cats[cats.length - 1] : "",
-    image: p.image_front_url || "",
+    image: str(p.image_front_url),
     nutriscore: grade(p.nutriscore_grade),
     nova: num(p.nova_group),
     ecoscore: grade(p.ecoscore_grade),
-    ingredients: p.ingredients_text_vi || p.ingredients_text || p.ingredients_text_en || "",
-    allergens: (p.allergens_tags || []).map(tag).map((a) => ALLERGEN_VI[a] || a),
-    traces: (p.traces_tags || []).map(tag).map((a) => ALLERGEN_VI[a] || a),
-    additives: (p.additives_tags || []).map((t) => tag(t).toUpperCase()),
+    ingredients: str(p.ingredients_text_vi) || str(p.ingredients_text) || str(p.ingredients_text_en),
+    allergens: tags(p.allergens_tags).map(tag).map((a) => ALLERGEN_VI[a] || a),
+    traces: tags(p.traces_tags).map(tag).map((a) => ALLERGEN_VI[a] || a),
+    additives: tags(p.additives_tags).map((t) => tag(t).toUpperCase()),
     nutriments,
     hasNutriments: Object.values(nutriments).some((v) => v != null),
     // Giai đoạn 2: xuất xứ, sản xuất, bảo quản
-    origins: p.origins || "",
-    manufacturingPlaces: p.manufacturing_places || "",
-    countries: p.countries || "",
-    storage: p.conservation_conditions || "",
-    preparation: p.preparation || "",
-    labels: p.labels || "",
-    packaging: p.packaging || ""
+    origins: str(p.origins),
+    manufacturingPlaces: str(p.manufacturing_places),
+    countries: str(p.countries),
+    storage: str(p.conservation_conditions),
+    preparation: str(p.preparation),
+    labels: str(p.labels),
+    packaging: str(p.packaging)
   };
 }
