@@ -15,6 +15,8 @@ export function errorText(e) {
   if (e instanceof Error || (typeof e === "object" && e.name)) {
     return e.message ? `${e.name}: ${e.message}` : String(e.name);
   }
+  // Object thường chỉ có message (không có name), ví dụ { message: "x" }: lấy message, tránh "[object Object]".
+  if (typeof e === "object" && typeof e.message === "string" && e.message) return e.message;
   return String(e);
 }
 
