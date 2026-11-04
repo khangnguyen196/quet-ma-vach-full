@@ -8,7 +8,8 @@ Dùng:  python run_ocr.py
 Công cụ "claude" (API Claude / Anthropic) đã bị gỡ: dự án không gọi API Claude / Anthropic
 (không có mức miễn phí). --tools claude sẽ bị từ chối.
 """
-import os, sys, time, csv, argparse, pathlib, traceback
+import os, sys, time, csv, json, argparse, pathlib, traceback
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
 
@@ -17,6 +18,76 @@ PHOTOS = pathlib.Path("photos")
 WORK = pathlib.Path("work")       # ảnh đã thu nhỏ, dùng chung cho mọi công cụ
 OUT = pathlib.Path("outputs")
 MAX_SIDE = 1600                   # thu nhỏ ảnh để chạy nhanh và không vượt giới hạn API
+
+# ---------- bộ đếm lượt gọi dịch vụ trả phí (chỉ dùng mức miễn phí, trần 80%) ----------
+# Số lượt miễn phí mỗi tháng, chép từ trang giá chính thức. Không chắc thì để 0 (= không gọi).
+FREE_PER_MONTH = {
+    # Nguồn: https://cloud.google.com/vision/pricing (đọc ngày 05/11/2026), bảng giá, dòng Document Text Detection:
+    # "Document Text Detection 0 count to 1,000 count $0.00 (Free)"
+    "google": 1000,
+    # Nguồn: https://azure.microsoft.com/en-us/pricing/details/computer-vision/ (đọc ngày 05/11/2026), Image Analysis:
+    # "Free (F0) - Web/Container All 5,000 free transactions per month 20 transactions per minute"
+    "azure": 5000,
+}
+CAP_RATIO = 0.8                   # chỉ dùng tới 80% mức miễn phí
+USAGE = OUT / "api_usage.json"    # {"google": {"YYYY-MM": n}, "azure": {...}}, không commit
+# Azure F0 giới hạn 20 lượt / phút (cùng nguồn trên): giữ khoảng cách 60/20 + 0,1 = 3,1 giây giữa 2 lần gọi
+AZURE_PER_MINUTE = 20
+AZURE_MIN_GAP = 60 / AZURE_PER_MINUTE + 0.1
+
+def cap(service):
+    """Trần lượt gọi mỗi tháng = 80% mức miễn phí (làm tròn xuống)."""
+    return int(FREE_PER_MONTH.get(service, 0) * CAP_RATIO)
+
+def month_key():
+    """Tháng hiện tại theo giờ UTC, dạng YYYY-MM."""
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+def load_usage():
+    """Đọc bộ đếm. Chưa có file -> {}. File hỏng -> None (= không tin được: coi như mọi dịch vụ trả phí đã chạm trần)."""
+    if not USAGE.exists():
+        return {}
+    try:
+        data = json.loads(USAGE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("không phải object JSON")
+        for svc, months in data.items():
+            if not isinstance(months, dict) or not all(type(n) is int and n >= 0 for n in months.values()):
+                raise ValueError(f"mục {svc!r} sai dạng")
+        return data
+    except Exception as e:
+        print(f"CẢNH BÁO: không đọc được {USAGE} ({e}). Không gọi google / azure lần này. "
+              f"File được giữ nguyên, hãy tự sửa lại cho đúng dạng.")
+        return None
+
+def save_usage(usage):
+    """Ghi bộ đếm ra file tạm rồi thay file cũ, để không bao giờ còn file ghi dở."""
+    tmp = USAGE.with_name(USAGE.name + ".tmp")
+    tmp.write_text(json.dumps(usage, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, USAGE)
+
+def take_paid_call(usage, tool, month):
+    """Gọi trước MỖI lần gọi dịch vụ trả phí. Còn dưới trần: tăng 1, ghi file ngay, trả True. Hết lượt: trả False."""
+    if usage is None:
+        print(f"[{tool}] bộ đếm {USAGE} không đọc được, coi như đã chạm trần, ngừng gọi dịch vụ này.")
+        return False
+    used, limit = usage.get(tool, {}).get(month, 0), cap(tool)
+    if used >= limit:
+        print(f"[{tool}] đã tới trần 80% mức miễn phí tháng {month} ({used}/{limit}), ngừng gọi dịch vụ này.")
+        return False
+    usage.setdefault(tool, {})[month] = used + 1
+    save_usage(usage)   # đếm cả lần gọi bị lỗi (không chắc lỗi có bị tính tiền không)
+    return True
+
+_last_azure = None
+def wait_for_azure():
+    """Giữ khoảng cách tối thiểu AZURE_MIN_GAP giây giữa 2 lần gọi azure (tránh lỗi 429 quá giới hạn / phút)."""
+    global _last_azure
+    if _last_azure is not None:
+        wait = AZURE_MIN_GAP - (time.monotonic() - _last_azure)
+        if wait > 0:
+            time.sleep(wait)
+    _last_azure = time.monotonic()
 
 # ---------- chuẩn bị ảnh ----------
 def prepare(src: pathlib.Path) -> pathlib.Path:
@@ -92,6 +163,7 @@ def main():
     print(f"Có {len(photos)} ảnh của {len({p.parent.name for p in photos})} sản phẩm.")
 
     OUT.mkdir(exist_ok=True)
+    usage, month = load_usage(), month_key()
     times_path = OUT / "times.csv"
     new_file = not times_path.exists()
     with open(times_path, "a", newline="", encoding="utf-8") as tf:
@@ -108,7 +180,6 @@ def main():
             if not available():
                 print(f"[{tool}] thiếu key trong .env, bỏ qua."); continue
             out_dir = OUT / tool
-            out_dir.mkdir(exist_ok=True)
             print(f"\n=== {tool} ===")
             for src in photos:
                 code, name = src.parent.name, src.stem
@@ -116,6 +187,12 @@ def main():
                 if out_file.exists():
                     continue  # đã chạy rồi
                 img = prepare(src)
+                if tool in FREE_PER_MONTH:
+                    # dịch vụ trả phí: hết lượt thì dừng hẳn công cụ này, ảnh còn lại không ghi gì (tháng sau chạy tiếp)
+                    if not take_paid_call(usage, tool, month):
+                        break
+                    if tool == "azure":
+                        wait_for_azure()
                 t0 = time.perf_counter()
                 try:
                     text = fn(img) or ""
@@ -124,9 +201,16 @@ def main():
                     text, status = "", f"error: {e}"
                     traceback.print_exc(limit=1)
                 secs = round(time.perf_counter() - t0, 2)
+                out_dir.mkdir(exist_ok=True)
                 out_file.write_text(text, encoding="utf-8")
                 tw.writerow([tool, code, name, secs, status]); tf.flush()
                 print(f"  {code}/{name}: {secs}s {status} ({len(text)} ký tự)")
+
+    print(f"\nLượt gọi dịch vụ trả phí (bộ đếm {USAGE}, trần = 80% mức miễn phí):")
+    print("  dịch vụ   tháng     đã dùng / trần")
+    for svc in FREE_PER_MONTH:
+        used = "không đọc được" if usage is None else usage.get(svc, {}).get(month, 0)
+        print(f"  {svc:<9} {month}   {used} / {cap(svc)}")
 
     print("\nXong. Chạy tiếp:  python score.py")
 
