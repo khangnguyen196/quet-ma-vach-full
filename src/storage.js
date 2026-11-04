@@ -15,8 +15,9 @@ export function getHistory() { return read(HISTORY_KEY, []); }
 export function addHistory(code, name) {
   const list = getHistory().filter((x) => x.code !== code);
   list.unshift({ code, name, at: Date.now() });
-  write(HISTORY_KEY, list.slice(0, 10));
-  return list;
+  const recent = list.slice(0, 10);
+  write(HISTORY_KEY, recent);
+  return recent;
 }
 
 // ---- Tủ đồ (giai đoạn 2): mỗi món có hạn sử dụng ----
