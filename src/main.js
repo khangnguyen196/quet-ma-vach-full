@@ -37,6 +37,16 @@ function placeholder(text) {
 // ---- Camera ----
 const scanner = createScanner("reader");
 
+// Khóa nút trong lúc bận (đang đọc ảnh, đang mở camera): 2 việc cùng dùng camera / vùng #reader
+// sẽ giẫm lên nhau (thư viện báo lỗi, hình camera bị xóa). Input #file bị disabled thì bấm nhãn
+// "Chụp ảnh mã" cũng không mở chọn ảnh.
+let busy = false;
+function setBusy(on) {
+  busy = on;
+  btnCam.disabled = on;
+  fileInput.disabled = on;
+}
+
 async function stopCam() {
   await scanner.stop();
   btnCam.textContent = "Bật camera";
@@ -45,9 +55,12 @@ async function stopCam() {
 }
 
 btnCam.addEventListener("click", async () => {
+  if (busy) return; // phòng xa: sự kiện tới trước khi disabled kịp có hiệu lực
+  // Camera đang chạy thì nút là "Tắt camera": không khóa, bấm là tắt.
   if (scanner.running) { await stopCam(); setMsg(); return; }
   reader.innerHTML = "";
   setMsg("Đang mở camera…");
+  setBusy(true); // khóa từ lúc mở camera (có thể đang chờ người dùng cho quyền) tới khi xong hoặc lỗi
   try {
     await scanner.start(async (text) => {
       await stopCam();
@@ -60,6 +73,8 @@ btnCam.addEventListener("click", async () => {
   } catch (e) {
     placeholder("Không mở được camera ở đây.");
     setMsg(`Không mở được camera (${e?.message || e}). Bấm “Chụp ảnh mã” hoặc nhập số bên dưới.`, true);
+  } finally {
+    setBusy(false);
   }
 });
 
@@ -67,7 +82,10 @@ btnCam.addEventListener("click", async () => {
 fileInput.addEventListener("change", async (ev) => {
   const file = ev.target.files?.[0];
   ev.target.value = "";
-  if (!file) return;
+  if (busy || !file) return;
+  // Đang bật camera thì tắt hẳn trước (nút về "Bật camera"), rồi mới khóa nút và đọc ảnh.
+  if (scanner.running) await stopCam();
+  setBusy(true);
   setMsg("Đang đọc mã trong ảnh…");
   try {
     const text = await scanner.scanImage(file);
@@ -77,6 +95,8 @@ fileInput.addEventListener("change", async (ev) => {
     console.error(e);
     placeholder();
     setMsg("Không đọc được mã vạch trong ảnh. Chụp gần hơn, đủ sáng, mã nằm ngang, hoặc nhập số.", true, errorText(e));
+  } finally {
+    setBusy(false); // mở lại nút dù đọc được hay lỗi
   }
 });
 
