@@ -18,6 +18,8 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 - [x] Trạng thái: đang tra, không tìm thấy, lỗi mạng
 - [x] Lịch sử quét (localStorage, 10 mã gần nhất)
 
+> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4).
+
 ### Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn
 - [ ] Hiện xuất xứ nguyên liệu, nơi sản xuất, nước bán, bảo quản, cách dùng, nhãn chứng nhận (halal, organic…) – trường nào trống thì ẩn
 - [ ] Nút "Thêm vào tủ đồ" sau khi tra: nhập hạn sử dụng (ô chọn ngày) + số lượng
@@ -124,3 +126,6 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Hàng Việt trên Open Food Facts nhiều mã có nhưng thiếu dinh dưỡng, thiếu bảo quản → luôn có trạng thái "chưa có dữ liệu" và cho nhập tay.
 - Open Food Facts yêu cầu app tử tế: không gọi liên tục, cache kết quả đã tra trong localStorage.
 - Trang demo chạy bên trong Claude bị chặn gọi internet; dự án thật chạy bằng Vite thì gọi API bình thường.
+- Thương hiệu, khối lượng, ảnh đang bị ẩn khi API trống, chưa hiện "chưa có dữ liệu" như quy tắc CLAUDE.md (sửa ở giai đoạn sau).
+- Khi Open Food Facts lỗi máy chủ (5xx/429), app đang báo nhầm "Không kết nối được" như lỗi mạng (chưa kiểm res.ok).
+- Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (có chủ ý).
