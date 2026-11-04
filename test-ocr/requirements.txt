@@ -5,7 +5,6 @@ pytesseract
 easyocr
 google-cloud-vision
 azure-ai-vision-imageanalysis
-anthropic
 yake
 underthesea
 requests

@@ -1,14 +1,14 @@
 """
-Chạy 5 công cụ OCR trên cùng bộ ảnh trong photos/<mã>/*.jpg
+Chạy 4 công cụ OCR (tesseract, easyocr, google, azure) trên cùng bộ ảnh trong photos/<mã>/*.jpg
 Kết quả: outputs/<công cụ>/<mã>__<tên ảnh>.txt  và  outputs/times.csv (thời gian từng ảnh)
 
 Dùng:  python run_ocr.py
        python run_ocr.py --tools tesseract,easyocr
 
-Công cụ "claude" (API Claude / Anthropic) KHÔNG nằm trong danh sách chạy mặc định:
-dự án không dùng API Claude / Anthropic (không có mức miễn phí). Code giữ lại chỉ để tham khảo.
+Công cụ "claude" (API Claude / Anthropic) đã bị gỡ: dự án không gọi API Claude / Anthropic
+(không có mức miễn phí). --tools claude sẽ bị từ chối.
 """
-import os, sys, time, csv, base64, argparse, pathlib, traceback
+import os, sys, time, csv, argparse, pathlib, traceback
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
 
@@ -71,34 +71,14 @@ def ocr_azure(path):
                 lines.append(line.text)
     return "\n".join(lines)
 
-def ocr_claude(path):
-    import anthropic
-    client = anthropic.Anthropic()
-    data = base64.standard_b64encode(path.read_bytes()).decode()
-    msg = client.messages.create(
-        model=os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5"),
-        max_tokens=2000,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}},
-                {"type": "text", "text": "Chép lại toàn bộ chữ có trong ảnh, đúng từng ký tự, giữ nguyên tiếng Việt "
-                                         "có dấu, số, dấu chấm và dấu phẩy. Chỉ trả về chữ trong ảnh, không giải thích."},
-            ],
-        }],
-    )
-    return "".join(block.text for block in msg.content if block.type == "text")
-
 # tên công cụ -> (hàm, điều kiện có thể chạy)
 TOOLS = {
     "tesseract": (ocr_tesseract, lambda: True),
     "easyocr":   (ocr_easyocr,   lambda: True),
     "google":    (ocr_google,    lambda: bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))),
     "azure":     (ocr_azure,     lambda: bool(os.environ.get("AZURE_VISION_ENDPOINT") and os.environ.get("AZURE_VISION_KEY"))),
-    "claude":    (ocr_claude,    lambda: bool(os.environ.get("ANTHROPIC_API_KEY"))),
 }
-# Chạy mặc định: mọi công cụ trừ "claude" (dự án không gọi API Claude / Anthropic, kể cả khi .env có key).
-DEFAULT_TOOLS = [t for t in TOOLS if t != "claude"]
+DEFAULT_TOOLS = list(TOOLS)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -120,6 +100,8 @@ def main():
             tw.writerow(["tool", "code", "image", "seconds", "status"])
 
         for tool in wanted:
+            if tool == "claude":
+                print("[claude] không dùng (quy tắc dự án: không gọi API Claude / Anthropic), bỏ qua."); continue
             if tool not in TOOLS:
                 print(f"[{tool}] không biết công cụ này, bỏ qua."); continue
             fn, available = TOOLS[tool]

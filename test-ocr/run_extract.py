@@ -6,8 +6,8 @@ Dùng:  python run_extract.py
        python run_extract.py --extractors regex,dict,yake
        python run_extract.py --ocr tesseract,easyocr --extractors llm
 
-Extractor "llm" mặc định chạy bằng Ollama trên máy (LLM_PROVIDER=ollama, miễn phí).
-Dự án KHÔNG dùng API Claude / Anthropic: không đặt LLM_PROVIDER=claude.
+Extractor "llm" chỉ chạy bằng Ollama trên máy (LLM_PROVIDER=ollama, mặc định, miễn phí).
+Dự án KHÔNG dùng API Claude / Anthropic: LLM_PROVIDER khác "ollama" thì llm bị bỏ qua.
 """
 import os, re, json, time, argparse, pathlib, unicodedata, traceback
 from dotenv import load_dotenv
@@ -177,7 +177,7 @@ def extract_underthesea(text):
         out["thuong_hieu"] = min(orgs, key=len)
     return out
 
-# ---------- 5. LLM (mặc định Ollama chạy máy; nhánh Claude API giữ lại nhưng dự án không dùng) -> JSON ----------
+# ---------- 5. LLM (chỉ Ollama chạy trên máy, không gọi API trả phí) -> JSON ----------
 LLM_PROMPT = """Dưới đây là chữ đọc được bằng OCR từ bao bì một sản phẩm thực phẩm Việt Nam (có thể sai chính tả, thiếu dấu).
 Hãy rút ra thông tin và trả về DUY NHẤT một JSON với đúng các khóa sau (không có thì để chuỗi rỗng ""):
 {"ten": "tên sản phẩm", "thuong_hieu": "thương hiệu", "khoi_luong": "khối lượng tịnh, ví dụ 75g",
@@ -193,27 +193,30 @@ def _parse_json(s):
     start, end = s.find("{"), s.rfind("}")
     return json.loads(s[start:end + 1])
 
+def llm_provider():
+    """Giá trị LLM_PROVIDER đã bỏ khoảng trắng và đổi về chữ thường (" Ollama " -> "ollama")."""
+    return os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+
 def extract_llm(text):
-    provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
-    if provider == "ollama":
-        import requests
-        r = requests.post("http://localhost:11434/api/generate", timeout=180,
-                          json={"model": os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"), "prompt": LLM_PROMPT + text,
-                                "stream": False, "format": "json"})
-        r.raise_for_status()
-        return _parse_json(r.json()["response"])
-    import anthropic
-    client = anthropic.Anthropic()
-    msg = client.messages.create(model=os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5"), max_tokens=800,
-                                 messages=[{"role": "user", "content": LLM_PROMPT + text}])
-    return _parse_json("".join(b.text for b in msg.content if b.type == "text"))
+    if llm_provider() != "ollama":
+        raise RuntimeError("Dự án chỉ chạy llm bằng Ollama (LLM_PROVIDER=ollama), không gọi API Claude / Anthropic.")
+    import requests
+    r = requests.post("http://localhost:11434/api/generate", timeout=180,
+                      json={"model": os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"), "prompt": LLM_PROMPT + text,
+                            "stream": False, "format": "json"})
+    r.raise_for_status()
+    return _parse_json(r.json()["response"])
 
 EXTRACTORS = {
     "regex": (extract_regex, lambda: True),
     "dict": (extract_dict, lambda: True),
     "yake": (extract_yake, lambda: True),
     "underthesea": (extract_underthesea, lambda: True),
-    "llm": (extract_llm, lambda: os.environ.get("LLM_PROVIDER", "ollama").lower() == "ollama" or bool(os.environ.get("ANTHROPIC_API_KEY"))),
+    "llm": (extract_llm, lambda: llm_provider() == "ollama"),
+}
+# Câu báo khi một extractor không chạy được (hiện chỉ llm có điều kiện, các extractor khác luôn chạy)
+SKIP_MSG = {
+    "llm": "LLM_PROVIDER không phải ollama, bỏ qua (dự án chỉ chạy llm bằng Ollama).",
 }
 
 def product_text(ocr_dir: pathlib.Path, code: str) -> str:
@@ -242,7 +245,7 @@ def main():
                 print(f"[{ext}] không biết extractor này, bỏ qua."); continue
             fn, available = EXTRACTORS[ext]
             if not available():
-                print(f"[{ext}] LLM_PROVIDER không phải ollama, bỏ qua (dự án chỉ chạy llm bằng Ollama)."); continue
+                print(f"[{ext}] {SKIP_MSG.get(ext, 'không chạy được, bỏ qua.')}"); continue
             out_dir = EXT_DIR / f"{ocr_dir.name}__{ext}"
             out_dir.mkdir(parents=True, exist_ok=True)
             print(f"\n=== OCR {ocr_dir.name} + {ext} ===")
