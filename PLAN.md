@@ -18,7 +18,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 - [x] Trạng thái: đang tra, không tìm thấy, lỗi mạng
 - [x] Lịch sử quét (localStorage, 10 mã gần nhất)
 
-> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4).
+> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4). 11/2026: iPhone báo không đọc được mã cả khi chụp gần; app thu nhỏ ảnh về 1600/1000 px và thử xoay 90° trước khi đọc; chờ thử lại trên iPhone, nút Bật camera chưa thử trên iPhone.
 
 ### Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn
 - [ ] Hiện xuất xứ nguyên liệu, nơi sản xuất, nước bán, bảo quản, cách dùng, nhãn chứng nhận (halal, organic…) – trường nào trống thì ẩn
