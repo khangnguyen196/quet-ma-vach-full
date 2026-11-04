@@ -9,7 +9,7 @@ Công cụ "claude" (API Claude / Anthropic) đã bị gỡ: dự án không g�
 (không có mức miễn phí). --tools claude sẽ bị từ chối.
 """
 import os, sys, time, csv, json, argparse, pathlib, traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from PIL import Image, ImageOps
 
@@ -36,15 +36,17 @@ LOCK = OUT / "api_usage.lock"     # file khóa: chỉ 1 lần chạy được g�
 # Azure F0 giới hạn 20 lượt / phút (cùng nguồn trên): giữ khoảng cách 60/20 + 0,1 = 3,1 giây giữa 2 lần gọi
 AZURE_PER_MINUTE = 20
 AZURE_MIN_GAP = 60 / AZURE_PER_MINUTE + 0.1
-PAID_MAX_FAILS = 3                # google / azure lỗi 3 lần liên tiếp thì dừng gọi dịch vụ đó (lượt lỗi vẫn bị đếm)
+# Không gọi google / azure trong 12 giờ đầu và 12 giờ cuối mỗi tháng (giờ UTC), xem near_month_edge()
+EDGE_HOURS = 12
+PAID_MAX_FAILS = 3               # google / azure lỗi 3 lần liên tiếp thì dừng gọi dịch vụ đó (lượt lỗi vẫn bị đếm)
 
 def cap(service):
     """Trần lượt gọi mỗi tháng = 80% mức miễn phí (làm tròn xuống)."""
     return int(FREE_PER_MONTH.get(service, 0) * CAP_RATIO)
 
-def month_key():
-    """Tháng hiện tại theo giờ UTC, dạng YYYY-MM."""
-    return datetime.now(timezone.utc).strftime("%Y-%m")
+def month_key(now=None):
+    """Tháng theo giờ UTC (mặc định: bây giờ), dạng YYYY-MM."""
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m")
 
 def load_usage():
     """Đọc bộ đếm. Chưa có file -> {}. File hỏng -> None (= không tin được: coi như mọi dịch vụ trả phí đã chạm trần)."""
@@ -92,9 +94,23 @@ def release_lock():
     except FileNotFoundError:
         pass
 
-def take_paid_call(tool, month):
-    """Gọi trước MỖI lần gọi dịch vụ trả phí. Đọc lại bộ đếm từ file (không tin số cũ trong bộ nhớ).
+def near_month_edge(now):
+    """True khi giờ UTC `now` nằm trong 12 giờ đầu hoặc 12 giờ cuối tháng.
+    Khi đó các múi giờ tính tiền (UTC-12 tới UTC+12) có nơi đã sang tháng, có nơi chưa, nên không chắc
+    Google / Azure tính lượt gọi vào tháng nào. Ngoài khoảng này mọi múi giờ đó đều ra cùng một tháng."""
+    return (now.day == 1 and now.hour < EDGE_HOURS) or (now + timedelta(hours=EDGE_HOURS)).month != now.month
+
+def take_paid_call(tool):
+    """Gọi trước MỖI lần gọi dịch vụ trả phí. Ở ranh giới tháng: không gọi, trả False.
+    Đọc lại bộ đếm từ file (không tin số cũ trong bộ nhớ).
     Còn dưới trần: tăng 1, ghi file ngay, trả True. Hết lượt / file hỏng: trả False."""
+    now = datetime.now(timezone.utc)
+    if near_month_edge(now):
+        print(f"[{tool}] đang ở ranh giới tháng (giờ UTC {now:%Y-%m-%d %H:%M}, trong {EDGE_HOURS} giờ đầu hoặc "
+              f"{EDGE_HOURS} giờ cuối tháng): không chắc lượt gọi bị tính vào tháng nào, không gọi dịch vụ này, bỏ qua. "
+              f"Chạy lại từ 12:00 UTC ngày 1 (19:00 giờ Việt Nam).")
+        return False
+    month = month_key(now)
     usage = load_usage()
     if usage is None:
         print(f"[{tool}] bộ đếm {USAGE} không đọc được, coi như đã chạm trần, ngừng gọi dịch vụ này.")
@@ -193,7 +209,6 @@ def main():
     print(f"Có {len(photos)} ảnh của {len({p.parent.name for p in photos})} sản phẩm.")
 
     OUT.mkdir(exist_ok=True)
-    month = month_key()
     # Dịch vụ trả phí sẽ chạy (có trong --tools và có key): giữ file khóa để 2 lần chạy cùng lúc không đếm thiếu
     paid = [t for t in wanted if t in FREE_PER_MONTH and t in TOOLS and TOOLS[t][1]()]
     locked = acquire_lock() if paid else False
@@ -225,8 +240,9 @@ def main():
                         continue  # đã chạy rồi
                     img = prepare(src)
                     if tool in FREE_PER_MONTH:
-                        # dịch vụ trả phí: hết lượt thì dừng hẳn công cụ này, ảnh còn lại không ghi gì (tháng sau chạy tiếp)
-                        if not take_paid_call(tool, month):
+                        # dịch vụ trả phí: hết lượt / ranh giới tháng / bộ đếm hỏng thì dừng hẳn công cụ này,
+                        # ảnh còn lại không ghi gì (chạy lại sau sẽ làm tiếp)
+                        if not take_paid_call(tool):
                             break
                         if tool == "azure":
                             wait_for_azure()
@@ -254,7 +270,7 @@ def main():
         if locked:
             release_lock()   # chỉ xóa khóa do chính lần chạy này tạo (kể cả khi lỗi / bấm Ctrl+C)
 
-    usage = load_usage()
+    usage, month = load_usage(), month_key()
     print(f"\nLượt gọi dịch vụ trả phí (bộ đếm {USAGE}, trần = 80% mức miễn phí):")
     print("  dịch vụ   tháng     đã dùng / trần")
     for svc in FREE_PER_MONTH:
