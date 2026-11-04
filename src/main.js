@@ -1,6 +1,6 @@
 // Nối các phần lại: sự kiện nút bấm → scanner / API → render.
 import { createScanner } from "./scanner.js";
-import { getProduct } from "./off.js";
+import { getProduct, normalize } from "./off.js";
 import { renderProduct, renderNotFound, renderError, esc } from "./render.js";
 import { getHistory, addHistory } from "./storage.js";
 
@@ -89,17 +89,39 @@ async function lookup(raw) {
   result.innerHTML = "";
   result.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
+  // (a) Gọi API: lỗi ở đây là lỗi mạng / hết giờ / máy chủ (e.kind do getProduct gắn).
+  let raw;
   try {
-    const product = await getProduct(code);
+    raw = await getProduct(code);
+  } catch (e) {
+    console.error(e);
     if (id !== current) return;
     setMsg();
-    if (!product) { result.innerHTML = renderNotFound(code); return; }
+    result.innerHTML = renderError(code, e?.kind || "network", e);
+    return;
+  }
+  if (id !== current) return;
+  setMsg();
+
+  // (b) Đổi dữ liệu + hiển thị: lỗi ở đây là do dữ liệu, không phải do mạng.
+  let product;
+  try {
+    if (!raw) { result.innerHTML = renderNotFound(code); return; }
+    product = normalize(raw, code);
     result.innerHTML = renderProduct(product);
-    renderHistory(addHistory(code, product.name));
-  } catch {
+  } catch (e) {
+    console.error(e);
     if (id !== current) return;
-    setMsg();
-    result.innerHTML = renderError(code);
+    result.innerHTML = renderError(code, "display", e);
+    return;
+  }
+
+  // (c) Lưu lịch sử: lỗi chỉ ghi ra console, giữ nguyên kết quả đang hiện.
+  try {
+    renderHistory(addHistory(code, product.name));
+  } catch (e) {
+    console.error(e);
+    if (id !== current) return;
   }
 }
 

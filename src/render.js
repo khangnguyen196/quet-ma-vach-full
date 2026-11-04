@@ -69,7 +69,24 @@ export function renderNotFound(code) {
 <p>Sản phẩm này chưa được ai thêm vào. Bạn có thể <a href="https://world.openfoodfacts.org/cgi/product.pl?type=add&code=${esc(code)}" target="_blank" rel="noopener">tự thêm bằng cách chụp bao bì</a>, hoặc thử mã khác.</p></div>`;
 }
 
-export function renderError(code) {
-  return `<div class="notfound"><p class="big">Không kết nối được tới Open Food Facts</p>
-<p>Kiểm tra mạng rồi tra lại mã ${esc(code)}.</p></div>`;
+/**
+ * Báo lỗi khi tra cứu.
+ * kind: "timeout" | "network" | "server" | "display"; detail: lỗi gốc (Error), hiện name: message ở dòng chữ nhỏ.
+ */
+export function renderError(code, kind, detail) {
+  const status = detail?.status ? ` (HTTP ${detail.status})` : "";
+  const main = {
+    timeout: "Open Food Facts phản hồi chậm, thử lại.",
+    server: `Open Food Facts đang lỗi hoặc quá tải${status}, thử lại sau.`,
+    display: "Không hiển thị được dữ liệu sản phẩm này."
+  }[kind] || "Không kết nối được tới Open Food Facts";
+  const hint = kind === "display"
+    ? `Mã ${esc(code)} có trên Open Food Facts nhưng dữ liệu có dạng app chưa đọc được.`
+    : kind === "network" || !kind
+      ? `Kiểm tra mạng rồi tra lại mã ${esc(code)}.`
+      : `Tra lại mã ${esc(code)} sau ít giây.`;
+  const info = detail == null ? ""
+    : typeof detail === "object" ? `${detail.name}: ${detail.message}` : String(detail);
+  return `<div class="notfound"><p class="big">${esc(main)}</p>
+<p>${hint}</p>${info ? `\n<p class="src">${esc(info)}</p>` : ""}</div>`;
 }

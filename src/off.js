@@ -40,19 +40,55 @@ const num = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v
 const tag = (t) => String(t).replace(/^[a-z]{2}:/, "");
 const grade = (g) => (/^[a-e]$/.test(String(g || "").toLowerCase()) ? String(g).toLowerCase() : null);
 
+// Chờ tối đa 9 giây. Đo trên máy tính (11/2026): mỗi lần gọi khoảng 0,7–0,9 giây.
+const TIMEOUT_MS = 9000;
+
+/**
+ * Gắn loại lỗi vào lỗi gốc (giữ nguyên name, message) để giao diện chọn câu báo.
+ * kind: "network" (không gọi được), "timeout" (hết giờ), "server" (Open Food Facts lỗi / quá tải).
+ */
+function withKind(e, kind, status) {
+  const err = e && typeof e === "object" ? e : new Error(String(e));
+  err.kind = kind;
+  if (status) err.status = status;
+  return err;
+}
+
 /**
  * Tra 1 sản phẩm theo mã vạch.
- * Trả về object đã normalize, hoặc null nếu Open Food Facts không có mã này.
- * Ném lỗi nếu mất mạng / API lỗi.
+ * Trả về dữ liệu thô `product` của Open Food Facts (chưa normalize),
+ * hoặc null nếu Open Food Facts không có mã này (HTTP 404, hoặc status khác 1).
+ * Ném lỗi có `kind` = "network" | "timeout" | "server" (và `status` = mã HTTP nếu là lỗi máy chủ).
  */
 export async function getProduct(code) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 9000);
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/product/${code}.json?fields=${FIELDS}`, { signal: ctrl.signal });
-    const data = await res.json();
+    let res;
+    try {
+      res = await fetch(`${BASE}/product/${code}.json?fields=${FIELDS}`, { signal: ctrl.signal });
+    } catch (e) {
+      // Hết giờ thì fetch ném AbortError; còn lại (mất mạng, bị chặn, CORS…) Safari ném TypeError "Load failed".
+      throw withKind(e, ctrl.signal.aborted ? "timeout" : "network");
+    }
+
+    // 404 = mã không có (Open Food Facts trả kèm {status: 0}). Lỗi khác (5xx, 429…) là máy chủ lỗi / quá tải.
+    if (!res.ok && res.status !== 404) {
+      const err = new Error(`HTTP ${res.status}${res.statusText ? " " + res.statusText : ""}`);
+      err.name = "HttpError";
+      throw withKind(err, "server", res.status);
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      if (ctrl.signal.aborted) throw withKind(e, "timeout");
+      if (res.status === 404) return null; // 404 mà nội dung không phải JSON: vẫn là không tìm thấy
+      throw withKind(e, "server", res.status); // 200 mà JSON hỏng
+    }
     if (!data || data.status !== 1 || !data.product) return null;
-    return normalize(data.product, code);
+    return data.product;
   } finally {
     clearTimeout(timer);
   }
