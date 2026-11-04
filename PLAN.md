@@ -11,12 +11,12 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 ## 2. Tính năng theo giai đoạn
 
 ### Giai đoạn 1 – Tra cứu (đã có demo, chuyển vào code dự án)
-- [ ] Quét mã bằng camera (html5-qrcode)
-- [ ] Chụp ảnh mã vạch rồi đọc (dự phòng khi camera không mở được)
-- [ ] Nhập số mã vạch bằng tay
-- [ ] Gọi Open Food Facts, hiện: tên, thương hiệu, khối lượng, ảnh, Nutri-Score, NOVA, bảng dinh dưỡng/100 g, thành phần, dị ứng, phụ gia
-- [ ] Trạng thái: đang tra, không tìm thấy, lỗi mạng
-- [ ] Lịch sử quét (localStorage, 10 mã gần nhất)
+- [x] Quét mã bằng camera (html5-qrcode)
+- [x] Chụp ảnh mã vạch rồi đọc (dự phòng khi camera không mở được)
+- [x] Nhập số mã vạch bằng tay
+- [x] Gọi Open Food Facts, hiện: tên, thương hiệu, khối lượng, ảnh, Nutri-Score, NOVA, bảng dinh dưỡng/100 g, thành phần, dị ứng, phụ gia
+- [x] Trạng thái: đang tra, không tìm thấy, lỗi mạng
+- [x] Lịch sử quét (localStorage, 10 mã gần nhất)
 
 ### Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn
 - [ ] Hiện xuất xứ nguyên liệu, nơi sản xuất, nước bán, bảo quản, cách dùng, nhãn chứng nhận (halal, organic…) – trường nào trống thì ẩn
