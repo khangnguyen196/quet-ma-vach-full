@@ -36,6 +36,7 @@ LOCK = OUT / "api_usage.lock"     # file khóa: chỉ 1 lần chạy được g�
 # Azure F0 giới hạn 20 lượt / phút (cùng nguồn trên): giữ khoảng cách 60/20 + 0,1 = 3,1 giây giữa 2 lần gọi
 AZURE_PER_MINUTE = 20
 AZURE_MIN_GAP = 60 / AZURE_PER_MINUTE + 0.1
+PAID_MAX_FAILS = 3                # google / azure lỗi 3 lần liên tiếp thì dừng gọi dịch vụ đó (lượt lỗi vẫn bị đếm)
 
 def cap(service):
     """Trần lượt gọi mỗi tháng = 80% mức miễn phí (làm tròn xuống)."""
@@ -216,6 +217,7 @@ def main():
                     print(f"[{tool}] không giữ được file khóa {LOCK}, bỏ qua (xem cảnh báo ở trên)."); continue
                 out_dir = OUT / tool
                 print(f"\n=== {tool} ===")
+                fails = 0   # số lần lỗi liên tiếp của công cụ này
                 for src in photos:
                     code, name = src.parent.name, src.stem
                     out_file = out_dir / f"{code}__{name}.txt"
@@ -236,10 +238,18 @@ def main():
                         text, status = "", f"error: {e}"
                         traceback.print_exc(limit=1)
                     secs = round(time.perf_counter() - t0, 2)
-                    out_dir.mkdir(exist_ok=True)
-                    out_file.write_text(text, encoding="utf-8")
+                    if status == "ok":
+                        out_dir.mkdir(exist_ok=True)
+                        out_file.write_text(text, encoding="utf-8")
+                        fails = 0
+                    else:
+                        fails += 1   # lỗi: KHÔNG ghi file kết quả, lần sau chạy lại sẽ thử lại ảnh này
                     tw.writerow([tool, code, name, secs, status]); tf.flush()
                     print(f"  {code}/{name}: {secs}s {status} ({len(text)} ký tự)")
+                    if tool in FREE_PER_MONTH and fails >= PAID_MAX_FAILS:
+                        print(f"[{tool}] lỗi {fails} lần liên tiếp (lần cuối: {status}), dừng gọi dịch vụ này để không "
+                              f"tốn thêm lượt. Sửa lỗi (key, mạng, gói…) rồi chạy lại: ảnh chưa có kết quả sẽ được làm tiếp.")
+                        break
     finally:
         if locked:
             release_lock()   # chỉ xóa khóa do chính lần chạy này tạo (kể cả khi lỗi / bấm Ctrl+C)
