@@ -82,7 +82,7 @@ document.querySelectorAll(".try button[data-code]").forEach((b) =>
 let current = 0;
 async function lookup(raw) {
   const code = String(raw || "").replace(/\D/g, "");
-  if (code.length < 8 || code.length > 14) { setMsg("Mã vạch cần 8–13 chữ số.", true); return; }
+  if (code.length < 8 || code.length > 14) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
   const id = ++current;
   codeInput.value = code;
   setMsg(`Đang tra cứu mã ${code}…`);
