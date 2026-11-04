@@ -4,6 +4,20 @@ import { NOVA_VI, NUTRIENT_ROWS } from "./off.js";
 export const esc = (s) => String(s == null ? "" : s)
   .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+/**
+ * Đổi lỗi bất kỳ thành 1 dòng chữ để hiện cho người dùng (dòng nhỏ dưới câu báo lỗi).
+ * Thư viện quét có khi ném chuỗi, có khi ném Event (ảnh hỏng) thay vì Error.
+ */
+export function errorText(e) {
+  if (e == null) return "Không có thông tin lỗi";
+  if (typeof e === "string") return e;
+  if (typeof Event !== "undefined" && e instanceof Event) return `Event: ${e.type}`;
+  if (e instanceof Error || (typeof e === "object" && e.name)) {
+    return e.message ? `${e.name}: ${e.message}` : String(e.name);
+  }
+  return String(e);
+}
+
 const fmt = (v) => Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 });
 
 /** Dòng "nhãn: giá trị", bỏ qua nếu trống. */
@@ -74,7 +88,7 @@ export function renderNotFound(code) {
 /**
  * Báo lỗi khi tra cứu.
  * kind: "timeout" | "network" | "server" | "display" | "unknown" (kind lạ hoặc rỗng cũng coi là "unknown");
- * detail: lỗi gốc (Error), hiện name: message ở dòng chữ nhỏ.
+ * detail: lỗi gốc (Error, chuỗi…), hiện ở dòng chữ nhỏ qua errorText().
  */
 export function renderError(code, kind, detail) {
   const c = esc(code);
@@ -92,8 +106,7 @@ export function renderError(code, kind, detail) {
       `Tra lại mã ${c}; nếu vẫn lỗi, chụp lại dòng chữ nhỏ bên dưới.`]
   };
   const [main, hint] = Object.hasOwn(MESSAGES, kind) ? MESSAGES[kind] : MESSAGES.unknown;
-  const info = detail == null ? ""
-    : typeof detail === "object" ? `${detail.name}: ${detail.message}` : String(detail);
+  const info = detail == null ? "" : errorText(detail);
   return `<div class="notfound"><p class="big">${esc(main)}</p>
 <p>${hint}</p>${info ? `\n<p class="src">${esc(info)}</p>` : ""}</div>`;
 }
