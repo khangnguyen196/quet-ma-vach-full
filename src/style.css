@@ -129,6 +129,7 @@ form.manual button { flex: 0 0 auto; }
 
 .msg { margin-top: 12px; font-size: 14px; min-height: 1.4em; color: var(--ink-2); }
 .msg.warn { color: var(--warn); }
+.msg-detail { display: block; margin-top: 4px; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 
 /* Result: printed nutrition-label look */
 #result { margin-top: 32px; }

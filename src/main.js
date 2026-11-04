@@ -1,7 +1,7 @@
 // Nối các phần lại: sự kiện nút bấm → scanner / API → render.
 import { createScanner } from "./scanner.js";
 import { getProduct, normalize } from "./off.js";
-import { renderProduct, renderNotFound, renderError, esc } from "./render.js";
+import { renderProduct, renderNotFound, renderError, errorText, esc } from "./render.js";
 import { getHistory, addHistory } from "./storage.js";
 
 const $ = (s) => document.querySelector(s);
@@ -14,9 +14,16 @@ if (import.meta.env.VITE_APP_NAME) {
   document.title = import.meta.env.VITE_APP_NAME;
 }
 
-function setMsg(text = "", warn = false) {
-  msg.textContent = text;
+/** Hiện thông báo; detail (nếu có) là dòng chữ nhỏ bên dưới. Gọi lại thì dòng nhỏ cũ mất. */
+function setMsg(text = "", warn = false, detail = "") {
+  msg.textContent = text; // xóa luôn dòng nhỏ cũ
   msg.classList.toggle("warn", warn);
+  if (detail) {
+    const small = document.createElement("small");
+    small.className = "msg-detail";
+    small.textContent = detail; // textContent: chuỗi lỗi không bao giờ thành HTML
+    msg.append(small);
+  }
 }
 
 function placeholder(text) {
@@ -66,9 +73,10 @@ fileInput.addEventListener("change", async (ev) => {
     const text = await scanner.scanImage(file);
     placeholder();
     lookup(text);
-  } catch {
+  } catch (e) {
+    console.error(e);
     placeholder();
-    setMsg("Không đọc được mã vạch trong ảnh. Chụp gần hơn, đủ sáng, mã nằm ngang, hoặc nhập số.", true);
+    setMsg("Không đọc được mã vạch trong ảnh. Chụp gần hơn, đủ sáng, mã nằm ngang, hoặc nhập số.", true, errorText(e));
   }
 });
 
