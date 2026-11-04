@@ -90,9 +90,9 @@ async function lookup(raw) {
   result.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
   // (a) Gọi API: lỗi ở đây là lỗi mạng / hết giờ / máy chủ (e.kind do getProduct gắn).
-  let raw;
+  let data;
   try {
-    raw = await getProduct(code);
+    data = await getProduct(code);
   } catch (e) {
     console.error(e);
     if (id !== current) return;
@@ -106,8 +106,8 @@ async function lookup(raw) {
   // (b) Đổi dữ liệu + hiển thị: lỗi ở đây là do dữ liệu, không phải do mạng.
   let product;
   try {
-    if (!raw) { result.innerHTML = renderNotFound(code); return; }
-    product = normalize(raw, code);
+    if (!data) { result.innerHTML = renderNotFound(code); return; }
+    product = normalize(data, code);
     result.innerHTML = renderProduct(product);
   } catch (e) {
     console.error(e);
