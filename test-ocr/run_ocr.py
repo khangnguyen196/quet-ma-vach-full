@@ -3,7 +3,10 @@ Chạy 5 công cụ OCR trên cùng bộ ảnh trong photos/<mã>/*.jpg
 Kết quả: outputs/<công cụ>/<mã>__<tên ảnh>.txt  và  outputs/times.csv (thời gian từng ảnh)
 
 Dùng:  python run_ocr.py
-       python run_ocr.py --tools tesseract,easyocr,claude
+       python run_ocr.py --tools tesseract,easyocr
+
+Công cụ "claude" (API Claude / Anthropic) KHÔNG nằm trong danh sách chạy mặc định:
+dự án không dùng API Claude / Anthropic (không có mức miễn phí). Code giữ lại chỉ để tham khảo.
 """
 import os, sys, time, csv, base64, argparse, pathlib, traceback
 from dotenv import load_dotenv
@@ -94,10 +97,12 @@ TOOLS = {
     "azure":     (ocr_azure,     lambda: bool(os.environ.get("AZURE_VISION_ENDPOINT") and os.environ.get("AZURE_VISION_KEY"))),
     "claude":    (ocr_claude,    lambda: bool(os.environ.get("ANTHROPIC_API_KEY"))),
 }
+# Chạy mặc định: mọi công cụ trừ "claude" (dự án không gọi API Claude / Anthropic, kể cả khi .env có key).
+DEFAULT_TOOLS = [t for t in TOOLS if t != "claude"]
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tools", default=",".join(TOOLS), help="danh sách công cụ, cách nhau bằng dấu phẩy")
+    ap.add_argument("--tools", default=",".join(DEFAULT_TOOLS), help="danh sách công cụ, cách nhau bằng dấu phẩy")
     args = ap.parse_args()
     wanted = [t.strip() for t in args.tools.split(",") if t.strip()]
 

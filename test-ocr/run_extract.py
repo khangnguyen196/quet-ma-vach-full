@@ -4,7 +4,10 @@ Chạy trên MỌI kết quả OCR đã có trong outputs/<ocr>/  =>  outputs/ex
 
 Dùng:  python run_extract.py
        python run_extract.py --extractors regex,dict,yake
-       python run_extract.py --ocr google,claude --extractors llm
+       python run_extract.py --ocr tesseract,easyocr --extractors llm
+
+Extractor "llm" mặc định chạy bằng Ollama trên máy (LLM_PROVIDER=ollama, miễn phí).
+Dự án KHÔNG dùng API Claude / Anthropic: không đặt LLM_PROVIDER=claude.
 """
 import os, re, json, time, argparse, pathlib, unicodedata, traceback
 from dotenv import load_dotenv
@@ -174,7 +177,7 @@ def extract_underthesea(text):
         out["thuong_hieu"] = min(orgs, key=len)
     return out
 
-# ---------- 5. LLM (Claude API hoặc Ollama chạy máy) -> JSON ----------
+# ---------- 5. LLM (mặc định Ollama chạy máy; nhánh Claude API giữ lại nhưng dự án không dùng) -> JSON ----------
 LLM_PROMPT = """Dưới đây là chữ đọc được bằng OCR từ bao bì một sản phẩm thực phẩm Việt Nam (có thể sai chính tả, thiếu dấu).
 Hãy rút ra thông tin và trả về DUY NHẤT một JSON với đúng các khóa sau (không có thì để chuỗi rỗng ""):
 {"ten": "tên sản phẩm", "thuong_hieu": "thương hiệu", "khoi_luong": "khối lượng tịnh, ví dụ 75g",
@@ -191,7 +194,7 @@ def _parse_json(s):
     return json.loads(s[start:end + 1])
 
 def extract_llm(text):
-    provider = os.environ.get("LLM_PROVIDER", "claude").lower()
+    provider = os.environ.get("LLM_PROVIDER", "ollama").lower()
     if provider == "ollama":
         import requests
         r = requests.post("http://localhost:11434/api/generate", timeout=180,
@@ -210,7 +213,7 @@ EXTRACTORS = {
     "dict": (extract_dict, lambda: True),
     "yake": (extract_yake, lambda: True),
     "underthesea": (extract_underthesea, lambda: True),
-    "llm": (extract_llm, lambda: os.environ.get("LLM_PROVIDER", "claude").lower() == "ollama" or bool(os.environ.get("ANTHROPIC_API_KEY"))),
+    "llm": (extract_llm, lambda: os.environ.get("LLM_PROVIDER", "ollama").lower() == "ollama" or bool(os.environ.get("ANTHROPIC_API_KEY"))),
 }
 
 def product_text(ocr_dir: pathlib.Path, code: str) -> str:
@@ -239,7 +242,7 @@ def main():
                 print(f"[{ext}] không biết extractor này, bỏ qua."); continue
             fn, available = EXTRACTORS[ext]
             if not available():
-                print(f"[{ext}] thiếu key (ANTHROPIC_API_KEY) hoặc LLM_PROVIDER, bỏ qua."); continue
+                print(f"[{ext}] LLM_PROVIDER không phải ollama, bỏ qua (dự án chỉ chạy llm bằng Ollama)."); continue
             out_dir = EXT_DIR / f"{ocr_dir.name}__{ext}"
             out_dir.mkdir(parents=True, exist_ok=True)
             print(f"\n=== OCR {ocr_dir.name} + {ext} ===")
