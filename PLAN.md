@@ -107,7 +107,7 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 
 ## 6. Bắt đầu – làm theo thứ tự
 
-1. Cài Node.js (bản LTS) nếu chưa có: https://nodejs.org
+1. Cài Node.js (bản LTS) nếu chưa có: https://nodejs.org (cần 20.19+ trong dòng 20, hoặc 22.12+; xem README)
 2. Mở terminal trong thư mục `quet-ma-vach`, chạy:
    ```
    npm install
@@ -126,6 +126,6 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Hàng Việt trên Open Food Facts nhiều mã có nhưng thiếu dinh dưỡng, thiếu bảo quản → luôn có trạng thái "chưa có dữ liệu" và cho nhập tay.
 - Open Food Facts yêu cầu app tử tế: không gọi liên tục, cache kết quả đã tra trong localStorage.
 - Trang demo chạy bên trong Claude bị chặn gọi internet; dự án thật chạy bằng Vite thì gọi API bình thường.
-- Thương hiệu, khối lượng, ảnh đang bị ẩn khi API trống, chưa hiện "chưa có dữ liệu" như quy tắc CLAUDE.md (sửa ở giai đoạn sau).
-- Khi Open Food Facts lỗi máy chủ (5xx/429), app đang báo nhầm "Không kết nối được" như lỗi mạng (chưa kiểm res.ok).
-- Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (có chủ ý).
+- Thương hiệu, khối lượng, phân loại, ảnh đang bị ẩn khi API trống, chưa hiện "chưa có dữ liệu" như quy tắc CLAUDE.md (sửa ở giai đoạn sau).
+- Khi Open Food Facts lỗi máy chủ (5xx/429), app chưa kiểm res.ok nên báo nhầm: trả trang HTML → "Không kết nối được"; trả JSON không có status 1 → "không tìm thấy". Khi sửa: mã không tồn tại trả HTTP 404 kèm `{status: 0}` (mục 5), nên 404 vẫn phải là "không tìm thấy".
+- Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (hiện tại như vậy; chờ chủ dự án xác nhận có muốn lưu cả mã không tìm thấy không).

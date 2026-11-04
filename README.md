@@ -3,7 +3,7 @@
 Quét mã vạch trên bao bì → xem dinh dưỡng, thành phần, dị ứng (dữ liệu Open Food Facts).
 
 ## Chạy thử
-Cần Node.js 20.19 trở lên (hoặc 22.12 trở lên) vì Vite 7 đòi vậy.
+Cần Node.js bản 20.19 trở lên trong dòng 20, hoặc bản 22.12 trở lên. Node 21 và 22.0 đến 22.11 không chạy được (Vite 7 đòi vậy). Dễ nhất: cài bản LTS mới nhất từ https://nodejs.org. Kiểm tra bằng lệnh: `node -v`
 ```
 npm install
 cp .env.example .env
