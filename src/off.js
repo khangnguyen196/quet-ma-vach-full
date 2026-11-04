@@ -109,6 +109,12 @@ export async function getProduct(code) {
   }
 }
 
+/**
+ * Tên dị ứng tiếng Việt. Dùng Object.hasOwn để mã lạ như "constructor", "toString"
+ * không trúng thuộc tính có sẵn của object (sẽ ra một hàm thay vì chữ).
+ */
+const allergenVi = (a) => (Object.hasOwn(ALLERGEN_VI, a) ? ALLERGEN_VI[a] : a);
+
 /** Đổi dữ liệu thô của Open Food Facts sang dạng app dùng. */
 export function normalize(p, code) {
   const n = p.nutriments && typeof p.nutriments === "object" ? p.nutriments : {};
@@ -127,8 +133,8 @@ export function normalize(p, code) {
     nova: num(p.nova_group),
     ecoscore: grade(p.ecoscore_grade),
     ingredients: str(p.ingredients_text_vi) || str(p.ingredients_text) || str(p.ingredients_text_en),
-    allergens: tags(p.allergens_tags).map(tag).map((a) => ALLERGEN_VI[a] || a),
-    traces: tags(p.traces_tags).map(tag).map((a) => ALLERGEN_VI[a] || a),
+    allergens: tags(p.allergens_tags).map(tag).map(allergenVi),
+    traces: tags(p.traces_tags).map(tag).map(allergenVi),
     additives: tags(p.additives_tags).map((t) => tag(t).toUpperCase()),
     nutriments,
     hasNutriments: Object.values(nutriments).some((v) => v != null),
