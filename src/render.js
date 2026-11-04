@@ -12,6 +12,8 @@ const infoRow = (label, value) =>
 
 export function renderProduct(p) {
   const meta = [p.brand, p.quantity, p.category].filter(Boolean).join(" – ");
+  // Chỉ nhận ảnh https:// (chặn "javascript:", "http://"…); không đúng thì coi như không có ảnh.
+  const hasImage = typeof p.image === "string" && p.image.startsWith("https://");
 
   const rows = NUTRIENT_ROWS.map(([key, label, unit, cls]) => {
     const v = p.nutriments[key];
@@ -41,9 +43,9 @@ export function renderProduct(p) {
     <div class="text">
       <h2>${esc(p.name)}</h2>
       ${meta ? `<p class="meta">${esc(meta)}</p>` : ""}
-      <p class="code">Mã ${esc(p.code)} · <a href="https://world.openfoodfacts.org/product/${esc(p.code)}" target="_blank" rel="noopener">xem trên Open Food Facts</a></p>
+      <p class="code">Mã ${esc(p.code)} · <a href="https://world.openfoodfacts.org/product/${esc(encodeURIComponent(p.code))}" target="_blank" rel="noopener">xem trên Open Food Facts</a></p>
     </div>
-    ${p.image ? `<img src="${esc(p.image)}" alt="" onerror="this.remove()">` : ""}
+    ${hasImage ? `<img src="${esc(p.image)}" alt="" onerror="this.remove()">` : ""}
   </div>
   <div class="scores">
     <div><span class="k">Nutri-Score</span><div class="ns">${ns}</div><small>${esc(nsText)}</small></div>
