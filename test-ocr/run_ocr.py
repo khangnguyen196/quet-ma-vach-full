@@ -148,7 +148,8 @@ def ocr_google(path):
     from google.cloud import vision
     client = vision.ImageAnnotatorClient()
     image = vision.Image(content=path.read_bytes())
-    resp = client.document_text_detection(image=image, image_context={"language_hints": ["vi"]})
+    # retry=None: thư viện không tự gửi lại khi lỗi, để 1 lượt đếm = đúng 1 lần gửi (google-cloud-vision 3.16.0)
+    resp = client.document_text_detection(image=image, image_context={"language_hints": ["vi"]}, retry=None)
     if resp.error.message:
         raise RuntimeError(resp.error.message)
     return resp.full_text_annotation.text
@@ -160,6 +161,7 @@ def ocr_azure(path):
     client = ImageAnalysisClient(
         endpoint=os.environ["AZURE_VISION_ENDPOINT"],
         credential=AzureKeyCredential(os.environ["AZURE_VISION_KEY"]),
+        retry_total=0,   # tắt tự gửi lại của azure-core (mặc định retry_total=10), để 1 lượt đếm = đúng 1 lần gửi
     )
     result = client.analyze(image_data=path.read_bytes(), visual_features=[VisualFeatures.READ])
     lines = []
