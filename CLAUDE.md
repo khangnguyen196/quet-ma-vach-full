@@ -18,6 +18,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `src/off.js` – gọi API và hàm `normalize()` đổi dữ liệu thô sang object tiếng Việt sạch. Mọi mapping (tên dị ứng, NOVA…) nằm ở đây.
 - `src/render.js` – hàm trả về chuỗi HTML từ object đã normalize. Luôn escape dữ liệu từ API bằng `esc()`.
 - `src/storage.js` – đọc/ghi localStorage, bọc try/catch.
+- `src/pantry.js` – tính số ngày còn hạn, trạng thái, sắp xếp, định dạng ngày (không DOM, không localStorage).
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
 
 ## Quy ước
