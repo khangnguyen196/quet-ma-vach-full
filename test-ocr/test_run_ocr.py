@@ -203,6 +203,54 @@ class PaidServiceUsageTest(unittest.TestCase):
         self.assertFalse((self.out / "api_usage.json.tmp").exists())
         self.assertEqual(usage_file.read_bytes(), old)
 
+    def test_13b_run_ocr_main_prints_vietnamese_to_cp1252_stdout(self):
+        # Như `python run_ocr.py > file` trên Windows: stdout và stderr là file mã hóa cp1252.
+        # Tesseract giả (không gọi OCR thật): ảnh thứ 2 ném lỗi có chữ tiếng Việt để traceback ra stderr.
+        self.make_photos(2)
+        tess_calls = []
+
+        def fake_tesseract(path):
+            tess_calls.append(path)
+            if len(tess_calls) == 2:
+                raise RuntimeError("lỗi giả tiếng Việt")
+            return "chữ giả"
+
+        raw_out, raw_err = io.BytesIO(), io.BytesIO()
+        out = io.TextIOWrapper(raw_out, encoding="cp1252")
+        err = io.TextIOWrapper(raw_err, encoding="cp1252")
+        with mock.patch.dict(run_ocr.TOOLS, {"tesseract": (fake_tesseract, lambda: True)}), \
+                mock.patch.object(sys, "argv", ["run_ocr.py", "--tools", "tesseract"]), \
+                mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err):
+            run_ocr.main()   # không được lỗi UnicodeEncodeError
+        out.flush()
+        err.flush()
+        self.assertEqual(len(tess_calls), 2)
+        self.assertEqual(self.calls, 0)   # không gọi Google
+        self.assertIn("Có 2 ảnh của 2 sản phẩm.", raw_out.getvalue().decode("utf-8"))
+        self.assertIn("lỗi giả tiếng Việt", raw_err.getvalue().decode("utf-8"))
+
+    def test_10b_save_usage_write_error_cleans_tmp(self):
+        # Ghi file tạm lỗi giữa chừng (đã ghi được một phần): save_usage ném lại đúng lỗi đó, xóa file .tmp,
+        # bộ đếm cũ giữ nguyên từng byte.
+        self.out.mkdir()
+        usage_file = self.out / "api_usage.json"
+        old = json.dumps({"google": {run_ocr.month_key(): 5}}).encode("utf-8")
+        usage_file.write_bytes(old)
+        written = []
+
+        def broken_write_text(path, data, *args, **kwargs):
+            written.append(path)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(data[:5])   # ghi dở
+            raise OSError("lỗi ghi giả")
+
+        with mock.patch.object(pathlib.Path, "write_text", broken_write_text):
+            with self.assertRaisesRegex(OSError, "lỗi ghi giả"):
+                run_ocr.save_usage({"google": {run_ocr.month_key(): 6}})
+        self.assertEqual([p.name for p in written], ["api_usage.json.tmp"])
+        self.assertFalse((self.out / "api_usage.json.tmp").exists())
+        self.assertEqual(usage_file.read_bytes(), old)
+
 
 class ReadTimesTest(unittest.TestCase):
     def test_5_read_times_skips_cost_rows(self):
@@ -325,6 +373,14 @@ class ScoreMainTest(unittest.TestCase):
         google = [cells for cells in rows if len(cells) == 7 and cells[1] == "google"]
         self.assertEqual(len(google), 1, summary)
         self.assertEqual(google[0][1:], ["google", "0.0", "0%", "?", "0", "2"])
+
+    def test_13a_score_main_prints_vietnamese_to_cp1252_stdout(self):
+        # Như `python score.py > file` trên Windows: stdout là file mã hóa cp1252 (không có chữ "ế", "ả"…).
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="cp1252")
+        self.run_score(out)   # không được lỗi UnicodeEncodeError
+        out.flush()
+        self.assertIn("Kết quả", raw.getvalue().decode("utf-8"))
 
 
 class FoundTest(unittest.TestCase):
