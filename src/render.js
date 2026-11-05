@@ -1,5 +1,6 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
 import { NOVA_VI, NUTRIENT_ROWS } from "./off.js";
+import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry } from "./pantry.js";
 
 export const esc = (s) => String(s == null ? "" : s)
   .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -22,12 +23,15 @@ export function errorText(e) {
 
 const fmt = (v) => Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 });
 
+/** Dòng "Nhãn: giá trị" dưới tên sản phẩm; trống thì ghi "chưa có dữ liệu". */
+const metaRow = (label, value) =>
+  `<p class="meta"><span class="k">${esc(label)}:</span> ${value ? esc(value) : '<span class="empty">chưa có dữ liệu</span>'}</p>`;
+
 /** Dòng "nhãn: giá trị", bỏ qua nếu trống. */
 const infoRow = (label, value) =>
   value ? `<tr><td>${esc(label)}</td><td>${esc(value)}</td></tr>` : "";
 
 export function renderProduct(p) {
-  const meta = [p.brand, p.quantity, p.category].filter(Boolean).join(" – ");
   // Chỉ nhận ảnh https:// (chặn "javascript:", "http://"…); không đúng thì coi như không có ảnh.
   const hasImage = typeof p.image === "string" && p.image.startsWith("https://");
 
@@ -44,7 +48,8 @@ export function renderProduct(p) {
 
   const chips = (list, cls = "") => list.map((x) => `<span class="chip ${cls}">${esc(x)}</span>`).join("");
 
-  // Giai đoạn 2: xuất xứ / sản xuất / bảo quản – chỉ hiện dòng có dữ liệu
+  // Giai đoạn 2: xuất xứ / sản xuất / bảo quản – chỉ hiện dòng có dữ liệu, cả khối trống thì ẩn.
+  // Ngoại lệ có chủ đích với quy tắc 'chưa có dữ liệu' của CLAUDE.md: PLAN mục 2 yêu cầu trường trống thì ẩn.
   const extra = infoRow("Xuất xứ nguyên liệu", p.origins)
     + infoRow("Nơi sản xuất", p.manufacturingPlaces)
     + infoRow("Nước bán", p.countries)
@@ -58,10 +63,15 @@ export function renderProduct(p) {
   <div class="label-head">
     <div class="text">
       <h2>${esc(p.name)}</h2>
-      ${meta ? `<p class="meta">${esc(meta)}</p>` : ""}
+      ${metaRow("Thương hiệu", p.brand)}
+      ${metaRow("Khối lượng", p.quantity)}
+      ${metaRow("Phân loại", p.category)}
       <p class="code">Mã ${esc(p.code)} · <a href="https://world.openfoodfacts.org/product/${esc(encodeURIComponent(p.code))}" target="_blank" rel="noopener">xem trên Open Food Facts</a></p>
     </div>
-    ${hasImage ? `<img src="${esc(p.image)}" alt="" onerror="this.remove()">` : ""}
+    ${hasImage
+      // Ảnh tải lỗi: ẩn ảnh, hiện ô "Chưa có ảnh" ngay sau nó (không để trống chỗ)
+      ? `<img src="${esc(p.image)}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="noimg" hidden>Chưa có ảnh</div>`
+      : '<div class="noimg">Chưa có ảnh</div>'}
   </div>
   <div class="scores">
     <div><span class="k">Nutri-Score</span><div class="ns">${ns}</div><small>${esc(nsText)}</small></div>
@@ -111,4 +121,84 @@ export function renderError(code, kind, detail) {
   const info = detail == null ? "" : errorText(detail);
   return `<div class="notfound"><p class="big">${esc(main)}</p>
 <p>${hint}</p>${info ? `\n<p class="src">${esc(info)}</p>` : ""}</div>`;
+}
+
+// Tên off.js normalize() đặt khi sản phẩm không có tên
+const NO_NAME = "Sản phẩm chưa có tên";
+
+/**
+ * Form "Thêm vào tủ đồ" dưới kết quả tra.
+ * Mã không tìm thấy thì gọi với name = "": ô tên để trống, người dùng bắt buộc nhập.
+ */
+export function renderAddForm({ code, name = "", brand = "" }) {
+  if (name === NO_NAME) name = ""; // tên normalize() tự đặt khi API trống: không điền sẵn
+  const hint = name ? "" : '<p class="hint">Chưa có tên sản phẩm này: nhập tên để dễ nhận ra trong tủ.</p>';
+  return `
+<form class="add-pantry" data-code="${esc(code)}" data-brand="${esc(brand)}" autocomplete="off">
+  <h3>Thêm vào tủ đồ</h3>
+  ${hint}
+  <label>Tên món
+    <input name="name" required maxlength="120" value="${esc(name)}">
+  </label>
+  <div class="row">
+    <label>Hạn sử dụng
+      <input name="expiresOn" type="date" required>
+    </label>
+    <label>Số lượng
+      <input name="qty" type="number" min="1" step="1" value="1" inputmode="numeric" required>
+    </label>
+  </div>
+  <button class="btn primary" type="submit">Thêm vào tủ đồ</button>
+  <p class="form-msg" role="status" aria-live="polite"></p>
+</form>`;
+}
+
+/** Form sửa tại chỗ 1 món: hạn + số lượng, nút Lưu / Hủy. */
+function renderEditForm(x) {
+  const n = esc(x.name || "món này");
+  return `
+<form class="pantry-edit" data-id="${esc(x.id)}">
+  <div class="row">
+    <label>Hạn sử dụng
+      <input name="expiresOn" type="date" required value="${esc(x.expiresOn)}">
+    </label>
+    <label>Số lượng
+      <input name="qty" type="number" min="1" step="1" inputmode="numeric" required value="${esc(x.qty)}">
+    </label>
+  </div>
+  <div class="actions">
+    <button class="btn primary" type="submit" aria-label="Lưu ${n}">Lưu</button>
+    <button class="btn" type="button" data-action="cancel" aria-label="Hủy sửa ${n}">Hủy</button>
+  </div>
+  <p class="form-msg" role="status" aria-live="polite"></p>
+</form>`;
+}
+
+/**
+ * Danh sách tủ đồ, sắp theo hạn (hết hạn trước lên đầu).
+ * editingId: id món đang sửa (hiện form tại chỗ thay cho nút Sửa / Xóa).
+ * today: truyền vào để test; mặc định là hôm nay.
+ */
+export function renderPantry(list, { editingId = null, today = new Date() } = {}) {
+  if (!list.length) return '<p class="empty pantry-empty">Tủ đồ trống.</p>';
+  const items = sortPantry(list).map((x) => {
+    const days = daysLeft(x.expiresOn, today);
+    const status = expiryStatus(days);
+    const n = esc(x.name || "món này");
+    const tail = x.id === editingId
+      ? renderEditForm(x)
+      : `<div class="actions">
+    <button class="btn" type="button" data-action="edit" aria-label="Sửa ${n}">Sửa</button>
+    <button class="btn" type="button" data-action="delete" aria-label="Xóa ${n}">Xóa</button>
+  </div>`;
+    return `
+<li class="pantry-item ${status}" data-id="${esc(x.id)}">
+  <p class="pi-name">${esc(x.name || "Chưa có tên")}</p>
+  <p class="pi-meta">${x.code ? `Mã ${esc(x.code)} · ` : ""}Số lượng: ${esc(x.qty)}</p>
+  <p class="pi-date">Hết hạn ngày ${esc(formatDate(x.expiresOn))}</p>
+  <p class="pi-status">${esc(expiryText(days))}</p>
+  ${tail}
+</li>`;
+  }).join("");
+  return `<ul class="pantry-list">${items}</ul>`;
 }

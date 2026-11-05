@@ -13,6 +13,13 @@
   --warn: #A8480C;
   --warn-bg: #FFF1E4;
   --focus: #2D6CDF;
+  /* Tủ đồ: sắp hết hạn (vàng), đã hết hạn (đỏ). Chữ trên nền nhạt tương phản >= 4.5:1 */
+  --soon-ink: #7A5200;
+  --soon-bg: #FFF4CC;
+  --soon-line: #D9A400;
+  --expired-ink: #B3261E;
+  --expired-bg: #FDECEA;
+  --expired-line: #B3261E;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -28,6 +35,12 @@
     --warn: #F5A66C;
     --warn-bg: #2B1A0E;
     --focus: #7FA9F2;
+    --soon-ink: #F2C94C;
+    --soon-bg: #2B2308;
+    --soon-line: #F2C94C;
+    --expired-ink: #FF8A80;
+    --expired-bg: #33150F;
+    --expired-line: #FF8A80;
   }
 }
 :root[data-theme="dark"] {
@@ -43,6 +56,12 @@
   --warn: #F5A66C;
   --warn-bg: #2B1A0E;
   --focus: #7FA9F2;
+  --soon-ink: #F2C94C;
+  --soon-bg: #2B2308;
+  --soon-line: #F2C94C;
+  --expired-ink: #FF8A80;
+  --expired-bg: #33150F;
+  --expired-line: #FF8A80;
 }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 *, *::before, *::after { box-sizing: inherit; }
@@ -150,7 +169,17 @@ form.manual button { flex: 0 0 auto; }
   flex: 0 0 auto; width: 84px; height: 84px; object-fit: contain;
   background: #fff; border: 1px solid var(--rule); border-radius: 4px;
 }
-.meta { color: var(--ink-2); margin-top: 4px; }
+/* Ô xám thay ảnh khi không có ảnh hoặc ảnh tải lỗi */
+.noimg {
+  flex: 0 0 auto; width: 84px; height: 84px;
+  display: grid; place-items: center; text-align: center; padding: 6px;
+  background: var(--well); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px;
+  font-size: 12px; line-height: 1.25;
+}
+.noimg[hidden] { display: none; }
+.meta { color: var(--ink-2); margin-top: 2px; font-size: 15px; }
+.label-head h2 + .meta { margin-top: 6px; }
+.meta .k { font-weight: 500; }
 .code { font-size: 13px; color: var(--ink-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
 .note {
   display: inline-block; margin-top: 8px;
@@ -223,3 +252,51 @@ table.info { width: 100%; border-collapse: collapse; font-size: 15px; }
 table.info td { padding: 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
 table.info td:first-child { color: var(--ink-2); width: 38%; padding-right: 10px; }
 table.info tr:last-child td { border-bottom: 0; }
+
+/* Thanh trên cùng: tên app + nút Tủ đồ */
+.topbar { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.topbar .pantry-btn { flex: 0 0 auto; min-height: 40px; font-variant-numeric: tabular-nums; }
+
+/* Form thêm vào tủ đồ / sửa món */
+form.add-pantry {
+  margin-top: 24px; padding: 14px; border: 2px solid var(--rule-strong); border-radius: 6px;
+  display: grid; gap: 10px;
+}
+form.add-pantry h3 { margin: 0; font-size: 17px; }
+form.add-pantry .hint { font-size: 14px; color: var(--ink-2); }
+form.add-pantry label, form.pantry-edit label { display: grid; gap: 4px; font-size: 14px; font-weight: 500; }
+form.add-pantry .row, form.pantry-edit .row { display: grid; grid-template-columns: 1fr 7.5em; gap: 10px; }
+form.add-pantry input, form.pantry-edit input {
+  min-height: 44px; padding: 0 10px; min-width: 0; width: 100%;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--well);
+  font-weight: 400; font-variant-numeric: tabular-nums;
+}
+.form-msg { font-size: 14px; color: var(--ink-2); min-height: 1.4em; }
+.form-msg.warn, #pantryMsg.warn { color: var(--warn); }
+form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
+
+/* Màn Tủ đồ */
+.pantry-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pantry-head .btn { flex: 0 0 auto; gap: 6px; }
+.pantry-head h2:focus { outline: none; }
+.pantry-head h2:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pantry-legend { margin-top: 8px; font-size: 14px; color: var(--ink-2); }
+.tag { padding: 0 6px; border-radius: 4px; font-weight: 700; }
+.tag.soon { background: var(--soon-bg); color: var(--soon-ink); }
+.tag.expired { background: var(--expired-bg); color: var(--expired-ink); }
+.pantry-empty { margin-top: 16px; }
+.pantry-list { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 10px; }
+.pantry-item {
+  padding: 12px 14px; border: 1px solid var(--rule); border-left: 6px solid var(--rule); border-radius: 6px;
+  display: grid; gap: 2px;
+}
+.pantry-item.soon { background: var(--soon-bg); border-color: var(--soon-line); }
+.pantry-item.expired { background: var(--expired-bg); border-color: var(--expired-line); }
+.pi-name { font-weight: 700; font-size: 17px; overflow-wrap: anywhere; }
+.pi-meta, .pi-date { font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pi-status { font-weight: 700; }
+.pantry-item.soon .pi-status { color: var(--soon-ink); }
+.pantry-item.expired .pi-status { color: var(--expired-ink); }
+.pantry-item .actions { margin-top: 8px; }
+.pantry-item .btn { min-height: 40px; background: transparent; }
+.pantry-item .btn.primary { background: var(--ink); }

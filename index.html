@@ -12,10 +12,15 @@
 <body>
 <main>
   <header>
-    <h1 id="appName">Quét mã vạch đồ ăn</h1>
+    <div class="topbar">
+      <h1 id="appName">Quét mã vạch đồ ăn</h1>
+      <button id="btnPantry" class="btn pantry-btn" type="button">Tủ đồ (<span id="pantryCount">0</span>)</button>
+    </div>
     <p>Quét mã trên gói mì, chai nước, hộp bánh… để xem thành phần và dinh dưỡng.</p>
   </header>
 
+  <!-- Màn Tra cứu và màn Tủ đồ: chỉ hiện 1 màn, màn kia có thuộc tính hidden -->
+  <div id="screenLookup">
   <section aria-label="Quét mã">
     <div id="reader" class="viewfinder"></div>
     <div class="actions">
@@ -38,6 +43,17 @@
   <section id="history" aria-label="Đã quét gần đây">
     <h2>Đã quét gần đây</h2>
     <ul id="historyList"></ul>
+  </section>
+  </div>
+
+  <section id="screenPantry" aria-labelledby="pantryTitle" hidden>
+    <div class="pantry-head">
+      <h2 id="pantryTitle" tabindex="-1">Tủ đồ</h2>
+      <button id="btnBack" class="btn" type="button"><span aria-hidden="true">←</span> Tra cứu</button>
+    </div>
+    <p class="pantry-legend">Sắp theo hạn sử dụng. <span class="tag soon">Vàng</span> còn 7 ngày trở xuống, <span class="tag expired">Đỏ</span> đã hết hạn.</p>
+    <p id="pantryMsg" class="msg" role="status" aria-live="polite"></p>
+    <div id="pantryList"></div>
   </section>
 
   <footer>

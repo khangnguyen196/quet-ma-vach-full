@@ -1,13 +1,16 @@
 // Nối các phần lại: sự kiện nút bấm → scanner / API → render.
 import { createScanner } from "./scanner.js";
 import { getProduct, normalize } from "./off.js";
-import { renderProduct, renderNotFound, renderError, errorText, esc } from "./render.js";
-import { getHistory, addHistory } from "./storage.js";
+import { renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc } from "./render.js";
+import { getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry } from "./storage.js";
 
 const $ = (s) => document.querySelector(s);
 const reader = $("#reader"), btnCam = $("#btnCam"), fileInput = $("#file");
 const form = $("#manual"), codeInput = $("#codeInput"), msg = $("#msg");
 const result = $("#result"), historyList = $("#historyList");
+const screenLookup = $("#screenLookup"), screenPantry = $("#screenPantry");
+const btnPantry = $("#btnPantry"), btnBack = $("#btnBack"), pantryCount = $("#pantryCount");
+const pantryTitle = $("#pantryTitle"), pantryList = $("#pantryList"), pantryMsg = $("#pantryMsg");
 
 if (import.meta.env.VITE_APP_NAME) {
   $("#appName").textContent = import.meta.env.VITE_APP_NAME;
@@ -135,9 +138,10 @@ async function lookup(raw) {
   // (b) Đổi dữ liệu + hiển thị: lỗi ở đây là do dữ liệu, không phải do mạng.
   let product;
   try {
-    if (!data) { result.innerHTML = renderNotFound(code); return; }
+    // Không tìm thấy vẫn cho thêm vào tủ đồ, tên để trống bắt buộc nhập (lỗi mạng / máy chủ thì không có form)
+    if (!data) { result.innerHTML = renderNotFound(code) + renderAddForm({ code }); return; }
     product = normalize(data, code);
-    result.innerHTML = renderProduct(product);
+    result.innerHTML = renderProduct(product) + renderAddForm(product);
   } catch (e) {
     console.error(e);
     if (id !== current) return;
@@ -164,3 +168,123 @@ function renderHistory(list = getHistory()) {
 
 placeholder();
 renderHistory();
+
+// ---- Tủ đồ ----
+let editingId = null; // id món đang mở form sửa (null = không sửa món nào)
+
+/** Hiện câu báo ở 1 ô (form-msg trong form, hoặc #pantryMsg); warn = tô màu cảnh báo. */
+function say(el, text = "", warn = false) {
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("warn", warn);
+}
+
+/** Câu báo cho lỗi khi thêm / sửa / xóa: lỗi do nhập sai hoặc không lưu được thì có câu riêng. */
+function pantryErrorText(e) {
+  if (e?.name === "PantryError") return e.message;
+  console.error(e);
+  return `Có lỗi bất thường, thử lại (${errorText(e)}).`;
+}
+
+function updatePantryCount(list = getPantry()) {
+  pantryCount.textContent = String(list.length);
+}
+
+function showPantryList(list = getPantry()) {
+  pantryList.innerHTML = renderPantry(list, { editingId });
+  updatePantryCount(list);
+}
+
+/** Tìm ô của 1 món theo id (CSS.escape: id lạ có ký tự đặc biệt vẫn không làm hỏng bộ chọn). */
+const itemEl = (id) => pantryList.querySelector(`li[data-id="${CSS.escape(id)}"]`);
+
+btnPantry.addEventListener("click", async () => {
+  if (busy) { setMsg("Đợi mở camera hoặc đọc ảnh xong rồi hãy mở Tủ đồ.", true); return; }
+  if (scanner.running) { await stopCam(); setMsg(); } // không để camera chạy ngầm khi đang xem tủ
+  editingId = null;
+  say(pantryMsg);
+  showPantryList();
+  screenLookup.hidden = true;
+  screenPantry.hidden = false;
+  pantryTitle.focus();
+});
+
+btnBack.addEventListener("click", () => {
+  editingId = null;
+  screenPantry.hidden = true;
+  screenLookup.hidden = false;
+  btnPantry.focus();
+});
+
+// Ủy quyền sự kiện (event delegation): 1 listener trên #result bắt submit của form "Thêm vào tủ đồ",
+// vì form được tạo lại mỗi lần tra (gắn listener vào từng form thì phải gắn lại mỗi lần).
+result.addEventListener("submit", (ev) => {
+  const form = ev.target.closest("form.add-pantry");
+  if (!form) return;
+  ev.preventDefault();
+  const out = form.querySelector(".form-msg");
+  const fd = new FormData(form);
+  try {
+    const list = addToPantry({
+      code: form.dataset.code,
+      brand: form.dataset.brand,
+      name: fd.get("name"),
+      expiresOn: fd.get("expiresOn"),
+      qty: fd.get("qty")
+    });
+    updatePantryCount(list);
+    say(out, "Đã thêm vào tủ đồ.");
+  } catch (e) {
+    say(out, pantryErrorText(e), true);
+  }
+});
+
+// Ủy quyền sự kiện trên danh sách tủ đồ: nút Sửa / Xóa / Hủy (click) và form sửa (submit).
+pantryList.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-action]");
+  const li = btn?.closest("li[data-id]");
+  if (!li) return;
+  const id = li.dataset.id;
+  const name = li.querySelector(".pi-name")?.textContent || "món này";
+
+  if (btn.dataset.action === "edit") {
+    editingId = id;
+    say(pantryMsg);
+    showPantryList();
+    itemEl(id)?.querySelector("input")?.focus();
+  } else if (btn.dataset.action === "cancel") {
+    editingId = null;
+    showPantryList();
+    itemEl(id)?.querySelector('[data-action="edit"]')?.focus();
+  } else if (btn.dataset.action === "delete") {
+    if (!confirm(`Xóa "${name}" khỏi tủ đồ?`)) return;
+    try {
+      const list = removeFromPantry(id);
+      if (editingId === id) editingId = null;
+      showPantryList(list);
+      say(pantryMsg, `Đã xóa "${name}".`);
+      pantryTitle.focus();
+    } catch (e) {
+      say(pantryMsg, pantryErrorText(e), true);
+    }
+  }
+});
+
+pantryList.addEventListener("submit", (ev) => {
+  const form = ev.target.closest("form.pantry-edit");
+  if (!form) return;
+  ev.preventDefault();
+  const id = form.dataset.id;
+  const fd = new FormData(form);
+  try {
+    const list = updatePantryItem(id, { expiresOn: fd.get("expiresOn"), qty: fd.get("qty") });
+    editingId = null;
+    showPantryList(list);
+    say(pantryMsg, "Đã lưu thay đổi.");
+    itemEl(id)?.querySelector('[data-action="edit"]')?.focus();
+  } catch (e) {
+    say(form.querySelector(".form-msg"), pantryErrorText(e), true);
+  }
+});
+
+updatePantryCount();
