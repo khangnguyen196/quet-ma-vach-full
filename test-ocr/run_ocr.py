@@ -80,10 +80,18 @@ def load_usage():
         return None
 
 def save_usage(usage):
-    """Ghi bộ đếm ra file tạm rồi thay file cũ, để không bao giờ còn file ghi dở."""
+    """Ghi bộ đếm ra file tạm rồi thay file cũ, để không bao giờ còn file ghi dở.
+    Ghi hoặc thay lỗi (kể cả Ctrl+C): xóa file tạm (xóa lỗi thì bỏ qua), rồi ném lại lỗi gốc; file cũ giữ nguyên."""
     tmp = USAGE.with_name(USAGE.name + ".tmp")
-    tmp.write_text(json.dumps(usage, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, USAGE)
+    try:
+        tmp.write_text(json.dumps(usage, ensure_ascii=False, indent=1), encoding="utf-8")
+        os.replace(tmp, USAGE)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 def acquire_lock():
     """Tạo file khóa LOCK (chỉ tạo được nếu chưa có). Tạo được: trả True. Đã có / không tạo được: in cảnh báo, trả False."""
