@@ -142,7 +142,7 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
 - [ ] Chụp 30 sản phẩm × 3 ảnh (front, back, date) vào `test-ocr/photos/<mã vạch>/`; điền `test-ocr/truth.csv` (theo dòng mẫu); bổ sung `test-ocr/dict/brands.txt`. Có thể làm 5 món trước để thử quy trình.
 - [ ] (Tùy chọn) Lấy key Azure gói F0 (hết lượt chỉ báo lỗi, không trừ tiền) hoặc Google Vision khi tài khoản chưa nâng cấp trả phí, tự điền `test-ocr/.env`. Không key vẫn chạy so sánh được với công cụ miễn phí.
 - [ ] (Tùy chọn) Quyết có cài easyocr không (tải ~257 MB, sau cài ~600–900 MB).
-- [ ] Kiểm Claude Code đăng nhập bằng gói Claude (Pro/Max) hay API key (`/status`); API key nghĩa là đang tốn tiền.
+- [x] Kiểm Claude Code đăng nhập bằng gói Claude (Pro/Max) hay API key (`/status`); API key nghĩa là đang tốn tiền. (05/11/2026: gói Team, không phải API key)
 
 ### Claude Code làm (mỗi việc một đợt `/dot`)
 - [ ] **A. Đợt `gd2`** (làm ngay được): giai đoạn 2 ở mục 2 (xuất xứ/bảo quản, tủ đồ ăn, hạn sử dụng). Sửa luôn vấn đề ở mục 7: thương hiệu, khối lượng, phân loại, ảnh phải hiện "chưa có dữ liệu" khi trống. Push `main`, chờ deploy, test trên link Pages bằng Chromium + WebKit, báo cáo kèm danh sách chủ dự án thử trên iPhone.
