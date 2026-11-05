@@ -282,6 +282,51 @@ class LastRowTest(unittest.TestCase):
         self.assertEqual(score.list_tools(out), ["google", "tesseract"])
 
 
+class ScoreMainTest(unittest.TestCase):
+    """Danh sách công cụ của score.py lấy cả từ times.csv, và score.main() chạy trên thư mục tạm.
+    Công cụ trả phí bị bỏ qua hết theo luật chi phí thì không có thư mục outputs/<công cụ>/, chỉ có dòng trong times.csv."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = pathlib.Path(self.tmp.name)
+        self.out = root / "outputs"
+        (self.out / "tesseract").mkdir(parents=True)
+        (self.out / "tesseract" / "1__front.txt").write_text("Mì gói 75g", encoding="utf-8")
+        with open(self.out / "times.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["tool", "code", "image", "seconds", "status"])
+            w.writerow(["tesseract", "1", "front", 1.5, "ok"])
+            w.writerow(["google", "1", "front", 0, SKIP])
+            w.writerow(["google", "1", "back", 0, SKIP])
+        with open(root / "truth.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["code"] + score.FIELDS)
+            w.writerow(["1", "Mì gói", "", "75g"] + [""] * (len(score.FIELDS) - 3))
+        # score.py đọc truth.csv và outputs/ theo đường dẫn tương đối: chạy trong thư mục tạm
+        cwd = os.getcwd()
+        os.chdir(root)
+        self.addCleanup(os.chdir, cwd)
+
+    def run_score(self, stdout):
+        """Chạy score.main() với stdout cho trước (stderr cũng thay, để main() không đổi stderr thật của test)."""
+        with mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", io.StringIO()):
+            score.main()   # không được ném lỗi / SystemExit
+        return (self.out / "summary.md").read_text(encoding="utf-8")
+
+    def test_12a_all_tools_includes_tool_only_in_times_csv(self):
+        self.assertFalse((self.out / "google").exists())
+        self.assertEqual(score.all_tools(self.out), ["google", "tesseract"])
+
+    def test_12b_summary_has_tool_only_in_times_csv(self):
+        summary = self.run_score(io.StringIO())
+        rows = [[c.strip() for c in line.strip("|").split("|")] for line in summary.splitlines() if line.startswith("|")]
+        # Bảng xếp hạng: Hạng | Công cụ | Điểm | % đầy đủ | Giây/ảnh | Ảnh lỗi | Ảnh bỏ qua
+        google = [cells for cells in rows if len(cells) == 7 and cells[1] == "google"]
+        self.assertEqual(len(google), 1, summary)
+        self.assertEqual(google[0][1:], ["google", "0.0", "0%", "?", "0", "2"])
+
+
 class FoundTest(unittest.TestCase):
     """Hàm found() của score.py: so khớp giá trị số (ngày, số thập phân) trong text OCR."""
 
