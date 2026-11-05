@@ -4,7 +4,7 @@ Mỗi trường 1 điểm nếu giá trị đúng có trong text OCR (số: kh�
 Trường thanh_phan_dau: tỷ lệ số thành phần tìm thấy (0–1).
 Ra: outputs/results.csv (chi tiết) và outputs/summary.md (tổng hợp).
 """
-import csv, re, unicodedata, pathlib, statistics
+import csv, re, sys, unicodedata, pathlib, statistics
 from collections import defaultdict
 from rapidfuzz import fuzz
 
@@ -101,6 +101,12 @@ def score_field(field: str, value: str, text: str) -> float:
     return found(value, text)
 
 def main():
+    # In tiếng Việt được cả khi đưa kết quả ra file / pipe (Windows mặc định cp1252 -> UnicodeEncodeError).
+    # Chỉ đổi khi luồng có reconfigure (test thay stdout bằng StringIO không có hàm này).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     truth = {}
     with open("truth.csv", encoding="utf-8") as f:
         for row in csv.DictReader(f):
