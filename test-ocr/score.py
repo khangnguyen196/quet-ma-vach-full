@@ -12,6 +12,23 @@ OUT = pathlib.Path("outputs")
 FIELDS = ["ten", "thuong_hieu", "khoi_luong", "thanh_phan_dau", "nang_luong_kcal", "dam_g",
           "beo_g", "carb_g", "nha_san_xuat", "bao_quan", "han_su_dung"]
 FUZZ_MIN = 85
+# run_ocr.py ghi chuỗi này vào cột status khi không gọi dịch vụ vì chạm trần (phải giống hệt run_ocr.SKIP_STATUS)
+SKIP_STATUS = "bỏ qua theo luật chi phí"
+
+def read_times(path):
+    """Đọc outputs/times.csv -> (times, errors): tool -> [giây], tool -> số ảnh lỗi.
+    Dòng SKIP_STATUS (ảnh chưa chạy vì luật chi phí) không tính là lỗi, không vào thời gian trung bình.
+    Chưa có file -> 2 bảng rỗng."""
+    times, errors = defaultdict(list), defaultdict(int)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if r["status"] == SKIP_STATUS:
+                    continue
+                times[r["tool"]].append(float(r["seconds"]))
+                if r["status"] != "ok":
+                    errors[r["tool"]] += 1
+    return times, errors
 
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFC", s or "").lower()
@@ -54,15 +71,7 @@ def main():
     if not tools:
         raise SystemExit("Chưa có kết quả OCR. Chạy python run_ocr.py trước.")
 
-    # thời gian và lỗi
-    times, errors = defaultdict(list), defaultdict(int)
-    tp = OUT / "times.csv"
-    if tp.exists():
-        with open(tp, encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                times[r["tool"]].append(float(r["seconds"]))
-                if r["status"] != "ok":
-                    errors[r["tool"]] += 1
+    times, errors = read_times(OUT / "times.csv")
 
     rows = []
     total = defaultdict(float)                   # tool -> tổng điểm

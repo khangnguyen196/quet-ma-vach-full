@@ -39,6 +39,20 @@ AZURE_MIN_GAP = 60 / AZURE_PER_MINUTE + 0.1
 # Không gọi google / azure trong 12 giờ đầu và 12 giờ cuối mỗi tháng (giờ UTC), xem near_month_edge()
 EDGE_HOURS = 12
 PAID_MAX_FAILS = 3               # google / azure lỗi 3 lần liên tiếp thì dừng gọi dịch vụ đó (lượt lỗi vẫn bị đếm)
+# Trần lượt gọi mỗi LẦN CHẠY script (thêm vào trần tháng ở trên). Nguồn: mục "Luật chi phí" trong .claude/du-an.md
+# (chủ dự án đặt 05/11/2026): Google Cloud Vision "Mỗi lần chạy thử tối đa 60 lượt". Azure không có trần lần chạy.
+RUN_LIMIT = {"google": 60}
+run_calls = {}                   # số lượt đã gọi trong lần chạy này, theo dịch vụ (chỉ trong bộ nhớ, main() đặt lại)
+# Ghi vào cột status của times.csv cho ảnh không gọi vì chạm trần (score.py đọc chuỗi này, phải giống hệt)
+SKIP_STATUS = "bỏ qua theo luật chi phí"
+
+# Lý do take_paid_call() không cho gọi
+REASON_MONTH_EDGE = "ranh giới tháng"
+REASON_BAD_USAGE = "bộ đếm hỏng"
+REASON_RUN_LIMIT = "chạm trần lần chạy"
+REASON_MONTH_CAP = "chạm trần tháng"
+# Chỉ 2 lý do này mới ghi dòng SKIP_STATUS cho các ảnh còn lại; lý do khác giữ cách cũ (dừng, không ghi gì)
+COST_RULE_REASONS = (REASON_RUN_LIMIT, REASON_MONTH_CAP)
 
 def cap(service):
     """Trần lượt gọi mỗi tháng = 80% mức miễn phí (làm tròn xuống)."""
@@ -101,27 +115,47 @@ def near_month_edge(now):
     return (now.day == 1 and now.hour < EDGE_HOURS) or (now + timedelta(hours=EDGE_HOURS)).month != now.month
 
 def take_paid_call(tool):
-    """Gọi trước MỖI lần gọi dịch vụ trả phí. Ở ranh giới tháng: không gọi, trả False.
-    Đọc lại bộ đếm từ file (không tin số cũ trong bộ nhớ).
-    Còn dưới trần: tăng 1, ghi file ngay, trả True. Hết lượt / file hỏng: trả False."""
+    """Gọi trước MỖI lần gọi dịch vụ trả phí. Được gọi: trả None. Không được gọi: trả lý do (một hằng REASON_...).
+    Thứ tự kiểm: ranh giới tháng -> trần lần chạy (RUN_LIMIT) -> đọc lại bộ đếm tháng từ file (không tin số cũ
+    trong bộ nhớ; file hỏng -> không gọi) -> trần tháng. Còn dưới mọi trần: tăng bộ đếm tháng, ghi file ngay,
+    rồi mới tăng bộ đếm lần chạy."""
     now = datetime.now(timezone.utc)
     if near_month_edge(now):
         print(f"[{tool}] đang ở ranh giới tháng (giờ UTC {now:%Y-%m-%d %H:%M}, trong {EDGE_HOURS} giờ đầu hoặc "
               f"{EDGE_HOURS} giờ cuối tháng): không chắc lượt gọi bị tính vào tháng nào, không gọi dịch vụ này, bỏ qua. "
               f"Chạy lại từ 12:00 UTC ngày 1 (19:00 giờ Việt Nam).")
-        return False
+        return REASON_MONTH_EDGE
+    run_used = run_calls.get(tool, 0)
+    if tool in RUN_LIMIT and run_used >= RUN_LIMIT[tool]:
+        print(f"[{tool}] đã gọi {run_used} lượt trong lần chạy này, tới trần {RUN_LIMIT[tool]} lượt / lần chạy "
+              f"(luật chi phí), ngừng gọi dịch vụ này. Chạy lại sau sẽ làm tiếp ảnh còn lại.")
+        return REASON_RUN_LIMIT
     month = month_key(now)
     usage = load_usage()
     if usage is None:
         print(f"[{tool}] bộ đếm {USAGE} không đọc được, coi như đã chạm trần, ngừng gọi dịch vụ này.")
-        return False
+        return REASON_BAD_USAGE
     used, limit = usage.get(tool, {}).get(month, 0), cap(tool)
     if used >= limit:
         print(f"[{tool}] đã tới trần 80% mức miễn phí tháng {month} ({used}/{limit}), ngừng gọi dịch vụ này.")
-        return False
+        return REASON_MONTH_CAP
     usage.setdefault(tool, {})[month] = used + 1
     save_usage(usage)   # đếm cả lần gọi bị lỗi (không chắc lỗi có bị tính tiền không)
-    return True
+    run_calls[tool] = run_used + 1   # chỉ tăng sau khi đã ghi được bộ đếm tháng
+    return None
+
+def write_cost_skips(tw, tool, photos, out_dir):
+    """Chạm trần (lần chạy / tháng): mỗi ảnh còn lại chưa có file kết quả -> 1 dòng SKIP_STATUS trong times.csv,
+    không tạo file .txt (chạy lại sau sẽ làm tiếp ảnh đó). Trả số ảnh bị bỏ qua."""
+    n = 0
+    for src in photos:
+        code, name = src.parent.name, src.stem
+        if (out_dir / f"{code}__{name}.txt").exists():
+            continue
+        tw.writerow([tool, code, name, 0, SKIP_STATUS])
+        print(f"  {code}/{name}: {SKIP_STATUS}")
+        n += 1
+    return n
 
 _last_azure = None
 def wait_for_azure():
@@ -202,6 +236,7 @@ def main():
     ap.add_argument("--tools", default=",".join(DEFAULT_TOOLS), help="danh sách công cụ, cách nhau bằng dấu phẩy")
     args = ap.parse_args()
     wanted = [t.strip() for t in args.tools.split(",") if t.strip()]
+    run_calls.clear()   # mỗi lần chạy main() đếm lại từ 0
 
     photos = sorted(p for p in PHOTOS.glob("*/*") if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
     if not photos:
@@ -233,16 +268,21 @@ def main():
                 out_dir = OUT / tool
                 print(f"\n=== {tool} ===")
                 fails = 0   # số lần lỗi liên tiếp của công cụ này
-                for src in photos:
+                for i, src in enumerate(photos):
                     code, name = src.parent.name, src.stem
                     out_file = out_dir / f"{code}__{name}.txt"
                     if out_file.exists():
                         continue  # đã chạy rồi
                     img = prepare(src)
                     if tool in FREE_PER_MONTH:
-                        # dịch vụ trả phí: hết lượt / ranh giới tháng / bộ đếm hỏng thì dừng hẳn công cụ này,
-                        # ảnh còn lại không ghi gì (chạy lại sau sẽ làm tiếp)
-                        if not take_paid_call(tool):
+                        # dịch vụ trả phí: không được gọi thì dừng hẳn công cụ này (chạy lại sau sẽ làm tiếp).
+                        # Chạm trần lần chạy / trần tháng: ghi dòng "bỏ qua theo luật chi phí" cho ảnh còn lại.
+                        # Ranh giới tháng / bộ đếm hỏng: ảnh còn lại không ghi gì (như cũ).
+                        reason = take_paid_call(tool)
+                        if reason is not None:
+                            if reason in COST_RULE_REASONS:
+                                n = write_cost_skips(tw, tool, photos[i:], out_dir); tf.flush()
+                                print(f"[{tool}] {n} ảnh bỏ qua theo luật chi phí ({reason}).")
                             break
                         if tool == "azure":
                             wait_for_azure()
@@ -271,11 +311,13 @@ def main():
             release_lock()   # chỉ xóa khóa do chính lần chạy này tạo (kể cả khi lỗi / bấm Ctrl+C)
 
     usage, month = load_usage(), month_key()
-    print(f"\nLượt gọi dịch vụ trả phí (bộ đếm {USAGE}, trần = 80% mức miễn phí):")
-    print("  dịch vụ   tháng     đã dùng / trần")
+    print(f"\nLượt gọi dịch vụ trả phí (bộ đếm {USAGE}, trần tháng = 80% mức miễn phí):")
+    print("  dịch vụ   tháng     đã dùng / trần tháng   lần chạy này / trần lần chạy")
     for svc in FREE_PER_MONTH:
         used = "không đọc được" if usage is None else usage.get(svc, {}).get(month, 0)
-        print(f"  {svc:<9} {month}   {used} / {cap(svc)}")
+        month_col = f"{used} / {cap(svc)}"
+        run_col = f"{run_calls.get(svc, 0)} / {RUN_LIMIT.get(svc, 'không có trần')}"
+        print(f"  {svc:<9} {month}   {month_col:<22} {run_col}")
 
     print("\nXong. Chạy tiếp:  python score.py")
 
