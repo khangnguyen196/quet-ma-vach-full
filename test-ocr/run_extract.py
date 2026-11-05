@@ -44,14 +44,15 @@ def grab(pattern, t, group=1):
     return m.group(group).strip() if m else ""
 
 def find_date(t):
-    """Ưu tiên ngày đứng sau nhãn HSD/EXP; rồi 6 số liền (ddmmyy) sau nhãn HSD/EXP;
-    không có thì lấy ngày cuối cùng trong text (NSX thường in trước HSD)."""
+    """Ưu tiên ngày đứng sau nhãn HSD/EXP; rồi 6 số liền sau nhãn HSD/EXP, chỉ nhận khi là ngày hợp lệ ddmmyy
+    (ngày 01-31, tháng 01-12; không hợp lệ thì coi như chưa có); không có thì lấy ngày cuối cùng trong text
+    (NSX thường in trước HSD)."""
     d = grab(r"(?:hsd|han su dung|han dung|exp(?:iry)?|best before|use by)\s*[:.\-]?\s*[^\d\n]{0,12}" + DATE, t)
     if d:
         return d
     # Lỗi OCR / cách in lặp lại: hạn in liền 6 số, có khi xuống dòng (vd "hsd:071026", "hsd / exp:\n200223")
     d = grab(r"(?:\bhsd|\bexp)[^\d]{0,12}(\d{6})(?!\d)", t)
-    if d:
+    if d and 1 <= int(d[:2]) <= 31 and 1 <= int(d[2:4]) <= 12:
         return d
     all_dates = re.findall(DATE, t)
     return all_dates[-1] if all_dates else ""
@@ -64,7 +65,8 @@ def first_number_after(labels, t, unit=r"g\b"):
             return v
     return ""
 
-# ---- Luật chịu lỗi OCR lặp lại (đợt ocr-b; mỗi luật có ở text OCR thật của >= 2 sản phẩm) ----
+# ---- Luật chịu lỗi OCR lặp lại (đợt ocr-b; mỗi luật có ở text OCR thật của >= 2 sản phẩm;
+#      đã bỏ nhãn "dam (g)" và "g đọc thành 9" sau khối lượng tịnh vì chỉ thấy ở 1 sản phẩm) ----
 # Nhãn "năng lượng" đọc sai: "nang iuong", "nang ivong", "nang luqng", "nang iugng", "nang luang".
 LB_NANG_LUONG = r"nang ?[li1][uv][a-z]?ng"
 # Nhãn "calories" đọc sai: "galories", "calorios", "galones"; bỏ "calories from fat" (năng lượng từ chất béo).
@@ -86,7 +88,8 @@ def loose_number_after(labels, t, not_unit):
     return ""
 
 def unglue_g(v):
-    """'g' dính sau số thập phân bị đọc thành '9' (vd '7,09' là 7,0 g): bỏ số 9 cuối. Chỉ dùng khi không có đơn vị g."""
+    """'g' dính sau số thập phân bị đọc thành '9' (vd '7,09' là 7,0 g): bỏ số 9 cuối. Chỉ dùng khi không có đơn vị g.
+    Rủi ro: số thật có 2 chữ số thập phân tận cùng 9 mà mất chữ g thì bị cắt (vd '18,49' thành '18,4')."""
     return v[:-1] if re.fullmatch(r"\d+[.,]\d+9", v) else v
 
 def gram_after(strict_labels, loose_labels, t):
@@ -97,11 +100,9 @@ def gram_after(strict_labels, loose_labels, t):
 LB_KHOI_LUONG = r"kh[a-z']{1,2} ?[li1]u[a-z]{0,2}ng ?t[a-z]nh|the tich thuc|net ?w(?:eigh)?t"
 
 def net_weight(t):
-    """Khối lượng sau nhãn 'khối lượng tịnh' (chịu nhãn đọc sai, 'g' đọc thành '9'). Trả về '' nếu không có."""
-    m = re.search(r"(?:" + LB_KHOI_LUONG + r")[^\d\n]{0,15}" + NUM + r"(\s?)(g|gr|gam|ml|kg|l|9)\b", t)
-    if not m:
-        return ""
-    return m.group(1) + m.group(2) + ("g" if m.group(3) == "9" else m.group(3))
+    """Khối lượng sau nhãn 'khối lượng tịnh' (chịu nhãn đọc sai). Trả về '' nếu không có."""
+    m = re.search(r"(?:" + LB_KHOI_LUONG + r")[^\d\n]{0,15}" + NUM + r"(\s?)(g|gr|gam|ml|kg|l)\b", t)
+    return m.group(1) + m.group(2) + m.group(3) if m else ""
 
 def split_ingredients(s, k=3):
     parts = re.split(r"[,;]", re.sub(r"\([^)]*\)", "", s))
@@ -128,8 +129,9 @@ def extract_regex(text):
     out["nang_luong_kcal"] = first_number_after(["nang luong", "energy", "calo"], te, r"k?cal") \
         or grab(NUM + r"\s*kcal", te) or loose_number_after(ENERGY_LABELS, te, NOT_KCAL)
     # Luật dự phòng chỉ dùng nhãn rõ ràng (không dùng "dam", "beo", "tinh bot"... vì hay gặp trong phần thành phần).
-    out["dam_g"] = gram_after(["chat dam", "dam", "protein"], ["chat dam", "protein", r"\bdam ?\(g\)"], t)
-    out["beo_g"] = gram_after(["chat beo", "beo", "fat", "lipid"], ["chat beo", "fat", "lipid"], t)
+    out["dam_g"] = gram_after(["chat dam", "dam", "protein"], ["chat dam", "protein"], t)
+    # Nhãn béo dự phòng bỏ "calories from fat" (năng lượng từ chất béo, không phải số gam béo).
+    out["beo_g"] = gram_after(["chat beo", "beo", "fat", "lipid"], ["chat beo", r"(?<!from )fat", "lipid"], t)
     out["carb_g"] = gram_after([r"carbohydrat\w*", "carb", "hydrat cacbon", "duong bot", "tinh bot", "glucid"],
                                [r"carbohydrat\w*", "hydrat cacbon", "glucid"], t)
     out["nha_san_xuat"] = grab(r"(?:san xuat boi|nha san xuat|san xuat tai|manufactured by)\s*[:\-]?\s*([^\n]{5,120})", t) \
