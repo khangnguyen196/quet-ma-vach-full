@@ -45,7 +45,9 @@ def found(value: str, text: str) -> float:
     if not v:
         return 0.0
     if is_number(v):
-        v = v.rstrip("0").rstrip(".") if "." in v else v
+        # Chỉ cắt số 0 cuối ở số thập phân (7.0 -> 7); ngày như 19.09.20 giữ nguyên. Không để thành chuỗi rỗng.
+        if re.fullmatch(r"\d+\.\d+", v):
+            v = v.rstrip("0").rstrip(".") or "0"
         pattern = r"(?<![\d.])" + re.escape(v) + r"(?:[.,]0+)?(?![\d])"
         return 1.0 if re.search(pattern, t) else 0.0
     return 1.0 if fuzz.partial_ratio(v, t) >= FUZZ_MIN else 0.0
