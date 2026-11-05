@@ -44,8 +44,13 @@ def grab(pattern, t, group=1):
     return m.group(group).strip() if m else ""
 
 def find_date(t):
-    """Ưu tiên ngày đứng sau nhãn HSD/EXP; không có thì lấy ngày cuối cùng trong text (NSX thường in trước HSD)."""
+    """Ưu tiên ngày đứng sau nhãn HSD/EXP; rồi 6 số liền (ddmmyy) sau nhãn HSD/EXP;
+    không có thì lấy ngày cuối cùng trong text (NSX thường in trước HSD)."""
     d = grab(r"(?:hsd|han su dung|han dung|exp(?:iry)?|best before|use by)\s*[:.\-]?\s*[^\d\n]{0,12}" + DATE, t)
+    if d:
+        return d
+    # Lỗi OCR / cách in lặp lại: hạn in liền 6 số, có khi xuống dòng (vd "hsd:071026", "hsd / exp:\n200223")
+    d = grab(r"(?:\bhsd|\bexp)[^\d]{0,12}(\d{6})(?!\d)", t)
     if d:
         return d
     all_dates = re.findall(DATE, t)
@@ -59,6 +64,45 @@ def first_number_after(labels, t, unit=r"g\b"):
             return v
     return ""
 
+# ---- Luật chịu lỗi OCR lặp lại (đợt ocr-b; mỗi luật có ở text OCR thật của >= 2 sản phẩm) ----
+# Nhãn "năng lượng" đọc sai: "nang iuong", "nang ivong", "nang luqng", "nang iugng", "nang luang".
+LB_NANG_LUONG = r"nang ?[li1][uv][a-z]?ng"
+# Nhãn "calories" đọc sai: "galories", "calorios", "galones"; bỏ "calories from fat" (năng lượng từ chất béo).
+LB_CALORIES = r"[cg]alo[a-z]*(?![a-z])(?!\s*fr)"
+ENERGY_LABELS = [LB_NANG_LUONG, "energy", LB_CALORIES]
+# "% giá trị ... tính trên nhu cầu năng lượng 2000 kcal" là mức tham chiếu, không phải năng lượng của sản phẩm.
+REF_INTAKE = re.compile(r"nhu ?cau ?" + LB_NANG_LUONG + r"[^\d\n]{0,5}\d[\d .,]*k?cal")
+# Đơn vị theo sau số không phải gam / kcal thì không lấy (mg, %, ml, kJ...).
+NOT_GRAM = r"(?![.,]?\d)(?!\s*(?:mg|mcg|ug|kcal|kj|ml|%))"
+NOT_KCAL = r"(?![.,]?\d)(?!\s*(?:mg|mcg|ug|kj|ml|%|g\b))"
+
+def loose_number_after(labels, t, not_unit):
+    """Dự phòng khi đơn vị bị OCR đọc sai / mất / in trước số: số đầu tiên sau nhãn (cùng dòng, không qua dấu %),
+    miễn số đó không kèm đơn vị khác (not_unit)."""
+    for lb in labels:
+        v = grab(r"(?:" + lb + r")[^\d\n%]{0,30}" + NUM + not_unit, t)
+        if v:
+            return v
+    return ""
+
+def unglue_g(v):
+    """'g' dính sau số thập phân bị đọc thành '9' (vd '7,09' là 7,0 g): bỏ số 9 cuối. Chỉ dùng khi không có đơn vị g."""
+    return v[:-1] if re.fullmatch(r"\d+[.,]\d+9", v) else v
+
+def gram_after(strict_labels, loose_labels, t):
+    """Số gam sau nhãn: luật cũ (số + g) trước; không có thì luật dự phòng chịu lỗi OCR."""
+    return first_number_after(strict_labels, t) or unglue_g(loose_number_after(loose_labels, t, NOT_GRAM))
+
+# Nhãn "khối lượng tịnh" đọc sai: "khol luong tinh", "khoi iuong tinh", "kho' luong tinh", "khei luong tinh", "tjnh".
+LB_KHOI_LUONG = r"kh[a-z']{1,2} ?[li1]u[a-z]{0,2}ng ?t[a-z]nh|the tich thuc|net ?w(?:eigh)?t"
+
+def net_weight(t):
+    """Khối lượng sau nhãn 'khối lượng tịnh' (chịu nhãn đọc sai, 'g' đọc thành '9'). Trả về '' nếu không có."""
+    m = re.search(r"(?:" + LB_KHOI_LUONG + r")[^\d\n]{0,15}" + NUM + r"(\s?)(g|gr|gam|ml|kg|l|9)\b", t)
+    if not m:
+        return ""
+    return m.group(1) + m.group(2) + ("g" if m.group(3) == "9" else m.group(3))
+
 def split_ingredients(s, k=3):
     parts = re.split(r"[,;]", re.sub(r"\([^)]*\)", "", s))
     parts = [p.strip(" .:") for p in parts if len(p.strip()) >= 2]
@@ -70,17 +114,24 @@ def extract_regex(text):
     lines = [l.strip() for l in t.splitlines() if l.strip()]
     out = {f: "" for f in FIELDS}
     out["ten"] = next((l for l in lines[:10] if len(re.sub(r"[^a-z]", "", l)) >= 4 and not re.search(r"\d{3,}", l)), "")
+    out["khoi_luong"] = net_weight(t)
     for l in lines[:15]:
+        if out["khoi_luong"]:
+            break
         m = re.search(r"\b" + NUM + r"\s?(g|gr|gam|ml|kg|l)\b", l)
         if m:
             out["khoi_luong"] = m.group(0); break
     m = re.search(r"thanh phan[^:\n]{0,20}[:\s]+(.{5,500}?)(?:\n\s*\n|\.\s|$)", t, re.I | re.M)
     tp = m.group(1).strip() if m else ""
     out["thanh_phan_dau"] = split_ingredients(tp)
-    out["nang_luong_kcal"] = first_number_after(["nang luong", "energy", "calo"], t, r"k?cal") or grab(NUM + r"\s*kcal", t)
-    out["dam_g"] = first_number_after(["chat dam", "dam", "protein"], t)
-    out["beo_g"] = first_number_after(["chat beo", "beo", "fat", "lipid"], t)
-    out["carb_g"] = first_number_after([r"carbohydrat\w*", "carb", "hydrat cacbon", "duong bot", "tinh bot", "glucid"], t)
+    te = REF_INTAKE.sub(" ", t)
+    out["nang_luong_kcal"] = first_number_after(["nang luong", "energy", "calo"], te, r"k?cal") \
+        or grab(NUM + r"\s*kcal", te) or loose_number_after(ENERGY_LABELS, te, NOT_KCAL)
+    # Luật dự phòng chỉ dùng nhãn rõ ràng (không dùng "dam", "beo", "tinh bot"... vì hay gặp trong phần thành phần).
+    out["dam_g"] = gram_after(["chat dam", "dam", "protein"], ["chat dam", "protein", r"\bdam ?\(g\)"], t)
+    out["beo_g"] = gram_after(["chat beo", "beo", "fat", "lipid"], ["chat beo", "fat", "lipid"], t)
+    out["carb_g"] = gram_after([r"carbohydrat\w*", "carb", "hydrat cacbon", "duong bot", "tinh bot", "glucid"],
+                               [r"carbohydrat\w*", "hydrat cacbon", "glucid"], t)
     out["nha_san_xuat"] = grab(r"(?:san xuat boi|nha san xuat|san xuat tai|manufactured by)\s*[:\-]?\s*([^\n]{5,120})", t) \
         or next((l for l in lines if re.search(r"\bcong ty\b|\btnhh\b|\bco phan\b", l)), "")
     out["bao_quan"] = grab(r"(?:huong dan bao quan|cach bao quan|bao quan)\s*[:\-]?\s*([^\n]{5,120})", t)
