@@ -109,11 +109,18 @@ class OllamaCallTest(unittest.TestCase):
         self.assertEqual(self.call_llm({"OLLAMA_TIMEOUT": "600"})["timeout"], 600)
 
     def test_e3b_timeout_default_180(self):
-        # Không đặt, rỗng, không phải số, <= 0 -> 180 giây.
+        # Không đặt, rỗng, không phải số (kể cả nan, inf), <= 0 -> 180 giây.
         self.assertEqual(self.call_llm({})["timeout"], 180)
-        for bad in ["", "  ", "abc", "0", "-5"]:
+        for bad in ["", "  ", "abc", "0", "-5", "nan", "inf", "-inf"]:
             with self.subTest(OLLAMA_TIMEOUT=bad):
                 self.assertEqual(self.call_llm({"OLLAMA_TIMEOUT": bad})["timeout"], 180)
+
+    def test_e3c_timeout_over_one_day_uses_180(self):
+        # Quá 1 ngày (86400 giây, vd 1e308) -> 180; đúng 86400 vẫn giữ.
+        self.assertEqual(self.call_llm({"OLLAMA_TIMEOUT": "86400"})["timeout"], 86400)
+        for big in ["86401", "1e308"]:
+            with self.subTest(OLLAMA_TIMEOUT=big):
+                self.assertEqual(self.call_llm({"OLLAMA_TIMEOUT": big})["timeout"], 180)
 
     def test_e4_default_model_qwen25_3b(self):
         self.assertEqual(self.call_llm({})["json"]["model"], "qwen2.5:3b")
