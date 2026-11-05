@@ -211,7 +211,7 @@ Kết quả đợt `ocr-b` (05/11/2026, 31 mã, 239 điểm, sau khi sửa luậ
 | tesseract | 12% | 13% | 12% | 11% | 15% |
 
 - EasyOCR + `llm` (qwen2.5:3b qua Ollama) 37% là cao nhất nhưng mất khoảng 129 giây mỗi sản phẩm trên CPU; EasyOCR + `regex` 30% gần như tức thì (trước sửa luật 16%; Tesseract + regex 7% → 12%).
-- So với trước sửa luật (1.434 ô của regex / dict / underthesea × 2 OCR): rỗng → đúng 81 ô, sai → đúng 6, rỗng → sai 63 (số sai thay cho ô trống, chủ yếu đạm / béo: 52 ô số OCR dính 2 số liền hoặc lấy nhầm số khác sau nhãn, 6 ô "0 g" đọc thành "09", 2 ô "00" của "Saturated Fat", 3 ô HSD "200223" hợp lệ nhưng đọc sai), đúng → sai 0, đúng → rỗng 0.
+- So với trước sửa luật (1.434 ô của regex / dict / underthesea × 2 OCR): rỗng → đúng 81 ô, sai → đúng 6, đúng → sai 0, đúng → rỗng 0, rỗng → sai 63 ô (số sai thay cho ô trống, chủ yếu đạm / béo). Nguyên nhân của 63 ô: 6 ô "0 g" đọc thành "09"; 2 ô "00" của "Saturated Fat"; 3 ô HSD "200223" hợp lệ nhưng đọc sai; 52 ô còn lại: mất dấu phẩy + g đọc thành 9 (vd "569" là 5,6 g; "1199" là 11,9 g) hoặc lấy nhầm số khác sau nhãn ("288Akcal" mất phần lẻ). Việc để sau: bỏ giá trị đạm / béo / carb > 100 g.
 - Mất thông tin ở bước rút trích (OCR đã đọc được mà extractor ra sai / rỗng): EasyOCR + regex 71% → 48%, EasyOCR + llm 36%, yake 79–81%.
 - `han_su_dung` gần như không đọc được: 1/9 ô ở EasyOCR + regex / dict / underthesea, Tesseract 0/9 với mọi extractor, llm 0/9. Cách đọc HSD cho giai đoạn 3 (`tesseract.js`) mới là giả thuyết, phải đo lại.
 
