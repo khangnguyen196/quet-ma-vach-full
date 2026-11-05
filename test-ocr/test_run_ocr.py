@@ -212,6 +212,58 @@ class ReadTimesTest(unittest.TestCase):
         self.assertEqual(dict(errors), {})
 
 
+class LastRowTest(unittest.TestCase):
+    """score.py chỉ tính dòng CUỐI của mỗi ảnh trong times.csv (run_ocr.py ghi nối thêm qua nhiều lần chạy)."""
+
+    def write_times(self, rows):
+        p = pathlib.Path(self.tmp.name) / "times.csv"
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["tool", "code", "image", "seconds", "status"])
+            w.writerows(rows)
+        return p
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_11a_error_then_ok(self):
+        p = self.write_times([["google", "1", "front", 3.0, "error: lỗi giả"],
+                              ["google", "1", "front", 2.0, "ok"]])
+        times, errors = score.read_times(p)
+        self.assertEqual(errors["google"], 0)
+        self.assertEqual(times["google"], [2.0])
+
+    def test_11b_ok_then_error(self):
+        p = self.write_times([["google", "1", "front", 2.0, "ok"],
+                              ["google", "1", "front", 3.0, "error: lỗi giả"]])
+        times, errors = score.read_times(p)
+        self.assertEqual(errors["google"], 1)
+        self.assertEqual(times["google"], [3.0])
+
+    def test_11c_skip_then_ok(self):
+        p = self.write_times([["google", "1", "front", 0, SKIP],
+                              ["google", "1", "front", 2.0, "ok"]])
+        times, errors = score.read_times(p)
+        self.assertEqual(errors["google"], 0)
+        self.assertEqual(times["google"], [2.0])
+        self.assertEqual(score.read_skipped(p)["google"], 0)
+
+    def test_11d_only_skip(self):
+        p = self.write_times([["google", "1", "front", 0, SKIP]])
+        times, errors = score.read_times(p)
+        self.assertEqual(score.read_skipped(p)["google"], 1)
+        self.assertEqual(times["google"], [])
+        self.assertEqual(errors["google"], 0)
+
+    def test_11e_list_tools_ignores_extract_and_dot_dirs(self):
+        out = pathlib.Path(self.tmp.name) / "outputs"
+        for name in ["tesseract", "google", "extract", ".cache"]:
+            (out / name).mkdir(parents=True)
+        (out / "times.csv").write_text("", encoding="utf-8")   # file, không phải thư mục
+        self.assertEqual(score.list_tools(out), ["google", "tesseract"])
+
+
 class FoundTest(unittest.TestCase):
     """Hàm found() của score.py: so khớp giá trị số (ngày, số thập phân) trong text OCR."""
 
