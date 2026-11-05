@@ -2,6 +2,8 @@
 
 Mục tiêu: chụp 30 sản phẩm, cho 4 công cụ OCR đọc cùng bộ ảnh, chấm xem công cụ nào lấy được **đầy đủ thông tin nhất** (tên, thương hiệu, khối lượng, thành phần, dinh dưỡng, nhà sản xuất, bảo quản, hạn sử dụng), kèm tốc độ và chi phí.
 
+**Bộ ảnh hiện tại:** ảnh và `truth.csv` của bộ hiện tại lấy từ Open Food Facts (ảnh CC BY-SA, dữ liệu ODbL); nguồn và tác giả từng ảnh ở `photos/NGUON.csv` (chỉ có trên máy, không commit).
+
 ## 4 công cụ
 
 | # | Công cụ | Kiểu | Cần gì | Tiếng Việt |
@@ -21,15 +23,22 @@ Chọn đa dạng để kết quả công bằng, ví dụ: 6 mì/phở gói, 5 
 
 ## Bước 2 – Chụp ảnh
 
-Mỗi sản phẩm chụp 3 ảnh, đặt vào thư mục `photos/<mã vạch>/`:
+Mỗi sản phẩm 3 ảnh (thêm `date.jpg` nếu có ảnh chỗ in hạn sử dụng), đặt vào thư mục `photos/<mã vạch>/`:
 
 ```
 photos/
-└── 8934563163150/
-    ├── front.jpg   # mặt trước: tên, thương hiệu, khối lượng
-    ├── back.jpg    # mặt sau: thành phần, bảng dinh dưỡng, bảo quản, nhà sản xuất
-    └── date.jpg    # chỗ in NSX / HSD (chụp sát)
+├── NGUON.csv              # nguồn, giấy phép, tác giả từng ảnh (không commit)
+├── 8936017368111/
+│   ├── front.jpg          # mặt trước: tên, thương hiệu, khối lượng
+│   ├── ingredients.jpg    # thành phần (thường có cả bảo quản, nhà sản xuất)
+│   ├── nutrition.jpg      # bảng dinh dưỡng
+│   └── date.jpg           # (nếu có) chỗ in NSX / HSD, chụp sát
+└── hsd-01/
+    └── date.jpg           # ảnh HSD không rõ mã vạch
 ```
+
+- Tự chụp thì có thể gộp thành phần + dinh dưỡng của mặt sau vào 1 ảnh `back.jpg` thay cho `ingredients.jpg` và `nutrition.jpg`.
+- Ảnh hạn sử dụng không biết mã vạch thì để trong `photos/hsd-01/date.jpg`, `hsd-02/`…; `truth.csv` thêm dòng chỉ có `code` (`hsd-01`…) và `han_su_dung`. Ảnh HSD của sản phẩm có mã nhưng không có 3 ảnh kia thì để `photos/<mã>/date.jpg` và dòng `truth.csv` chỉ có `code` + `han_su_dung`.
 
 Cách chụp: đủ sáng, tránh bóng đèn phản chiếu, chụp thẳng góc, chữ chiếm gần hết khung, giữ máy yên. **Cả 4 công cụ dùng đúng bộ ảnh này**, không chụp lại cho từng công cụ.
 
@@ -58,6 +67,7 @@ Mở `truth.csv`, mỗi sản phẩm 1 dòng, chép đúng theo bao bì:
 
 1. Python 3.10 trở lên.
 2. Tesseract: Windows tải bộ cài tại https://github.com/UB-Mannheim/tesseract/wiki (khi cài tick thêm ngôn ngữ Vietnamese); macOS `brew install tesseract tesseract-lang`; Ubuntu `sudo apt install tesseract-ocr tesseract-ocr-vie`.
+   Kiểm đã có tiếng Việt: chạy `tesseract --list-langs` (Windows PowerShell: `& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs`), danh sách phải có `vie` (và `eng`); `run_ocr.py` đọc với `vie+eng`. Không có `vie` thì tải `vie.traineddata` từ https://github.com/tesseract-ocr/tessdata rồi chép vào thư mục `tessdata` của Tesseract (Windows: `C:\Program Files\Tesseract-OCR\tessdata`, cần quyền quản trị).
 3. Trong thư mục `test-ocr`:
    ```
    python -m venv .venv
@@ -118,7 +128,7 @@ Chọn công cụ theo 4 tiêu chí: điểm đầy đủ thông tin, tốc đ�
 ## Prompt dán vào Claude Code
 
 ```
-Đọc README.md và truth.csv trong thư mục test-ocr. Mình đã chụp ảnh vào photos/ và điền truth.csv.
+Đọc README.md và truth.csv trong thư mục test-ocr. Ảnh đã có trong photos/ (nguồn ở photos/NGUON.csv) và truth.csv đã điền.
 Giúp mình: (1) không mở .env; chạy script và báo công cụ nào bị bỏ qua vì thiếu key / chạm trần (không gọi API Claude / Anthropic),
 (2) chạy python run_ocr.py rồi python score.py,
 (3) đọc outputs/summary.md và viết nhận xét ngắn bằng tiếng Việt: công cụ nào tốt nhất về độ đầy đủ, trường nào
