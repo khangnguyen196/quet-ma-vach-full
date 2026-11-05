@@ -22,7 +22,8 @@ DICT = pathlib.Path("dict")
 FIELDS = ["ten", "thuong_hieu", "khoi_luong", "thanh_phan_dau", "nang_luong_kcal", "dam_g",
           "beo_g", "carb_g", "nha_san_xuat", "bao_quan", "han_su_dung"]
 IMAGE_ORDER = ["front", "ingredients", "nutrition", "back", "date"]   # ghép text theo thứ tự này
-OLLAMA_TIMEOUT_DEFAULT = 180   # giây, khi OLLAMA_TIMEOUT không đặt / rỗng / không phải số / <= 0
+OLLAMA_TIMEOUT_DEFAULT = 180   # giây, khi OLLAMA_TIMEOUT không đặt / rỗng / không phải số / <= 0 / quá trần
+OLLAMA_TIMEOUT_MAX = 86400     # trần 1 ngày
 
 # ---------- tiện ích ----------
 def strip_accents(s: str) -> str:
@@ -202,12 +203,14 @@ def llm_provider():
     return os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
 
 def ollama_timeout():
-    """Số giây chờ Ollama trả lời, đọc từ OLLAMA_TIMEOUT. Không đặt, rỗng, không phải số hoặc <= 0 -> 180."""
+    """Số giây chờ Ollama trả lời, đọc từ OLLAMA_TIMEOUT.
+    Không đặt, rỗng, không phải số, <= 0 hoặc quá 1 ngày (86400) -> 180."""
     try:
         v = float(os.environ.get("OLLAMA_TIMEOUT", "").strip())
     except ValueError:
         return OLLAMA_TIMEOUT_DEFAULT
-    if not math.isfinite(v) or v <= 0:   # "nan", "inf", số âm, 0
+    # "nan", "inf", số âm, 0; số quá lớn (vd 1e308) làm requests lỗi tràn số
+    if not math.isfinite(v) or v <= 0 or v > OLLAMA_TIMEOUT_MAX:
         return OLLAMA_TIMEOUT_DEFAULT
     return int(v) if v.is_integer() else v
 
