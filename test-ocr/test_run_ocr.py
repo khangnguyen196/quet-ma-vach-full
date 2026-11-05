@@ -25,9 +25,9 @@ import score            # noqa: E402
 SKIP = "bỏ qua theo luật chi phí"
 
 
-class PaidServiceUsageTest(unittest.TestCase):
-    """Bộ đếm lượt gọi dịch vụ trả phí (Google, Azure) của run_ocr.py, trên thư mục tạm.
-    Mặc định chạy run_ocr.main() với --tools google và hàm Google giả; test Azure tự vá thêm hàm Azure giả và --tools azure."""
+class RunOcrTmpCase(unittest.TestCase):
+    """Khung chung (không có test): run_ocr.py chạy trên thư mục tạm, hàm Google giả, không đọc .env.
+    Mặc định run_ocr.main() chạy với --tools google; test nào cần công cụ khác thì tự vá TOOLS và argv."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -91,6 +91,11 @@ class PaidServiceUsageTest(unittest.TestCase):
     def assert_no_txt(self, images):
         for code, name in images:
             self.assertFalse((self.out / "google" / f"{code}__{name}.txt").exists(), f"{code}/{name} không được có file .txt")
+
+
+class PaidServiceUsageTest(RunOcrTmpCase):
+    """Bộ đếm lượt gọi dịch vụ trả phí (Google, Azure) của run_ocr.py, trên thư mục tạm.
+    Mặc định chạy run_ocr.main() với --tools google và hàm Google giả; test Azure tự vá thêm hàm Azure giả và --tools azure."""
 
     def test_1_stops_at_60_calls(self):
         images = self.make_photos(65)
@@ -204,6 +209,33 @@ class PaidServiceUsageTest(unittest.TestCase):
         self.assertFalse((self.out / "api_usage.json.tmp").exists())
         self.assertEqual(usage_file.read_bytes(), old)
 
+    def test_10b_save_usage_write_error_cleans_tmp(self):
+        # Ghi file tạm lỗi giữa chừng (đã ghi được một phần): save_usage ném lại đúng lỗi đó, xóa file .tmp,
+        # bộ đếm cũ giữ nguyên từng byte.
+        self.out.mkdir()
+        usage_file = self.out / "api_usage.json"
+        old = json.dumps({"google": {run_ocr.month_key(): 5}}).encode("utf-8")
+        usage_file.write_bytes(old)
+        written = []
+
+        def broken_write_text(path, data, *args, **kwargs):
+            written.append(path)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(data[:5])   # ghi dở
+            raise OSError("lỗi ghi giả")
+
+        with mock.patch.object(pathlib.Path, "write_text", broken_write_text):
+            with self.assertRaisesRegex(OSError, "lỗi ghi giả"):
+                run_ocr.save_usage({"google": {run_ocr.month_key(): 6}})
+        self.assertEqual([p.name for p in written], ["api_usage.json.tmp"])
+        self.assertFalse((self.out / "api_usage.json.tmp").exists())
+        self.assertEqual(usage_file.read_bytes(), old)
+
+
+class OutputEncodingTest(RunOcrTmpCase):
+    """In tiếng Việt khi stdout / stderr là file cp1252 (như `python run_ocr.py > file` trên Windows).
+    test_13a (score.main()) vẫn ở ScoreMainTest vì cần thư mục tạm có truth.csv của class đó; dời sang đây phải chép helper."""
+
     def test_13b_run_ocr_main_prints_vietnamese_to_cp1252_stdout(self):
         # Như `python run_ocr.py > file` trên Windows: stdout và stderr là file mã hóa cp1252.
         # Tesseract giả (không gọi OCR thật): ảnh thứ 2 ném lỗi có chữ tiếng Việt để traceback ra stderr.
@@ -229,28 +261,6 @@ class PaidServiceUsageTest(unittest.TestCase):
         self.assertEqual(self.calls, 0)   # không gọi Google
         self.assertIn("Có 2 ảnh của 2 sản phẩm.", raw_out.getvalue().decode("utf-8"))
         self.assertIn("lỗi giả tiếng Việt", raw_err.getvalue().decode("utf-8"))
-
-    def test_10b_save_usage_write_error_cleans_tmp(self):
-        # Ghi file tạm lỗi giữa chừng (đã ghi được một phần): save_usage ném lại đúng lỗi đó, xóa file .tmp,
-        # bộ đếm cũ giữ nguyên từng byte.
-        self.out.mkdir()
-        usage_file = self.out / "api_usage.json"
-        old = json.dumps({"google": {run_ocr.month_key(): 5}}).encode("utf-8")
-        usage_file.write_bytes(old)
-        written = []
-
-        def broken_write_text(path, data, *args, **kwargs):
-            written.append(path)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(data[:5])   # ghi dở
-            raise OSError("lỗi ghi giả")
-
-        with mock.patch.object(pathlib.Path, "write_text", broken_write_text):
-            with self.assertRaisesRegex(OSError, "lỗi ghi giả"):
-                run_ocr.save_usage({"google": {run_ocr.month_key(): 6}})
-        self.assertEqual([p.name for p in written], ["api_usage.json.tmp"])
-        self.assertFalse((self.out / "api_usage.json.tmp").exists())
-        self.assertEqual(usage_file.read_bytes(), old)
 
 
 class ReadTimesTest(unittest.TestCase):
