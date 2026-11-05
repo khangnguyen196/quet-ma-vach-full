@@ -127,6 +127,76 @@ class OllamaCallTest(unittest.TestCase):
         self.assertEqual(self.call_llm({"OLLAMA_MODEL": "qwen2.5:7b"})["json"]["model"], "qwen2.5:7b")
 
 
+class RegexOcrRulesTest(unittest.TestCase):
+    """Luật regex chịu lỗi OCR lặp lại (đợt ocr-b, P5). Chuỗi lỗi giả lập theo kiểu lỗi thấy ở >= 2 sản phẩm thật."""
+
+    def rx(self, text):
+        return run_extract.extract_regex(text)
+
+    def test_p5a_energy_unit_garbled_missing_or_before_number(self):
+        # kcal đọc sai ("kca]"), in trước số ("(kcal) 72,4", "calories-kcal: 150").
+        self.assertEqual(self.rx("Năng lượng / Energy 75,3kca] Chất đạm 1,2")["nang_luong_kcal"], "75,3")
+        self.assertEqual(self.rx("Năng lượng (kcal) 72,4 và sử dụng")["nang_luong_kcal"], "72,4")
+        self.assertEqual(self.rx("Calories-kcal ()*: 150 (630) Calories from fat: 50")["nang_luong_kcal"], "150")
+
+    def test_p5b_energy_label_misread(self):
+        # "năng lượng" đọc thành "nang iuong" / "nang ivong" / "nang luqng"; "calories" thành "galories" / "calorios".
+        self.assertEqual(self.rx("Nang iuong (kcal) 63,6 dam")["nang_luong_kcal"], "63,6")
+        self.assertEqual(self.rx("galories 120 calories from fac 60")["nang_luong_kcal"], "120")
+        self.assertEqual(self.rx("Calorios 140 cacrecfomn fa50")["nang_luong_kcal"], "140")
+
+    def test_p5c_energy_ignores_reference_intake_2000_kcal(self):
+        # "% giá trị ... tính trên nhu cầu năng lượng 2000 kcal" là mức tham chiếu, không phải năng lượng sản phẩm.
+        text = "170 kcal\nPhần trăm giá trị dinh dưỡng tính trên nhu cầu năng lượng 2000 kcal"
+        self.assertEqual(self.rx(text)["nang_luong_kcal"], "170")
+        text2 = "tính trên nhu caunăng lượng 2 000 kcal.\nGiá trị dinh dưỡng: 510 kcal"
+        self.assertEqual(self.rx(text2)["nang_luong_kcal"], "510")
+
+    def test_p5d_nutrient_unit_g_read_as_digit_or_missing(self):
+        # "g" đọc thành "9", "4", "2" cách số, hoặc mất hẳn; đơn vị "(g)" in trước số.
+        out = self.rx("Carbohydrate 2,0 9 Chất đạm 2,5 9 Chất béo 1,4 9")
+        self.assertEqual((out["carb_g"], out["dam_g"], out["beo_g"]), ("2,0", "2,5", "1,4"))
+        out = self.rx("Chất đạm/ Protein 3,1 4 Chất béo/ Fat 3,6 4 Carbohydrate 4,7 9 Calci 110 mg")
+        self.assertEqual((out["dam_g"], out["beo_g"], out["carb_g"]), ("3,1", "3,6", "4,7"))
+        out = self.rx("Chất béo 3,5 Chất đạm 2,6 2 Carbohydrat 17 Can-xi 106 mg")
+        self.assertEqual((out["beo_g"], out["dam_g"], out["carb_g"]), ("3,5", "2,6", "17"))
+        out = self.rx("Đạm (g) 0,7 lắc đều Chất béo (g) 0,4 Hydrat cacbon (g) 16,5")
+        self.assertEqual((out["dam_g"], out["beo_g"], out["carb_g"]), ("0,7", "0,4", "16,5"))
+
+    def test_p5e_nutrient_g_glued_as_9_after_decimal(self):
+        # "7,0g" đọc thành "7,09": bỏ số 9 cuối của số thập phân khi không có đơn vị g.
+        out = self.rx("Protein 7,09 Lipid 14,49 Carbohydrate 47,29 Năng lượng 346,4 kcal")
+        self.assertEqual((out["dam_g"], out["beo_g"], out["carb_g"]), ("7,0", "14,4", "47,2"))
+        self.assertEqual(self.rx("Carbohydrat/ Carbohydrate: 41,29 Natri: 1735 mg")["carb_g"], "41,2")
+
+    def test_p5f_date_six_digits_after_hsd(self):
+        # Hạn in liền 6 số (ddmmyy) sau nhãn HSD / EXP, có khi xuống dòng.
+        self.assertEqual(self.rx("HSD:071026 L 20:17-07")["han_su_dung"], "071026")
+        self.assertEqual(self.rx("NSX 01/02/2025\nHSD / EXP:\n200223 08:33 NSX / PRD:")["han_su_dung"], "200223")
+
+    def test_p5g_net_weight_label_misread(self):
+        # Nhãn "khối lượng tịnh" đọc sai (khol / khoi iuong / kho' luong), "g" đọc thành "9";
+        # ưu tiên số sau nhãn này hơn số đầu tiên (vd "trong 90 g" của bảng dinh dưỡng).
+        self.assertEqual(self.rx("Giá trị dinh dưỡng trong 90 g\nKhol luong tinh: 108 9")["khoi_luong"], "108 g")
+        self.assertEqual(self.rx("Trong 100 ml\nKhoi iuong tinh: 33 g/ 1,16 oz")["khoi_luong"], "33 g")
+
+    def test_p5h_clean_text_unchanged(self):
+        # Text sạch (không lỗi OCR): kết quả giống hệt code cũ.
+        text = ("Mì ăn liền vị bò\nKhối lượng tịnh: 75g\nThành phần: bột mì, dầu thực vật, muối.\n"
+                "Giá trị dinh dưỡng trong 100 g: Năng lượng 450 kcal, Chất đạm 9,5 g, Chất béo 18,49 g, "
+                "Carbohydrat 62 g.\nCalories from fat 160 kcal\n"
+                "Hướng dẫn bảo quản: nơi khô ráo, thoáng mát.\nSản xuất bởi: Công ty TNHH Thực phẩm ABC\n"
+                "NSX: 01/02/2025 HSD: 01/08/2025")
+        self.assertEqual(self.rx(text), {
+            "ten": "mi an lien vi bo", "thuong_hieu": "", "khoi_luong": "75g",
+            "thanh_phan_dau": ["bot mi", "dau thuc vat", "muoi"], "nang_luong_kcal": "450",
+            "dam_g": "9,5", "beo_g": "18,49", "carb_g": "62",
+            "nha_san_xuat": "cong ty tnhh thuc pham abc", "bao_quan": "noi kho rao, thoang mat.",
+            "han_su_dung": "01/08/2025"})
+        # Không nhãn HSD: vẫn lấy ngày cuối cùng như cũ.
+        self.assertEqual(self.rx("Ngày sản xuất 01.02.2025\nDùng tốt nhất trước 01.02.2026")["han_su_dung"], "01.02.2026")
+
+
 class OutputEncodingTest(TmpDirCase):
     """Như `python run_extract.py > file` / `python score_combo.py > file` trên Windows: stdout, stderr là file cp1252."""
 
