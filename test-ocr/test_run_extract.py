@@ -214,16 +214,6 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("HSD: 848224")["han_su_dung"], "")
         self.assertEqual(self.rx("HSD:071026")["han_su_dung"], "071026")
 
-    def test_p5o_date_six_digits_range_bounds(self):
-        # Hai đầu của khoảng: ngày 00 / 32 và tháng 13 bị loại; 31/12 được nhận.
-        self.assertEqual(self.rx("HSD: 001026")["han_su_dung"], "")
-        self.assertEqual(self.rx("HSD: 321026")["han_su_dung"], "")
-        self.assertEqual(self.rx("HSD: 011326")["han_su_dung"], "")
-        self.assertEqual(self.rx("HSD: 311226")["han_su_dung"], "311226")
-        # Giới hạn đã biết: chỉ kiểm khoảng, không kiểm lịch, nên 30/02 vẫn được nhận.
-        # Đợt sau đổi sang kiểm lịch thật thì sửa ca này (30/02 phải ra "").
-        self.assertEqual(self.rx("HSD: 300226")["han_su_dung"], "300226")
-
     def test_p5l_carb_two_decimals_ending_9_with_g_unit(self):
         # Có đơn vị g thì luật cũ lấy nguyên số, không cắt số 9 cuối (unglue_g chỉ dùng khi mất g).
         self.assertEqual(self.rx("Carbohydrate 18,79 g")["carb_g"], "18,79")
@@ -237,6 +227,16 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("HSD:071026\nIn ngày 01/02/2027")["han_su_dung"], "071026")
         # Luật (7): số sau nhãn "khối lượng tịnh" được xét trước luật cũ (số + đơn vị đầu tiên ở 15 dòng đầu).
         self.assertEqual(self.rx("Giá trị dinh dưỡng trong 100 g\nKhối lượng tịnh: 200 g")["khoi_luong"], "200 g")
+
+    def test_p5o_date_six_digits_range_bounds(self):
+        # Hai đầu của khoảng: ngày 00 / 32 và tháng 13 bị loại; 31/12 được nhận.
+        self.assertEqual(self.rx("HSD: 001026")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 321026")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 011326")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 311226")["han_su_dung"], "311226")
+        # Giới hạn đã biết: chỉ kiểm khoảng, không kiểm lịch, nên 30/02 vẫn được nhận.
+        # Đợt sau đổi sang kiểm lịch thật thì sửa ca này (30/02 phải ra "").
+        self.assertEqual(self.rx("HSD: 300226")["han_su_dung"], "300226")
 
 
 class OutputEncodingTest(TmpDirCase):
