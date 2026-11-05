@@ -18,7 +18,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 - [x] Trạng thái: đang tra, không tìm thấy, lỗi mạng
 - [x] Lịch sử quét (localStorage, 10 mã gần nhất)
 
-> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4). 11/2026: iPhone báo không đọc được mã cả khi chụp gần; app thu nhỏ ảnh về 1600/1000 px và thử xoay 90° trước khi đọc; chờ thử lại trên iPhone, nút Bật camera chưa thử trên iPhone.
+> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4). 11/2026: iPhone báo không đọc được mã cả khi chụp gần; app thu nhỏ ảnh về 1600/1000 px và thử xoay 90° trước khi đọc; chờ thử lại trên iPhone, nút Bật camera chưa thử trên iPhone. 05/11/2026: trên iPhone (link Pages) nhập mã tra được, "Chụp ảnh mã" đọc được (chủ dự án xác nhận); chỉ còn nút "Bật camera" chưa thử trên iPhone.
 
 ### Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn
 - [ ] Hiện xuất xứ nguyên liệu, nơi sản xuất, nước bán, bảo quản, cách dùng, nhãn chứng nhận (halal, organic…) – trường nào trống thì ẩn
@@ -130,3 +130,22 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Đã xử lý: app tách loại lỗi khi tra cứu. HTTP 404 (hoặc `status` khác 1) → "không tìm thấy"; 5xx/429 → "Open Food Facts đang lỗi hoặc quá tải (HTTP …)"; HTTP 200 mà JSON hỏng → cùng câu đó nhưng không kèm mã HTTP; quá 9 giây → "phản hồi chậm"; fetch bị từ chối → "Không kết nối được tới Open Food Facts", gợi ý "Kiểm tra mạng, hoặc Open Food Facts đang quá tải" (Safari không phân biệt được mất mạng với trang lỗi 503 thiếu CORS); lỗi dữ liệu khi hiển thị → "Không hiển thị được dữ liệu"; lỗi khác không rõ loại (ví dụ lỗi lập trình) → "Có lỗi bất thường khi tra cứu", nhờ chụp lại dòng chữ nhỏ. Dưới câu báo có dòng nhỏ `tên lỗi: nội dung lỗi`, và lỗi luôn được ghi ra console. Lưu ý: mã `0000000000000` được trả HTTP 200 kèm `{status: 0}`, không phải 404.
 - iPhone Safari báo "Không kết nối được" với 8934563163150 dù mở thẳng URL API ra JSON: chưa tìm ra nguyên nhân chắc chắn. Đã đo trên máy tính: URL app gọi trả 200 trong 0,7–0,9 giây, có header CORS; dữ liệu đúng kiểu. Giả thuyết mạnh nhất: lúc đó Open Food Facts trả trang lỗi 503 không kèm header CORS (đã thấy với API search, 11/2026) → Safari chặn và ném `TypeError: Load failed`, app không biết là 503 nên báo mất mạng. Cần thử lại trên iPhone và đọc dòng lỗi nhỏ để chốt.
 - Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (hiện tại như vậy; chờ chủ dự án xác nhận có muốn lưu cả mã không tìm thấy không).
+
+## 8. Việc cần làm tiếp (cập nhật 05/11/2026)
+
+Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma-vach-full/ (repo https://github.com/khangnguyen196/quet-ma-vach-full, push `main` là tự deploy). Đợt `khoi-dong` và `sua-va-dua-len` đã đóng. Quy tắc làm việc (toàn quyền, chỉ dùng mức miễn phí, không dùng API Claude/Anthropic) nằm trong `.claude/du-an.md`.
+
+### Chủ dự án tự làm (máy không làm thay được)
+- [ ] Thử nút "Bật camera" trên iPhone ở link app. Đạt thì giai đoạn 1 xong hẳn; lỗi thì chụp dòng chữ nhỏ dưới câu báo gửi Claude Code.
+- [ ] Xác nhận lịch sử chỉ lưu mã tìm thấy (đề xuất: giữ như hiện tại), xem mục 7.
+- [ ] Cài Tesseract kèm tiếng Việt: `winget install --id UB-Mannheim.TesseractOCR -e --interactive`, ở bước chọn thành phần tick Vietnamese trong "Additional language data". Kiểm: `tesseract --list-langs` có `eng` và `vie`.
+- [ ] Chụp 30 sản phẩm × 3 ảnh (front, back, date) vào `test-ocr/photos/<mã vạch>/`; điền `test-ocr/truth.csv` (theo dòng mẫu); bổ sung `test-ocr/dict/brands.txt`. Có thể làm 5 món trước để thử quy trình.
+- [ ] (Tùy chọn) Lấy key Azure gói F0 (hết lượt chỉ báo lỗi, không trừ tiền) hoặc Google Vision khi tài khoản chưa nâng cấp trả phí, tự điền `test-ocr/.env`. Không key vẫn chạy so sánh được với công cụ miễn phí.
+- [ ] (Tùy chọn) Quyết có cài easyocr không (tải ~257 MB, sau cài ~600–900 MB).
+- [ ] Kiểm Claude Code đăng nhập bằng gói Claude (Pro/Max) hay API key (`/status`); API key nghĩa là đang tốn tiền.
+
+### Claude Code làm (mỗi việc một đợt `/dot`)
+- [ ] **A. Đợt `gd2`** (làm ngay được): giai đoạn 2 ở mục 2 (xuất xứ/bảo quản, tủ đồ ăn, hạn sử dụng). Sửa luôn vấn đề ở mục 7: thương hiệu, khối lượng, phân loại, ảnh phải hiện "chưa có dữ liệu" khi trống. Push `main`, chờ deploy, test trên link Pages bằng Chromium + WebKit, báo cáo kèm danh sách chủ dự án thử trên iPhone.
+- [ ] **B. Đợt `ocr-a`** (sau khi có ảnh và `truth.csv`): sửa `test-ocr/score.py` chỉ tính kết quả cuối của mỗi ảnh, bỏ qua thư mục extract; chạy `run_ocr.py` rồi `score.py`; công cụ thiếu (key, Tesseract, easyocr) thì bỏ qua và ghi rõ. Ra `outputs/summary.md`: OCR nào đầy đủ nhất, trường nào hay sai, số lượt gọi Google/Azure đã dùng trong tháng.
+- [ ] **C. Đợt `ocr-b`** (sau B): chạy `run_extract.py` với regex, dict, yake, underthesea, llm (llm chỉ qua Ollama, được tự cài Ollama + qwen2.5:7b nếu máy đủ chỗ) rồi `score_combo.py`; sửa luật regex/dict nếu trượt vì lỗi OCR lặp lại. Ra `outputs/summary_combo.md` và đề xuất tổ hợp OCR + extractor cho app (miễn phí, chạy trên điện thoại).
+- [ ] **D. Giai đoạn 3** (sau C): dùng kết quả B/C để chọn cách đọc hạn sử dụng từ ảnh (`tesseract.js`), rồi làm các mục giai đoạn 3 ở mục 2.
