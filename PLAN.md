@@ -143,7 +143,7 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Lỗi có từ trước: tắt camera trong khoảng 50 ms sau khi bật thì html5-qrcode ném 'play() request was interrupted' (scanner.js, chưa sửa).
 - Việc nhỏ để sau: render.js chép tay chuỗi 'Sản phẩm chưa có tên' từ off.js; nên export hằng từ off.js.
 - Việc nhỏ để sau: bấm "Sửa" trong tủ đồ trên iPhone thì bảng chọn ngày tự bật (tạm chấp nhận, 05/11/2026).
-- Máy chủ dự án: ổ C chỉ còn ít chỗ (khoảng 2–5 GB trống), mọi thứ tải về để ở ổ D: Ollama `D:\ollama\app`, model `D:\ollama\models`, `HF_HOME` `D:\cache\hf`, `TEMP` / `TMP` `D:\tmp`, cache npm `D:\cache\npm`.
+- Máy chủ dự án: ổ C chỉ còn ít chỗ (05/11/2026 đo còn khoảng 4,6 GB; chủ dự án lưu ý ổ C ít chỗ), mọi thứ tải về để ở ổ D: Ollama `D:\ollama\app`, model `D:\ollama\models`, `HF_HOME` `D:\cache\hf`, `TEMP` / `TMP` `D:\tmp`, cache npm `D:\cache\npm`.
 
 ## 8. Việc cần làm tiếp (cập nhật 05/11/2026)
 
