@@ -181,7 +181,15 @@ python score_combo.py                     # → outputs/summary_combo.md
 - Chạy lại không mất công: sản phẩm đã có file kết quả `outputs/extract/<ocr>__<extractor>/<mã>.json` với `_status` là `ok` thì bỏ qua; file kết quả lỗi (vd Ollama quá giờ) sẽ được chạy lại ở lần sau.
 - `llm` (Ollama): `OLLAMA_MODEL` chọn model (mặc định `qwen2.5:3b`), `OLLAMA_TIMEOUT` là số giây chờ mỗi sản phẩm (mặc định 180; máy chậm đặt 600). Ollama phải đang chạy (`ollama.exe serve`, xem Bước 4).
 - Thứ tự ghép text các ảnh của một sản phẩm: `front`, `ingredients`, `nutrition`, `back`, `date`.
-- `regex` (và `underthesea`, vì dùng `regex` cho số) có thêm luật dự phòng chịu lỗi OCR lặp lại: nhãn "năng lượng" / "calories" đọc sai, đơn vị kcal / g đọc sai, mất hoặc in trước số, "7,09" là 7,0 g, hạn in liền 6 số sau HSD, nhãn "khối lượng tịnh" đọc sai. Luật cũ chạy trước, luật mới chỉ dùng khi luật cũ không ra gì. Sửa luật xong thì xóa `outputs/extract/*__regex`, `*__dict`, `*__underthesea` rồi chạy lại.
+- `regex` (và `underthesea`, vì dùng `regex` cho số) có thêm 7 luật chịu lỗi OCR lặp lại (mỗi luật có ở text OCR của ≥ 2 sản phẩm):
+  (1) nhãn "năng lượng" / "calories" đọc sai (`nang iuong`, `galories`…), bỏ "calories from fat";
+  (2) kcal đọc sai, mất hoặc in trước số (`75,3kca]`, `(kcal) 72,4`);
+  (3) bỏ mức tham chiếu "nhu cầu năng lượng 2000 kcal";
+  (4) đạm / béo / carb mất đơn vị g hoặc g đọc thành 9 / 4 / 2: lấy số đầu tiên sau nhãn rõ ràng (nhãn béo "fat" không tính "calories from fat"); "(g)" in trước số cũng được nhờ luật này, không cần luật riêng;
+  (5) "7,09" là 7,0 g (chữ g dính sau số thập phân đọc thành 9; rủi ro: số thật như 18,49 mà mất g thì thành 18,4);
+  (6) hạn in liền 6 số sau HSD / EXP, chỉ nhận khi là ngày hợp lệ ddmmyy (ngày 01–31, tháng 01–12);
+  (7) số sau nhãn "khối lượng tịnh" đọc sai (`khol luong`, `khoi iuong`, `tjnh`).
+  Thứ tự so với luật cũ: (1), (2), (4), (5) chỉ dùng khi luật cũ không ra gì; (3) bỏ mức tham chiếu khỏi text trước khi chạy mọi luật năng lượng; (6) được xét trước "ngày cuối cùng trong text" và áp cả cho `dict`; (7) được xét trước luật cũ (số + đơn vị đầu tiên ở 15 dòng đầu). Đã bỏ 2 luật vì chỉ thấy ở 1 sản phẩm: nhãn "đạm (g)" (8936025773181) và "g đọc thành 9" sau khối lượng tịnh (8936036027099). Sửa luật xong thì xóa `outputs/extract/*__regex`, `*__dict`, `*__underthesea` rồi chạy lại.
 - Cột giây/sản phẩm trong `summary_combo.md` tính cả file kết quả lỗi (vd Ollama quá giờ cũng được tính số giây đã chờ).
 
 ## Đọc kết quả phần B
@@ -193,9 +201,21 @@ python score_combo.py                     # → outputs/summary_combo.md
 
 So với `summary.md` (phần A): phần A đo "OCR **có chứa** thông tin không", phần B đo "extractor **đưa ra** được không". Chênh lệch giữa hai bảng là phần thông tin bị mất ở bước rút trích, không phải lỗi OCR. Ví dụ OCR đọc được "Năng lượng 437 kcal" (A đúng) nhưng regex đòi "kcal" đứng ngay sau số còn OCR in "437 kcaI" (chữ I hoa) thì B sai.
 
-Thường thấy: `regex`/`dict` đủ dùng cho khối lượng, kcal, đạm, béo khi OCR tốt; `llm` vượt trội ở tên, nhà sản xuất, bảo quản và khi OCR nhiều lỗi; `yake` thấp nhất vì nó không được thiết kế cho việc này (và đó chính là bài học của phần so sánh).
+Đợt `ocr-b` thấy: `regex` mạnh ở kcal, carb, đạm khi OCR tốt; `dict` mạnh ở thương hiệu, bảo quản; `llm` khá đều các trường (trừ HSD) và giữ được nhiều thông tin nhất khi OCR nhiều lỗi. `yake` **không** thấp nhất: EasyOCR + yake 26% (hơn dict 22%), Tesseract + yake 15% (cao nhất hàng Tesseract). Lý do thấy rõ trong `score_combo.py`: với yake, mỗi trường lấy điểm cao nhất trong cả 40 cụm từ (các extractor khác chỉ đưa 1 giá trị), và trường chữ chấm bằng `partial_ratio`, nên một cụm ngắn nằm trong đáp án cũng tính đúng (vd "NGON NGUYÊN" cho tên "Koreno vị ngon nguyên bản"). Vì vậy yake cao ở `ten` (76% / 34%) nhưng 0% ở mọi trường số và HSD: điểm yake không có nghĩa là yake dùng được cho app.
 
-Kết quả đợt `ocr-b` (05/11/2026, 31 mã, 239 điểm, sau khi sửa luật regex): EasyOCR + `llm` (qwen2.5:3b qua Ollama) 37% là cao nhất nhưng mất khoảng 129 giây mỗi sản phẩm trên CPU; EasyOCR + `regex` 30% gần như tức thì; Tesseract mọi extractor chỉ 12–15%. `han_su_dung` gần như không đọc được ở mọi tổ hợp. Chi tiết ở PLAN.md mục 8, dòng E.
+Kết quả đợt `ocr-b` (05/11/2026, 31 mã, 239 điểm, sau khi sửa luật regex ở vòng 2):
+
+| OCR \ extractor | dict | llm | regex | underthesea | yake |
+|---|---|---|---|---|---|
+| easyocr | 22% | **37%** | 30% | 30% | 26% |
+| tesseract | 12% | 13% | 12% | 11% | 15% |
+
+- EasyOCR + `llm` (qwen2.5:3b qua Ollama) 37% là cao nhất nhưng mất khoảng 129 giây mỗi sản phẩm trên CPU; EasyOCR + `regex` 30% gần như tức thì (trước sửa luật 16%; Tesseract + regex 7% → 12%).
+- So với trước sửa luật (1.434 ô của regex / dict / underthesea × 2 OCR): rỗng → đúng 81 ô, sai → đúng 6, rỗng → sai 63 (số sai thay cho ô trống, chủ yếu đạm / béo), đúng → sai 0, đúng → rỗng 0.
+- Mất thông tin ở bước rút trích (OCR đã đọc được mà extractor ra sai / rỗng): EasyOCR + regex 71% → 48%, EasyOCR + llm 36%, yake 79–81%.
+- `han_su_dung` gần như không đọc được: 1/9 ô ở EasyOCR + regex / dict / underthesea, Tesseract 0/9 với mọi extractor, llm 0/9. Cách đọc HSD cho giai đoạn 3 (`tesseract.js`) mới là giả thuyết, phải đo lại.
+
+Bảng theo trường, 3 mốc (trước sửa luật / vòng 1 / vòng 2), đếm từng ô và bảng mất thông tin đầy đủ ở PLAN.md mục 8, dòng E.
 
 ## Prompt dán vào Claude Code cho phần B
 

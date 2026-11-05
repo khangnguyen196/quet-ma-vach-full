@@ -163,23 +163,75 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
 - [x] **B. Đợt `anh-mang`** (05/11/2026: 30 sản phẩm × 3 ảnh front / ingredients / nutrition + 6 ảnh hạn sử dụng `date.jpg`, tất cả từ Open Food Facts, không cần Wikimedia Commons; `truth.csv` 31 dòng (30 sản phẩm + 1 dòng chỉ có `code` + `han_su_dung`); bỏ dòng mẫu 8934563163150 vì ảnh thành phần là nhãn xuất khẩu tiếng Pháp, bảng dinh dưỡng bị cắt ở mép, ảnh 'nutrition' thật ra là mặt trước. Cách đặt ảnh HSD đã chốt: có mã thì `photos/<mã>/date.jpg`, mã ngoài 30 món thì thêm dòng `truth.csv` chỉ có `code` + `han_su_dung`, không rõ mã thì `photos/hsd-NN/date.jpg`): lấy ảnh giấy phép mở từ Open Food Facts (ảnh hạn sử dụng thêm từ Wikimedia Commons) vào `test-ocr/photos/<mã vạch>/`; Claude Code điền `test-ocr/truth.csv` (chủ dự án cho phép 1 lần, cần ngoại lệ trong hồ sơ trước) và bổ sung `test-ocr/dict/brands.txt`; cập nhật `test-ocr/README.md` theo cách lấy ảnh mới (README đó còn ghi "chụp 30 sản phẩm", "Mình đã chụp ảnh…"). Ảnh hạn sử dụng từ Wikimedia Commons thường không phải đúng sản phẩm có mã vạch đó, nên cách đặt vào `photos/<mã>/` cho khớp `truth.csv` sẽ chốt trong đợt này. Cảnh báo: repo công khai; `test-ocr/photos/` đã có trong `test-ocr/.gitignore`; không bao giờ `git add -f` ảnh.
 - [x] **C. Đợt `gd2`** (05/11/2026, lên main và test Pages trong cùng đợt): giai đoạn 2 ở mục 2 (xuất xứ/bảo quản, tủ đồ ăn, hạn sử dụng). Sửa luôn vấn đề ở mục 7: thương hiệu, khối lượng, phân loại, ảnh phải hiện "chưa có dữ liệu" khi trống. Thêm comment ở `src/off.js`: APP_NAME là tên repo, không phải tên trong package.json. Lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy; chờ deploy xong, test trên link Pages bằng Chromium + WebKit, báo cáo kèm danh sách chủ dự án thử trên iPhone.
 - [x] **D. Đợt `ocr-a`** (05/11/2026). Kết quả trên 96 ảnh / 31 mã (`outputs/summary.md`, không commit): **EasyOCR 45% đầy đủ** (108/239 điểm, 13,7 giây/ảnh trên CPU), **Tesseract 20%** (47/239 điểm, 1,3 giây/ảnh); 0 ảnh lỗi, 0 ảnh bỏ qua. **Google và Azure bị bỏ qua: `test-ocr/.env` chưa có key** (script báo "thiếu key"), nên lượt gọi tháng 2026-11: Google 0 / 800, Azure 0 / 4.000; lần chạy Google thứ 2 không chạy. EasyOCR 1.7.2 + torch 2.15.0 bản CPU: `.venv` tăng từ 260 MB lên 1.209 MB, model EasyOCR tải lần đầu 94 MB (`C:\Users\LTC\.EasyOCR`). Trường yếu nhất: `ten` (EasyOCR 14%, Tesseract 0%), `han_su_dung` (11% cả hai, chỉ 9 ô), `nha_san_xuat` (8% / 17%, 12 ô); `bao_quan` chỉ 12 ô. Điểm số còn "ăn may": 23 ô số có giá trị 1 chữ số (vd 0, 2), EasyOCR được 17, Tesseract 14. Đã sửa: `score.py` chỉ tính dòng cuối mỗi ảnh trong `times.csv`, bỏ thư mục `outputs/extract`, thêm cột "Ảnh bỏ qua (luật chi phí)"; `found()` bỏ `or "0"` thừa; summary hiện cả công cụ chỉ có dòng trong `times.csv` (vd Google bị bỏ qua hết theo luật chi phí, chưa có thư mục `outputs/google`); `run_ocr.py` / `score.py` in tiếng Việt được khi ghi ra file (`score.py > file`); `save_usage()` xóa `api_usage.json.tmp` khi ghi lỗi; siết test_7, đổi tên class test thành `PaidServiceUsageTest`. Quyết định của dieu-phoi (05/11/2026): (1) chấm bằng `score.py` của worktree, chạy ở thư mục chính (ảnh, `.env`, `outputs` chỉ có ở đó); (2) không siết cách chấm "ăn may", không bỏ 4 ảnh trùng, để đợt sau; (3) Google chạy tối đa 2 lần (≤ 60 + ≤ 36 lượt), tổng tháng ≤ 96. Quyết định của dieu-phoi (05/11/2026, vòng 2): (4) sửa lỗi in tiếng Việt khi ghi ra file ở `run_ocr.py` và `score.py` ngay trong `ocr-a`, `run_extract.py` / `score_combo.py` để `ocr-b`; (5) công cụ chỉ có dòng trong `times.csv` (bị bỏ qua hết) vẫn hiện trong `summary.md` với điểm 0. Việc gốc: xem lịch sử git của PLAN.md. Ghi chú chấm điểm (05/11/2026): (1) `found()` trong `score.py` đã sửa trong đợt `anh-mang` (dieu-phoi quyết định sửa ngay thay vì chỉ ghi chú, vì lỗi làm ô HSD 19.09.20 của bộ dữ liệu mới luôn 0 điểm): ngày có dấu chấm tận cùng 0 (vd 19.09.20) không còn bị cắt thành 19.09.2; giá trị bắt đầu bằng dấu chấm (vd `.0`, `.00`) không còn thành mẫu rỗng khớp mọi text (`0.0` vốn đã chấm như số 0, có test giữ). (2) Chấm số còn dễ được điểm "ăn may": "0", "2" khớp mọi số đứng riêng; "7.0" khớp cả "7.5" (sau số được phép ".5"). Để đợt sau (quyết định (2) ở trên). (3) 4 mã có `ingredients.jpg` trùng `nutrition.jpg` (8934588022111, 8935049501503, 8936028641487, 8936036029819): `run_ocr.py` đọc 2 lần; có thể bỏ trùng để tiết kiệm lượt. (4) Bộ có 96 ảnh, trần Google 60 lượt mỗi lần chạy → một lần chạy Google không đọc hết; phần dư ghi "bỏ qua theo luật chi phí" hoặc chia nhiều lần, tổng tháng ≤ 800. (5) Tên ghép nhiều khối chữ (vd "Mì khoai tây Omachi xốt Bò hầm") có thể khó đạt ngưỡng khớp 85 → đọc điểm cột `ten` có lưu ý.
-- [x] **E. Đợt `ocr-b`** (05/11/2026). Kết quả `outputs/summary_combo.md` (không commit), 31 mã, 239 điểm, % thông tin rút ra đúng, sau khi sửa luật regex:
+- [x] **E. Đợt `ocr-b`** (05/11/2026, vòng 1 và vòng 2). Kết quả `outputs/summary_combo.md` (không commit), 31 mã, 239 điểm, % thông tin rút ra đúng, sau khi sửa luật regex (vòng 2):
 
   | OCR \ extractor | dict | llm | regex | underthesea | yake |
   |---|---|---|---|---|---|
   | easyocr | 22% | **37%** | 30% | 30% | 26% |
-  | tesseract | 12% | 13% | 12% | 12% | 15% |
+  | tesseract | 12% | 13% | 12% | 11% | 15% |
 
-  **Tổ hợp tốt nhất: EasyOCR + `llm` 37%**; nhanh và miễn phí nhất: EasyOCR + `regex` 30%. Giây / sản phẩm: regex 0,00; dict 0,01; yake 0,04; underthesea 0,13; llm 128,9 (EasyOCR) / 85,3 (Tesseract), TB 107,1. Số giây llm trong `summary_combo.md` tính cả file lỗi; đợt này 62/62 file llm ok, 0 file lỗi. `han_su_dung` yếu nhất: tốt nhất 11% (1/9 ô, EasyOCR + regex / dict / underthesea), llm 0%. llm: Ollama 0.40.14 bản zip (SHA256 khớp) ở `D:\ollama\app`, model `qwen2.5:3b` (1.841 MB) ở `D:\ollama\models`, `OLLAMA_CONTEXT_LENGTH=8192` (không lần nào bị cắt, dài nhất 2.457 token), `OLLAMA_TIMEOUT=600`; Ollama đã tắt sau đợt. Trước sửa luật regex: EasyOCR 16%, Tesseract 7% (underthesea 16% / 7%); sửa và chấm trên cùng 31 mã nên số sau sửa hơi lạc quan. Luật regex đã sửa (luật cũ chạy trước, luật mới chỉ là dự phòng; mỗi luật có ở text OCR của ≥ 2 sản phẩm):
+  **Tổ hợp tốt nhất: EasyOCR + `llm` 37%**; nhanh và miễn phí nhất: EasyOCR + `regex` 30%. Giây / sản phẩm: regex 0,00; dict 0,01; yake 0,04; underthesea 0,11; llm 128,9 (EasyOCR) / 85,3 (Tesseract), TB 107,1. Số giây llm trong `summary_combo.md` tính cả file lỗi; đợt này 62/62 file llm ok, 0 file lỗi. llm: Ollama 0.40.14 bản zip (SHA256 khớp) ở `D:\ollama\app`, model `qwen2.5:3b` (1.841 MB) ở `D:\ollama\models`, `OLLAMA_CONTEXT_LENGTH=8192` (không lần nào bị cắt, dài nhất 2.457 token), `OLLAMA_TIMEOUT=600`; Ollama đã tắt sau đợt. Vòng 2 chỉ chạy lại regex / dict / underthesea; kết quả llm và yake giữ nguyên từ vòng 1 (md5 124 file không đổi).
+
+  % đúng theo trường (vòng 2; trong ngoặc là số ô có đáp án):
+
+  | trường | easy+dict | easy+llm | easy+regex | easy+underthesea | easy+yake | tess+dict | tess+llm | tess+regex | tess+underthesea | tess+yake |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | ten (29) | 17 | 21 | 14 | 14 | 76 | 3 | 10 | 3 | 3 | 34 |
+  | thuong_hieu (29) | 45 | 38 | 0 | 0 | 52 | 17 | 10 | 0 | 0 | 17 |
+  | khoi_luong (18) | 17 | 22 | 22 | 22 | 0 | 11 | 17 | 17 | 17 | 0 |
+  | thanh_phan_dau (28) | 55 | 52 | 39 | 39 | 52 | 36 | 32 | 20 | 20 | 49 |
+  | nang_luong_kcal (26) | 27 | 77 | 88 | 88 | 0 | 4 | 12 | 12 | 12 | 0 |
+  | dam_g (26) | 0 | 27 | 27 | 27 | 0 | 0 | 12 | 8 | 8 | 0 |
+  | beo_g (24) | 0 | 33 | 29 | 29 | 0 | 4 | 8 | 17 | 17 | 0 |
+  | carb_g (26) | 0 | 38 | 50 | 50 | 0 | 0 | 12 | 19 | 19 | 0 |
+  | nha_san_xuat (12) | 0 | 42 | 0 | 0 | 33 | 33 | 17 | 17 | 8 | 50 |
+  | bao_quan (12) | 67 | 25 | 8 | 8 | 50 | 42 | 8 | 17 | 17 | 8 |
+  | han_su_dung (9) | 11 | 0 | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+  `han_su_dung` yếu nhất: tốt nhất 11% (1/9 ô: EasyOCR đọc "071026" của 8934673300759, regex / dict / underthesea lấy được); Tesseract 0/9 ô với mọi extractor; llm 0/9 với cả hai OCR.
+
+  3 mốc (% và điểm / 239): trước sửa luật → vòng 1 → vòng 2. Sửa và chấm trên cùng 31 mã nên số sau sửa hơi lạc quan.
+
+  | tổ hợp | trước sửa luật | vòng 1 | vòng 2 |
+  |---|---|---|---|
+  | easyocr + regex | 16% (38) | 30% (72) | 30% (71) |
+  | easyocr + underthesea | 16% (38) | 30% (72) | 30% (71) |
+  | easyocr + dict | 22% (51,5) | 22% (52,5) | 22% (52,5) |
+  | tesseract + regex | 7% (17,7) | 12% (28,7) | 12% (27,7) |
+  | tesseract + underthesea | 7% (16,7) | 12% (27,7) | 11% (26,7) |
+  | tesseract + dict | 12% (29) | 12% (29) | 12% (29) |
+  | llm, yake (cả hai OCR) | không chạy lại | 37% / 13%, 26% / 15% | như vòng 1 |
+
+  Đếm từng ô (1.434 ô của regex / dict / underthesea × 2 OCR), trước sửa luật → vòng 2 (giá trị trước sửa luật lấy bằng code 9b931eb chạy lại trong bộ nhớ, khớp 1.434/1.434 ô với kết quả đã lưu): 1.282 ô không đổi; **rỗng → đúng 81**, **sai → đúng 6**; **rỗng → sai 63** (đạm 26, béo 22, carb 6, kcal 6, HSD 3: trước để trống, giờ ra số sai như "1449", "569", không mất điểm nhưng hiện sai thay vì "chưa có dữ liệu"); sai → sai khác giá trị 2 (khối lượng 8936036029819 "30g" thành "711l"); **đúng → sai 0, đúng → rỗng 0**. Vòng 1 → vòng 2: 9 ô đổi: đúng → rỗng 4 (`dam_g` của 8936025773181 × regex / underthesea × 2 OCR, do bỏ nhãn "dam (g)", đúng dự kiến); sai → rỗng 3 (HSD "848224" của 8936012061321, EasyOCR, không phải ngày hợp lệ); sai → sai 2 (`beo_g` 8938501141477 EasyOCR: "20" của "Calories from Fat" thành "00" của "Saturated Fat", đáp án 2,5). `khoi_luong` của 8936036027099 không giảm dù bỏ "g đọc thành 9": text ảnh khác của mã này có sẵn "108 g". Tesseract + underthesea 12% → 11% chỉ do làm tròn của cùng 1 điểm đó (27,7 → 26,7).
+
+  Mất thông tin ở bước rút trích (ô OCR đã có thông tin theo `results.csv` phần A, nhưng extractor ra sai / rỗng), vòng 2, trong ngoặc là trước sửa luật:
+
+  | tổ hợp | ô OCR có | rút đúng | mất | % mất |
+  |---|---|---|---|---|
+  | easyocr + llm | 102 | 63 | 37 | 36% |
+  | easyocr + regex | 102 | 53 (30) | 49 (72) | 48% (71%) |
+  | easyocr + underthesea | 102 | 53 (30) | 49 (72) | 48% (71%) |
+  | easyocr + dict | 102 | 28 (27) | 69 (70) | 68% (69%) |
+  | easyocr + yake | 102 | 17 | 81 | 79% |
+  | tesseract + llm | 42 | 18 | 23 | 55% |
+  | tesseract + regex | 42 | 20 (11) | 21 (30) | 50% (71%) |
+  | tesseract + underthesea | 42 | 19 (10) | 22 (31) | 52% (74%) |
+  | tesseract + dict | 42 | 12 | 29 | 69% |
+  | tesseract + yake | 42 | 6 | 34 | 81% |
+
+  Luật regex (trong `extract_regex`, `underthesea` dùng lại; mỗi luật có ở text OCR của ≥ 2 sản phẩm). Thứ tự chạy so với luật cũ: (1), (2), (4), (5) chỉ dùng khi luật cũ không ra gì; (3) bỏ mức tham chiếu 2000 kcal khỏi text trước khi chạy mọi luật năng lượng (cũ lẫn mới); (6) HSD 6 số được xét trước "ngày cuối cùng trong text" và áp cả cho `dict`; (7) số sau nhãn "khối lượng tịnh" được xét trước luật cũ (số + đơn vị đầu tiên ở 15 dòng đầu).
   (1) nhãn "năng lượng" đọc sai (`nang iuong`, `nang ivong`, `nang luqng`) và "calories" đọc sai (`galories`, `calorios`, `galones`), bỏ "calories from fat";
   (2) năng lượng: kcal đọc sai / mất / in trước số (`75,3kca]`, `(kcal) 72,4`, `calories-kcal: 150`);
   (3) bỏ mức tham chiếu "nhu cầu năng lượng 2000 kcal";
-  (4) đạm / béo / carb: "g" đọc thành 9 / 4 / 2 hoặc mất, "(g)" in trước số;
-  (5) "g" dính sau số thập phân đọc thành "9" (`7,09` là 7,0 g);
-  (6) HSD in liền 6 số sau nhãn HSD / EXP;
-  (7) ưu tiên số sau nhãn "khối lượng tịnh" (chịu `khol luong`, `khoi iuong`, "g" thành "9").
+  (4) đạm / béo / carb: "g" đọc thành 9 / 4 / 2 hoặc mất: lấy số đầu tiên sau nhãn rõ ràng (chất đạm, protein, chất béo, lipid, carbohydrat, hydrat cacbon, glucid; nhãn béo "fat" bỏ "calories from fat": `(?<!from )fat`);
+  (5) "g" dính sau số thập phân đọc thành "9" (`7,09` là 7,0 g); rủi ro: số thật 2 chữ số thập phân tận cùng 9 mà mất chữ g thì bị cắt (18,49 thành 18,4);
+  (6) HSD in liền 6 số sau nhãn HSD / EXP, chỉ nhận khi là ngày hợp lệ ddmmyy (ngày 01–31, tháng 01–12);
+  (7) số sau nhãn "khối lượng tịnh" (chịu `khol luong`, `khoi iuong`, `kho' luong`, `tjnh`).
+  Đã bỏ ở vòng 2 vì chỉ thấy ở 1 sản phẩm: nhãn "dam (g)" (8936025773181) và "g đọc thành 9" sau khối lượng tịnh (8936036027099, "TỊNH: 108 9"). "(g) in trước số" không phải luật riêng: có sẵn nhờ "số đầu tiên sau nhãn" của (4).
   Không sửa `dict/*.txt`, `truth.csv`. Đã sửa thêm: `IMAGE_ORDER` thêm `ingredients`, `nutrition`; file kết quả lỗi được chạy lại; `OLLAMA_TIMEOUT` (mặc định 180, quá 86400 cũng về 180); model mặc định `qwen2.5:3b`; `run_extract.py` / `score_combo.py` in tiếng Việt được khi ghi ra file; `score.py` hiện "–" cho công cụ chưa có file .txt.
-  Quyết định của dieu-phoi (05/11/2026, ocr-b vòng 0): (1) dùng qwen2.5:3b, không thử 7b: RAM 7,8 GB tổng, rảnh ~0,9 GB, không đạt điều kiện "RAM đủ"; (2) `run_extract.py` chạy lại file kết quả có `_status` lỗi, timeout Ollama đổi bằng `OLLAMA_TIMEOUT` (mặc định 180, chạy thật dùng 600); (3) chạy script bản worktree, cwd thư mục chính `test-ocr`, không sửa `dict/*.txt` trong đợt; (4) làm cả 6 gợi ý của reviewer ocr-a. Quyết định của người điều khiển (05/11/2026, vòng 1): thử 1 mã mất 301,5 giây (gồm nạp model lần đầu), sát mốc 300 giây, nên chạy llm cho EasyOCR trước; giây TB thật 128,9 ≤ 300 và ước tổng thời gian llm khoảng 2,3 giờ ≤ trần 5 giờ, nên chạy thêm llm cho Tesseract.
+  Quyết định của dieu-phoi (05/11/2026, ocr-b vòng 0): (1) dùng qwen2.5:3b, không thử 7b: RAM 7,8 GB tổng, rảnh ~0,9 GB, không đạt điều kiện "RAM đủ"; (2) `run_extract.py` chạy lại file kết quả có `_status` lỗi, timeout Ollama đổi bằng `OLLAMA_TIMEOUT` (mặc định 180, chạy thật dùng 600); (3) chạy script bản worktree, cwd thư mục chính `test-ocr`, không sửa `dict/*.txt` trong đợt; (4) làm cả 6 gợi ý của reviewer ocr-a. Quyết định của người điều khiển (05/11/2026, vòng 1): thử 1 mã mất 301,5 giây (gồm nạp model lần đầu), sát mốc 300 giây, nên chạy llm cho EasyOCR trước; giây TB thật 128,9 ≤ 300 và ước tổng thời gian llm khoảng 2,3 giờ (ước tính lúc quyết định) ≤ trần 5 giờ, nên chạy thêm llm cho Tesseract; thực tế khoảng 1,8 giờ (EasyOCR 66,5 phút + Tesseract 44 phút).
+  Quyết định của dieu-phoi (05/11/2026, ocr-b vòng 1, sau review): (5) bỏ nhãn 'dam (g)' và 'g đọc thành 9' của khối lượng vì chỉ thấy ở 1 sản phẩm (8936025773181, 8936036027099); (6) nhãn béo dự phòng bỏ 'calories from fat'; (7) HSD 6 số liền chỉ nhận ngày hợp lệ ddmmyy; (8) không chạy lại llm (Ollama đã tắt, kết quả llm vòng 1 giữ nguyên, md5 không đổi).
   Quyết định của chủ dự án (05/11/2026): không lấy key Google / Azure; tủ đồ đạt trên iPhone; ổ C ít chỗ, đồ tải về để ở ổ D.
-  Đề xuất cho app (giai đoạn 3): trên điện thoại chỉ có `tesseract.js` (EasyOCR, Ollama không chạy trong trình duyệt); hạn sử dụng nên đọc từ ảnh chụp riêng vùng HSD rồi dùng luật regex (nhãn HSD / EXP, ngày có dấu chấm / gạch, 6 số liền), cho người dùng sửa lại trước khi lưu.
+  Việc để sau: llm trả `han_su_dung` bằng chữ chép từ câu lệnh gửi cho model ("như in", "tên hạn sử dụng") hoặc câu mô tả ("06 tháng kể từ ngày sản xuất", "hiện tại"); đợt sau sửa câu lệnh `LLM_PROMPT` (vd ví dụ ngày cụ thể, không có thì để trống). Nhãn béo "fat" (cả luật cũ lẫn dự phòng) còn bắt "Saturated Fat" / "Trans Fat"; luật dự phòng còn ra số sai khi OCR dính 2 số liền ("1449", "569"): 63 ô rỗng → sai ở trên.
+  Đề xuất cho app (giai đoạn 3), **là GIẢ THUYẾT, chưa được đo**: bằng chứng hiện có rất mỏng: Tesseract (gần nhất với `tesseract.js`) đọc HSD đúng 0/9 ô với mọi extractor; ô HSD đúng duy nhất là EasyOCR (8934673300759 "071026"); llm 0/9. Trên điện thoại chỉ có `tesseract.js` (EasyOCR, Ollama không chạy trong trình duyệt). Hướng thử: chụp riêng vùng HSD rồi dùng luật regex (nhãn HSD / EXP, ngày có dấu chấm / gạch, 6 số liền). Giai đoạn 3 phải đo lại bằng `tesseract.js` trên ảnh cắt riêng vùng HSD trước khi chọn; chuỗi 6 số liền phải đổi sang ngày và kiểm hợp lệ trước khi gợi ý; người dùng luôn xác nhận / sửa trước khi lưu.
 - [ ] **F. Giai đoạn 3** (sau `ocr-b`): dùng kết quả `ocr-a` / `ocr-b` để chọn cách đọc hạn sử dụng từ ảnh (`tesseract.js`), rồi làm các mục giai đoạn 3 ở mục 2.
