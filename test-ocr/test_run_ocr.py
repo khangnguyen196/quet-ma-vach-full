@@ -375,6 +375,21 @@ class ScoreMainTest(unittest.TestCase):
         self.assertEqual(len(google), 1, summary)
         self.assertEqual(google[0][1:], ["google", "0.0", "0%", "?", "0", "2"])
 
+    def test_12c_field_table_dash_for_tool_without_txt(self):
+        # Bảng theo trường: công cụ không có file .txt nào (chỉ có dòng trong times.csv) hiện "–" ở mọi trường,
+        # công cụ có .txt vẫn hiện số. Cột theo thứ tự xếp hạng: tesseract, google.
+        summary = self.run_score(io.StringIO())
+        rows = [[c.strip() for c in line.strip("|").split("|")] for line in summary.splitlines() if line.startswith("|")]
+        header = [cells for cells in rows if cells[0] == "Trường"]
+        self.assertEqual(header, [["Trường", "tesseract", "google"]])
+        field_rows = {cells[0]: cells[1:] for cells in rows if cells[0] in score.FIELDS}
+        self.assertEqual(sorted(field_rows), sorted(score.FIELDS))
+        for f, cells in field_rows.items():
+            self.assertEqual(cells[1], "–", f"trường {f}")
+        self.assertEqual(field_rows["ten"][0], "100")         # "Mì gói" có trong text tesseract
+        self.assertEqual(field_rows["khoi_luong"][0], "100")  # "75g"
+        self.assertEqual(field_rows["dam_g"][0], "–")         # ô trống trong truth.csv: không chấm
+
     def test_13a_score_main_prints_vietnamese_to_cp1252_stdout(self):
         # Như `python score.py > file` trên Windows: stdout là file mã hóa cp1252 (không có chữ "ế", "ả"…).
         raw = io.BytesIO()
