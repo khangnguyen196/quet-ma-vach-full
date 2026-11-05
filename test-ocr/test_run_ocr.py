@@ -131,6 +131,60 @@ class GoogleRunLimitTest(unittest.TestCase):
         self.assertFalse((self.out / "google").exists())
         self.assertFalse((self.out / "api_usage.json").exists())
 
+    def test_6_bad_usage_file_keeps_old_behavior(self):
+        # Bộ đếm hỏng: không gọi Google, không ghi dòng bỏ qua (giữ cách cũ), file bộ đếm giữ nguyên từng byte.
+        self.make_photos(5)
+        self.out.mkdir()
+        usage = self.out / "api_usage.json"
+        usage.write_bytes(b"{hong")
+        self.run_main()   # không được ném lỗi
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.skipped(), [])
+        self.assertEqual(usage.read_bytes(), b"{hong")
+        self.assertFalse((self.out / "google").exists())
+        self.assertFalse((self.out / "api_usage.lock").exists())
+
+    def test_7_save_usage_error_does_not_count_or_call(self):
+        # Ghi bộ đếm tháng bị lỗi: script dừng bằng lỗi đó, chưa gọi Google lượt nào, bộ đếm lần chạy không tăng,
+        # file khóa vẫn được xóa.
+        self.make_photos(5)
+
+        def broken_save(usage):
+            raise OSError("lỗi ghi giả")
+
+        with mock.patch.object(run_ocr, "save_usage", broken_save):
+            with self.assertRaises(OSError):
+                self.run_main()
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(run_ocr.run_calls.get("google", 0), 0)
+        self.assertFalse((self.out / "api_usage.lock").exists())
+
+    def test_8_azure_month_cap_writes_skip_rows(self):
+        # Azure đã ở trần tháng: không gọi lượt nào, mọi ảnh có dòng "bỏ qua theo luật chi phí" với tool azure.
+        images = self.make_photos(5)
+        self.out.mkdir()
+        usage = {"azure": {run_ocr.month_key(): run_ocr.cap("azure")}}
+        (self.out / "api_usage.json").write_text(json.dumps(usage), encoding="utf-8")
+        azure_calls = []
+
+        def fake_azure(path):
+            azure_calls.append(path)
+            return "chữ giả"
+
+        with mock.patch.dict(run_ocr.TOOLS, {"azure": (fake_azure, lambda: True)}), \
+                mock.patch.dict(os.environ, {"AZURE_VISION_ENDPOINT": "gia", "AZURE_VISION_KEY": "gia"}), \
+                mock.patch.object(run_ocr, "wait_for_azure", lambda: None), \
+                mock.patch.object(sys, "argv", ["run_ocr.py", "--tools", "azure"]):
+            self.run_main()
+        self.assertEqual(azure_calls, [])
+        rows = self.times_rows()
+        self.assertEqual(len(rows), 5)
+        self.assertEqual([(r["tool"], r["code"], r["image"], r["status"]) for r in rows],
+                         [("azure", code, name, SKIP) for code, name in images])
+        self.assertEqual(list(self.out.glob("**/*.txt")), [])
+        self.assertEqual(json.loads((self.out / "api_usage.json").read_text(encoding="utf-8")), usage)
+        self.assertFalse((self.out / "api_usage.lock").exists())
+
 
 class ReadTimesTest(unittest.TestCase):
     def test_5_read_times_skips_cost_rows(self):
