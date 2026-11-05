@@ -1,6 +1,7 @@
 """
-Test nhỏ cho phần đếm lượt gọi Google trong run_ocr.py, phần đọc times.csv trong score.py và hàm found() so khớp giá trị trong score.py.
-KHÔNG gọi Google / Azure thật: hàm OCR Google được thay bằng hàm giả, mọi file ghi vào thư mục tạm.
+Test nhỏ cho phần đếm lượt gọi Google và Azure trong run_ocr.py (trần lần chạy, trần tháng, bộ đếm hỏng, ghi bộ đếm),
+phần đọc times.csv và danh sách công cụ trong score.py, và hàm found() so khớp giá trị trong score.py.
+KHÔNG gọi Google / Azure thật: hàm OCR Google / Azure được thay bằng hàm giả, mọi file ghi vào thư mục tạm.
 
 Chạy (trong thư mục test-ocr):
     .venv\\Scripts\\python -B -m unittest -v test_run_ocr        (Windows)
@@ -23,8 +24,9 @@ import score            # noqa: E402
 SKIP = "bỏ qua theo luật chi phí"
 
 
-class GoogleRunLimitTest(unittest.TestCase):
-    """Chạy run_ocr.main() với --tools google trên thư mục tạm, hàm Google giả."""
+class PaidServiceUsageTest(unittest.TestCase):
+    """Bộ đếm lượt gọi dịch vụ trả phí (Google, Azure) của run_ocr.py, trên thư mục tạm.
+    Mặc định chạy run_ocr.main() với --tools google và hàm Google giả; test Azure tự vá thêm hàm Azure giả và --tools azure."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -148,13 +150,17 @@ class GoogleRunLimitTest(unittest.TestCase):
         # Ghi bộ đếm tháng bị lỗi: script dừng bằng lỗi đó, chưa gọi Google lượt nào, bộ đếm lần chạy không tăng,
         # file khóa vẫn được xóa.
         self.make_photos(5)
+        save_calls = []
 
         def broken_save(usage):
+            save_calls.append(usage)
             raise OSError("lỗi ghi giả")
 
         with mock.patch.object(run_ocr, "save_usage", broken_save):
-            with self.assertRaises(OSError):
+            # Lỗi phải đúng là lỗi của broken_save (không phải OSError khác ở chỗ khác)
+            with self.assertRaisesRegex(OSError, "lỗi ghi giả"):
                 self.run_main()
+        self.assertEqual(len(save_calls), 1)
         self.assertEqual(self.calls, 0)
         self.assertEqual(run_ocr.run_calls.get("google", 0), 0)
         self.assertFalse((self.out / "api_usage.lock").exists())
@@ -184,6 +190,18 @@ class GoogleRunLimitTest(unittest.TestCase):
         self.assertEqual(list(self.out.glob("**/*.txt")), [])
         self.assertEqual(json.loads((self.out / "api_usage.json").read_text(encoding="utf-8")), usage)
         self.assertFalse((self.out / "api_usage.lock").exists())
+
+    def test_10_save_usage_replace_error_cleans_tmp(self):
+        # os.replace lỗi: save_usage ném lại đúng lỗi đó, xóa file .tmp, bộ đếm cũ giữ nguyên từng byte.
+        self.out.mkdir()
+        usage_file = self.out / "api_usage.json"
+        old = json.dumps({"google": {run_ocr.month_key(): 5}}).encode("utf-8")
+        usage_file.write_bytes(old)
+        with mock.patch.object(run_ocr.os, "replace", side_effect=OSError("lỗi thay giả")):
+            with self.assertRaisesRegex(OSError, "lỗi thay giả"):
+                run_ocr.save_usage({"google": {run_ocr.month_key(): 6}})
+        self.assertFalse((self.out / "api_usage.json.tmp").exists())
+        self.assertEqual(usage_file.read_bytes(), old)
 
 
 class ReadTimesTest(unittest.TestCase):
