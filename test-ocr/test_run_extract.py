@@ -210,9 +210,19 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("Khol luong tinh: 108 9")["khoi_luong"], "")
 
     def test_p5k_date_six_digits_must_be_valid_ddmmyy(self):
-        # 6 số liền sau HSD chỉ nhận khi là ngày hợp lệ ddmmyy (ngày 01-31, tháng 01-12).
+        # 6 số liền sau HSD chỉ nhận khi ddmmyy nằm trong khoảng: chỉ kiểm khoảng ngày 01-31, tháng 01-12.
         self.assertEqual(self.rx("HSD: 848224")["han_su_dung"], "")
         self.assertEqual(self.rx("HSD:071026")["han_su_dung"], "071026")
+
+    def test_p5o_date_six_digits_range_bounds(self):
+        # Hai đầu của khoảng: ngày 00 / 32 và tháng 13 bị loại; 31/12 được nhận.
+        self.assertEqual(self.rx("HSD: 001026")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 321026")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 011326")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD: 311226")["han_su_dung"], "311226")
+        # Giới hạn đã biết: chỉ kiểm khoảng, không kiểm lịch, nên 30/02 vẫn được nhận.
+        # Đợt sau đổi sang kiểm lịch thật thì sửa ca này (30/02 phải ra "").
+        self.assertEqual(self.rx("HSD: 300226")["han_su_dung"], "300226")
 
     def test_p5l_carb_two_decimals_ending_9_with_g_unit(self):
         # Có đơn vị g thì luật cũ lấy nguyên số, không cắt số 9 cuối (unglue_g chỉ dùng khi mất g).
