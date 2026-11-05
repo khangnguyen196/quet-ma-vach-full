@@ -53,6 +53,22 @@ def list_tools(out):
     return sorted(d.name for d in out.iterdir()
                   if d.is_dir() and d.name != "extract" and not d.name.startswith("."))
 
+def all_tools(out):
+    """Mọi công cụ cần có trong summary = thư mục con của outputs (list_tools) + tên công cụ có ít nhất 1 dòng
+    trong outputs/times.csv. run_ocr.py chỉ tạo outputs/<công cụ>/ khi có ảnh ok, nên công cụ bị bỏ qua hết
+    (vd Google chạm trần tháng) chỉ có dòng trong times.csv. Vẫn bỏ "extract" và tên bắt đầu bằng dấu chấm."""
+    names = set(list_tools(out)) if out.is_dir() else set()
+    names |= {r["tool"] for r in last_rows(out / "times.csv")
+              if r["tool"] and r["tool"] != "extract" and not r["tool"].startswith(".")}
+    return sorted(names)
+
+def read_text(out, tool, code):
+    """Ghép text OCR của mọi ảnh thuộc mã `code` của công cụ `tool`. Chưa có thư mục công cụ -> chuỗi rỗng."""
+    d = out / tool
+    if not d.is_dir():
+        return ""
+    return "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in d.glob(f"{code}__*.txt"))
+
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFC", s or "").lower()
     s = s.replace(",", ".")               # 8,7 và 8.7 coi như nhau
@@ -93,8 +109,8 @@ def main():
     if not truth:
         raise SystemExit("truth.csv chưa có dòng nào.")
 
-    tools = list_tools(OUT)
-    if not tools:
+    tools = all_tools(OUT)
+    if not tools:   # chỉ báo khi cả thư mục outputs/<công cụ> lẫn times.csv đều không có công cụ nào
         raise SystemExit("Chưa có kết quả OCR. Chạy python run_ocr.py trước.")
 
     times, errors = read_times(OUT / "times.csv")
@@ -108,8 +124,7 @@ def main():
         checked = [f for f in FIELDS if t.get(f, "").strip()]
         max_per_tool += len(checked)
         for tool in tools:
-            text = "\n".join(p.read_text(encoding="utf-8", errors="ignore")
-                             for p in (OUT / tool).glob(f"{code}__*.txt"))
+            text = read_text(OUT, tool, code)
             for f in checked:
                 s = score_field(f, t[f], text)
                 rows.append([tool, code, f, t[f], round(s, 2)])
