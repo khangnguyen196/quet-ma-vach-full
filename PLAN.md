@@ -10,7 +10,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 
 ## 2. Tính năng theo giai đoạn
 
-### Giai đoạn 1 – Tra cứu (đã có demo, chuyển vào code dự án)
+### Giai đoạn 1 – Tra cứu (xong 05/11/2026)
 - [x] Quét mã bằng camera (html5-qrcode)
 - [x] Chụp ảnh mã vạch rồi đọc (dự phòng khi camera không mở được)
 - [x] Nhập số mã vạch bằng tay
@@ -18,7 +18,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 - [x] Trạng thái: đang tra, không tìm thấy, lỗi mạng
 - [x] Lịch sử quét (localStorage, 10 mã gần nhất)
 
-> Ghi chú: các mục trên tick theo code (đợt khoi-dong). Camera và chụp ảnh chưa thử trên điện thoại thật (xem mục 6 bước 4). 11/2026: iPhone báo không đọc được mã cả khi chụp gần; app thu nhỏ ảnh về 1600/1000 px và thử xoay 90° trước khi đọc; chờ thử lại trên iPhone, nút Bật camera chưa thử trên iPhone. 05/11/2026: trên iPhone (link Pages) nhập mã tra được, "Chụp ảnh mã" đọc được (chủ dự án xác nhận); chỉ còn nút "Bật camera" chưa thử trên iPhone.
+> Ghi chú: giai đoạn 1 xong 05/11/2026: trên iPhone Safari (link Pages) nhập mã, "Bật camera", "Chụp ảnh mã" đều đạt (chủ dự án xác nhận). Trước đó iPhone không đọc được mã khi chụp gần; app đã thu nhỏ ảnh về 1600/1000 px và thử xoay 90° trước khi đọc.
 
 ### Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn
 - [ ] Hiện xuất xứ nguyên liệu, nơi sản xuất, nước bán, bảo quản, cách dùng, nhãn chứng nhận (halal, organic…) – trường nào trống thì ẩn
@@ -51,7 +51,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 ## 4. Cấu trúc thư mục
 
 ```
-quet-ma-vach/
+quet-ma-vach-full/
 ├── index.html          # trang chính
 ├── src/
 │   ├── main.js         # nối các phần lại, xử lý sự kiện
@@ -109,8 +109,10 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 
 ## 6. Bắt đầu – làm theo thứ tự
 
+Đã xong (repo + GitHub Pages), giữ để cài lại máy.
+
 1. Cài Node.js (bản LTS) nếu chưa có: https://nodejs.org (cần 20.19+ trong dòng 20, hoặc 22.12+; xem README)
-2. Mở terminal trong thư mục `quet-ma-vach`, chạy:
+2. Mở terminal trong thư mục `quet-ma-vach-full`, chạy:
    ```
    npm install
    cp .env.example .env
@@ -119,12 +121,13 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 3. Terminal hiện 2 địa chỉ. Trên máy tính mở `https://localhost:5173`. Trên điện thoại (cùng Wi-Fi) mở địa chỉ `https://192.168.x.x:5173`, trình duyệt báo chứng chỉ không tin cậy → bấm "Nâng cao" → "Tiếp tục" (chỉ khi dev).
 4. Bấm "Bật camera", quét thử gói mì. Nếu ra kết quả là giai đoạn 1 xong phần khung.
 5. Tạo repo GitHub, commit lần đầu. Mỗi tính năng làm xong thì tick vào checklist ở mục 2 và commit.
-6. Khi muốn cho người khác dùng: đưa lên GitHub Pages theo mục "Đưa lên GitHub Pages" trong README (push `main` là tự build và deploy), hoặc `npm run build` rồi kéo thả thư mục `dist/` vào Netlify Drop.
+6. Khi muốn cho người khác dùng: đưa lên GitHub Pages theo mục "Đưa lên GitHub Pages" trong README: lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy. Cách khác: `npm run build` rồi kéo thả thư mục `dist/` vào Netlify Drop.
 
 ## 7. Vấn đề đã biết
 
 - Camera chỉ mở được trên HTTPS hoặc localhost → dev dùng `@vitejs/plugin-basic-ssl`, deploy dùng Netlify/GitHub Pages.
 - iPhone: Safari chỉ cho mở camera sau khi người dùng bấm nút (không tự bật khi vào trang).
+- "Chụp ảnh mã" có lúc không đọc được ảnh mờ, chụp quá gần, hoặc khi mở trong trình duyệt của Zalo/Messenger, nên dùng Safari.
 - Hàng Việt trên Open Food Facts nhiều mã có nhưng thiếu dinh dưỡng, thiếu bảo quản → luôn có trạng thái "chưa có dữ liệu" và cho nhập tay.
 - Open Food Facts yêu cầu app tử tế: không gọi liên tục, cache kết quả đã tra trong localStorage.
 - Trang demo chạy bên trong Claude bị chặn gọi internet; dự án thật chạy bằng Vite thì gọi API bình thường.
@@ -132,23 +135,24 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Đã xử lý: app tách loại lỗi khi tra cứu. HTTP 404 (hoặc `status` khác 1) → "không tìm thấy"; 5xx/429 → "Open Food Facts đang lỗi hoặc quá tải (HTTP …)"; HTTP 200 mà JSON hỏng → cùng câu đó nhưng không kèm mã HTTP; quá 9 giây → "phản hồi chậm"; fetch bị từ chối → "Không kết nối được tới Open Food Facts", gợi ý "Kiểm tra mạng, hoặc Open Food Facts đang quá tải" (Safari không phân biệt được mất mạng với trang lỗi 503 thiếu CORS); lỗi dữ liệu khi hiển thị → "Không hiển thị được dữ liệu"; lỗi khác không rõ loại (ví dụ lỗi lập trình) → "Có lỗi bất thường khi tra cứu", nhờ chụp lại dòng chữ nhỏ. Dưới câu báo có dòng nhỏ `tên lỗi: nội dung lỗi`, và lỗi luôn được ghi ra console. Lưu ý: mã `0000000000000` được trả HTTP 200 kèm `{status: 0}`, không phải 404.
 - iPhone Safari báo "Không kết nối được" với 8934563163150 dù mở thẳng URL API ra JSON: chưa tìm ra nguyên nhân chắc chắn. Đã đo trên máy tính: URL app gọi trả 200 trong 0,7–0,9 giây, có header CORS; dữ liệu đúng kiểu. Giả thuyết mạnh nhất: lúc đó Open Food Facts trả trang lỗi 503 không kèm header CORS (đã thấy với API search, 11/2026) → Safari chặn và ném `TypeError: Load failed`, app không biết là 503 nên báo mất mạng. Cần thử lại trên iPhone và đọc dòng lỗi nhỏ để chốt.
 - Đã xử lý (05/11/2026): app gửi app_name / app_version cho Open Food Facts; muốn bỏ thì xóa 2 tham số trong src/off.js.
-- Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (hiện tại như vậy; chờ chủ dự án xác nhận có muốn lưu cả mã không tìm thấy không).
+- Lịch sử chỉ lưu mã tìm thấy; chốt: giữ như hiện tại (chủ dự án, 05/11/2026).
 
 ## 8. Việc cần làm tiếp (cập nhật 05/11/2026)
 
-Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma-vach-full/ (repo https://github.com/khangnguyen196/quet-ma-vach-full, push `main` là tự deploy). Đợt `khoi-dong` và `sua-va-dua-len` đã đóng. Quy tắc làm việc (toàn quyền, chỉ dùng mức miễn phí, không dùng API Claude/Anthropic) nằm trong `.claude/du-an.md`.
+Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma-vach-full/ (repo https://github.com/khangnguyen196/quet-ma-vach-full). Lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy. Đợt `khoi-dong`, `sua-va-dua-len` và `chi-phi-1` (trần 60 lượt Google mỗi lần chạy, 800 lượt/tháng; app gửi app_name/app_version; main cb5f449) đã đóng. Quy tắc làm việc (toàn quyền, chỉ dùng mức miễn phí, không dùng API Claude/Anthropic) nằm trong `.claude/du-an.md`.
 
 ### Chủ dự án tự làm (máy không làm thay được)
-- [ ] Thử nút "Bật camera" trên iPhone ở link app. Đạt thì giai đoạn 1 xong hẳn; lỗi thì chụp dòng chữ nhỏ dưới câu báo gửi Claude Code.
-- [ ] Xác nhận lịch sử chỉ lưu mã tìm thấy (đề xuất: giữ như hiện tại), xem mục 7.
-- [ ] Cài Tesseract kèm tiếng Việt: `winget install --id UB-Mannheim.TesseractOCR -e --interactive`, ở bước chọn thành phần tick Vietnamese trong "Additional language data". Kiểm: `tesseract --list-langs` có `eng` và `vie`.
-- [ ] Chụp 30 sản phẩm × 3 ảnh (front, back, date) vào `test-ocr/photos/<mã vạch>/`; điền `test-ocr/truth.csv` (theo dòng mẫu); bổ sung `test-ocr/dict/brands.txt`. Có thể làm 5 món trước để thử quy trình.
+- [ ] Trước đợt `anh-mang`: thêm vào `.claude/du-an.md` ngoại lệ cho Claude Code điền `test-ocr/truth.csv` một lần (hồ sơ đang cấm sửa truth.csv).
+- [x] Thử nút "Bật camera" trên iPhone ở link app. (05/11/2026: đạt, giai đoạn 1 xong)
+- [x] Xác nhận lịch sử chỉ lưu mã tìm thấy, xem mục 7. (05/11/2026: giữ như hiện tại)
+- [x] Cài Tesseract kèm tiếng Việt: `winget install --id UB-Mannheim.TesseractOCR -e --interactive` (giữ lệnh để cài lại máy), ở bước chọn thành phần tick Vietnamese trong "Additional language data". Kiểm: `& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs` (phải có `eng` và `vie`). Lệnh `tesseract` không chạy được thì bỏ dấu `#` ở dòng `TESSERACT_CMD` trong `test-ocr\.env`. (05/11/2026: đã cài kèm tiếng Việt, dòng `TESSERACT_CMD` đã bật)
 - [ ] (Tùy chọn) Lấy key Azure gói F0 (hết lượt chỉ báo lỗi, không trừ tiền) hoặc Google Vision khi tài khoản chưa nâng cấp trả phí, tự điền `test-ocr/.env`. Không key vẫn chạy so sánh được với công cụ miễn phí.
-- [ ] (Tùy chọn) Quyết có cài easyocr không (tải ~257 MB, sau cài ~600–900 MB).
 - [x] Kiểm Claude Code đăng nhập bằng gói Claude (Pro/Max) hay API key (`/status`); API key nghĩa là đang tốn tiền. (05/11/2026: gói Team, không phải API key)
 
-### Claude Code làm (mỗi việc một đợt `/dot`)
-- [ ] **A. Đợt `gd2`** (làm ngay được): giai đoạn 2 ở mục 2 (xuất xứ/bảo quản, tủ đồ ăn, hạn sử dụng). Sửa luôn vấn đề ở mục 7: thương hiệu, khối lượng, phân loại, ảnh phải hiện "chưa có dữ liệu" khi trống. Push `main`, chờ deploy, test trên link Pages bằng Chromium + WebKit, báo cáo kèm danh sách chủ dự án thử trên iPhone.
-- [ ] **B. Đợt `ocr-a`** (sau khi có ảnh và `truth.csv`): sửa `test-ocr/score.py` chỉ tính kết quả cuối của mỗi ảnh, bỏ qua thư mục extract; chạy `run_ocr.py` rồi `score.py`; công cụ thiếu (key, Tesseract, easyocr) thì bỏ qua và ghi rõ. Ra `outputs/summary.md`: OCR nào đầy đủ nhất, trường nào hay sai, số lượt gọi Google/Azure đã dùng trong tháng.
-- [ ] **C. Đợt `ocr-b`** (sau B): chạy `run_extract.py` với regex, dict, yake, underthesea, llm (llm chỉ qua Ollama, được tự cài Ollama + qwen2.5:7b nếu máy đủ chỗ) rồi `score_combo.py`; sửa luật regex/dict nếu trượt vì lỗi OCR lặp lại. Ra `outputs/summary_combo.md` và đề xuất tổ hợp OCR + extractor cho app (miễn phí, chạy trên điện thoại).
-- [ ] **D. Giai đoạn 3** (sau C): dùng kết quả B/C để chọn cách đọc hạn sử dụng từ ảnh (`tesseract.js`), rồi làm các mục giai đoạn 3 ở mục 2.
+### Claude Code làm (mỗi việc một đợt `/dot`, theo thứ tự A → F)
+- [x] **A. Đợt `plan-sua`** (05/11/2026): sửa chữ PLAN.md, CLAUDE.md, README.md (diễn đạt "lên main" theo chế độ C, cập nhật theo chủ dự án), lên main.
+- [ ] **B. Đợt `anh-mang`**: lấy ảnh giấy phép mở từ Open Food Facts (ảnh hạn sử dụng thêm từ Wikimedia Commons) vào `test-ocr/photos/<mã vạch>/`; Claude Code điền `test-ocr/truth.csv` (chủ dự án cho phép 1 lần, cần ngoại lệ trong hồ sơ trước) và bổ sung `test-ocr/dict/brands.txt`. Cảnh báo: repo công khai; `test-ocr/photos/` đã có trong `test-ocr/.gitignore`; không bao giờ `git add -f` ảnh.
+- [ ] **C. Đợt `gd2`** (làm ngay được): giai đoạn 2 ở mục 2 (xuất xứ/bảo quản, tủ đồ ăn, hạn sử dụng). Sửa luôn vấn đề ở mục 7: thương hiệu, khối lượng, phân loại, ảnh phải hiện "chưa có dữ liệu" khi trống. Thêm comment ở `src/off.js`: APP_NAME là tên repo, không phải tên trong package.json. Lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy; chờ deploy xong, test trên link Pages bằng Chromium + WebKit, báo cáo kèm danh sách chủ dự án thử trên iPhone.
+- [ ] **D. Đợt `ocr-a`** (sau `anh-mang`): sửa `test-ocr/score.py` chỉ tính kết quả cuối của mỗi ảnh, bỏ qua thư mục extract; siết test_7, sửa docstring / tên class test nói cả Google lẫn Azure, dọn `api_usage.json.tmp` sót lại; chạy `run_ocr.py` rồi `score.py`; easyocr được cài luôn theo hồ sơ (tải ~257 MB, sau cài ~600–900 MB); công cụ thiếu (key, Tesseract) thì bỏ qua và ghi rõ. Ra `outputs/summary.md`: OCR nào đầy đủ nhất, trường nào hay sai, số lượt gọi Google/Azure đã dùng trong tháng.
+- [ ] **E. Đợt `ocr-b`** (sau `ocr-a`): chạy `run_extract.py` với regex, dict, yake, underthesea, llm (llm chỉ qua Ollama, được tự cài Ollama + qwen2.5:7b nếu máy đủ chỗ) rồi `score_combo.py`; sửa luật regex/dict nếu trượt vì lỗi OCR lặp lại. Ra `outputs/summary_combo.md` và đề xuất tổ hợp OCR + extractor cho app (miễn phí, chạy trên điện thoại).
+- [ ] **F. Giai đoạn 3** (sau `ocr-b`): dùng kết quả `ocr-a` / `ocr-b` để chọn cách đọc hạn sử dụng từ ảnh (`tesseract.js`), rồi làm các mục giai đoạn 3 ở mục 2.

@@ -22,7 +22,7 @@ Thư mục `dist/` kéo thả vào https://app.netlify.com/drop là có link HTT
 - Vào Settings → Pages → Source chọn **GitHub Actions**, làm việc này TRƯỚC khi push nhánh `main` có file `.github/workflows/deploy.yml`.
 - Push nhánh `main` lên đầu tiên (để `main` là nhánh mặc định), rồi mới push nhánh khác.
 - Nếu lần chạy đầu báo đỏ vì chưa bật Pages: bật xong vào tab Actions bấm Re-run.
-- Từ đó mỗi lần push `main`, workflow tự chạy `npm ci` + `npm run build` rồi đưa `dist/` lên Pages; xem tiến độ ở tab Actions.
+- Từ đó mỗi lần lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy: workflow chạy `npm ci` + `npm run build` rồi đưa `dist/` lên Pages; xem tiến độ ở tab Actions.
 - Link app có dạng https://khangnguyen196.github.io/quet-ma-vach-full/
 
 Kế hoạch chi tiết: xem `PLAN.md`.

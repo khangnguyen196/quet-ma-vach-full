@@ -10,7 +10,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `html5-qrcode` để quét; `tesseract.js` chỉ cài khi tới giai đoạn 3.
 - Dữ liệu: Open Food Facts API v2 (không cần key). Lưu trữ: localStorage.
 - Lệnh: `npm run dev` (dev có HTTPS), `npm run build`, `npm run preview`.
-- Đưa lên web: push nhánh `main` lên GitHub → GitHub Actions (workflow "Deploy GitHub Pages", `.github/workflows/deploy.yml`) tự chạy `npm ci` + `npm run build` rồi deploy `dist/` lên GitHub Pages. Không cần build hay upload tay.
+- Đưa lên web: lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions (workflow "Deploy GitHub Pages", `.github/workflows/deploy.yml`) tự chạy `npm ci` + `npm run build` rồi deploy `dist/` lên GitHub Pages. Không cần build hay upload tay.
 
 ## Cấu trúc
 - `src/main.js` – nối sự kiện, điều phối. Không chứa logic gọi API hay HTML dài.
