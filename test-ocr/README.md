@@ -79,7 +79,11 @@ Mở `truth.csv`, mỗi sản phẩm 1 dòng, chép đúng theo bao bì:
    - Google: trang giá chính thức https://cloud.google.com/vision/pricing (đọc ngày 05/11/2026) ghi "Document Text Detection 0 count to 1,000 count $0.00 (Free)", tức 1.000 ảnh miễn phí mỗi tháng. Trang giá **không ghi** có phải bật billing (thanh toán) hay không. Cách làm: tạo project tại https://console.cloud.google.com, bật Cloud Vision API, tạo service account, tải file JSON, ghi đường dẫn vào `GOOGLE_APPLICATION_CREDENTIALS`. **Nếu Google đòi bật billing hoặc gắn thẻ thì KHÔNG làm, bỏ qua Google** (để trống key, script tự bỏ qua).
    - Azure: trang giá chính thức https://azure.microsoft.com/pricing/details/cognitive-services/computer-vision/ (đọc ngày 05/11/2026) ghi gói "Free (F0) … 5,000 free transactions per month 20 transactions per minute". Tạo resource "Azure AI Vision" tại https://portal.azure.com, **chỉ chọn gói F0 (Free)**, chép Endpoint và Key. Trang giá không ghi có cần thẻ hay không; **nếu bị đòi thẻ hoặc chỉ có gói trả phí thì bỏ qua Azure** (Azure for Students thường không cần thẻ, nhưng phải tự kiểm lúc đăng ký).
    - Claude: **không dùng**, không cần key (dự án không gọi API Claude / Anthropic).
-   - Ollama (cho extractor `llm` ở phần B): cài tại https://ollama.com, chạy `ollama pull qwen2.5:7b`. `.env` mặc định đã có `LLM_PROVIDER=ollama`.
+   - Ollama (cho extractor `llm` ở phần B): dùng bản zip độc lập, không cần bộ cài và không đặt biến môi trường hệ thống. Tải `ollama-windows-amd64.zip` ở https://github.com/ollama/ollama/releases (kiểm SHA256 theo file `sha256sum.txt` cùng bản), giải nén vào `D:\ollama\app` (máy ổ C ít chỗ thì để mọi thứ ở ổ D). Chạy (Git Bash), để cửa sổ này mở:
+     ```
+     OLLAMA_MODELS='D:\ollama\models' OLLAMA_CONTEXT_LENGTH=8192 /d/ollama/app/ollama.exe serve
+     ```
+     Ở cửa sổ khác: `OLLAMA_MODELS='D:\ollama\models' /d/ollama/app/ollama.exe pull qwen2.5:3b` (khoảng 2 GB). Máy RAM nhiều (16 GB trở lên) mới dùng `qwen2.5:7b` (đặt `OLLAMA_MODEL=qwen2.5:7b`). `.env` mặc định đã có `LLM_PROVIDER=ollama`; model mặc định là `qwen2.5:3b`; `OLLAMA_TIMEOUT` là số giây chờ mỗi sản phẩm (mặc định 180, máy chậm đặt 600).
 
 ## Bước 5 – Chạy
 
@@ -91,7 +95,9 @@ python score.py              # chấm điểm → outputs/results.csv và output
 
 `--tools claude` sẽ bị từ chối (in "không dùng" rồi bỏ qua).
 
-Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ qua. Muốn chạy lại từ đầu thì xóa thư mục `outputs/<công cụ>` (chạy lại Google / Azure sẽ tốn thêm lượt gọi, xem bộ đếm dưới đây).
+Ghi log ra file trong Windows PowerShell 5.1 bằng `>` (vd `python score.py > log.txt`) có thể làm méo chữ tiếng Việt trong file log. Muốn đọc kết quả thì mở `outputs/summary.md`, hoặc chạy `[Console]::OutputEncoding = [Text.UTF8Encoding]::new()` trước.
+
+Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ qua. Muốn chạy lại từ đầu thì xóa thư mục `outputs/<công cụ>` rồi chạy lại ngay; chưa chạy lại thì công cụ đó hiện 0 điểm vì `times.csv` còn dòng cũ (chạy lại Google / Azure sẽ tốn thêm lượt gọi, xem bộ đếm dưới đây).
 
 ## Bộ đếm lượt gọi (Google, Azure)
 
@@ -110,7 +116,7 @@ Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ 
 - **Khoảng nghỉ đầu / cuối tháng**: script không gọi Google / Azure trong 12 giờ cuối và 12 giờ đầu mỗi tháng theo giờ UTC (từ 19:00 giờ Việt Nam ngày cuối tháng tới 19:00 giờ Việt Nam ngày 1). Lúc đó có nơi đã sang tháng mới, có nơi chưa, nên không chắc Google / Azure tính lượt gọi vào tháng nào. Script in lý do và bỏ qua dịch vụ; chạy lại sau 19:00 giờ Việt Nam ngày 1.
 - File `api_usage.json` hỏng (không đọc được) thì script coi như đã chạm trần, không gọi Google / Azure, và không ghi đè file đó: hãy tự sửa lại cho đúng dạng `{"google": {"2026-11": 12}, "azure": {"2026-11": 3}}`.
 - Cuối mỗi lần chạy, script in bảng: dịch vụ, tháng, đã dùng / trần tháng, lượt của lần chạy này / trần lần chạy (Google: `… / 60`, Azure: không có trần).
-- Test phần đếm, hàm `found()` của `score.py`, phần đọc times.csv, danh sách công cụ, in tiếng Việt khi ghi ra file (không gọi Google / Azure thật, không đọc `.env`, chỉ dùng thư mục tạm; cần `pillow`, `python-dotenv`, `rapidfuzz`), trong thư mục `test-ocr`: `.venv\Scripts\python -B -m unittest -v test_run_ocr` (Windows) hoặc `.venv/bin/python -B -m unittest -v test_run_ocr` (macOS / Linux).
+- Test phần đếm, hàm `found()` của `score.py`, phần đọc times.csv, danh sách công cụ, in tiếng Việt khi ghi ra file (không gọi Google / Azure thật, không đọc `.env`, chỉ dùng thư mục tạm; cần `pillow`, `python-dotenv`, `rapidfuzz`), trong thư mục `test-ocr`: `.venv\Scripts\python -B -m unittest -v test_run_ocr test_run_extract` (Windows) hoặc `.venv/bin/python -B -m unittest -v test_run_ocr test_run_extract` (macOS / Linux). `test_run_extract` thử `run_extract.py` / `score_combo.py` của phần B (không gọi Ollama thật).
 - File này và file khóa `api_usage.lock` **không commit** (nằm trong `outputs/`, đã có trong `.gitignore`).
 - Bộ đếm chỉ biết lượt gọi từ script này, trên máy này. Dùng cùng key ở nơi khác (máy khác, trang web của Google / Azure…) thì bộ đếm không biết, phải tự cộng vào.
 - **Đừng xóa file giữa tháng**: xóa là mất số đếm, script sẽ tưởng tháng này chưa gọi lần nào.
@@ -123,7 +129,7 @@ Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ 
 - Tỷ lệ đúng theo từng trường: sẽ thấy ví dụ "hạn sử dụng" thường thấp nhất vì in dạng chấm (dot-matrix).
 - Thời gian trung bình mỗi ảnh, số ảnh lỗi, số ảnh bỏ qua theo luật chi phí (cột "Ảnh bỏ qua (luật chi phí)").
 - `outputs/times.csv` được ghi nối thêm qua nhiều lần chạy, nên `score.py` chỉ đọc **dòng cuối của mỗi ảnh** (theo công cụ, mã, tên ảnh): ảnh lần trước lỗi hoặc bị bỏ qua, lần sau ok thì chỉ tính là ok, thời gian chỉ tính một lần.
-- `score.py` coi là công cụ OCR: thư mục con của `outputs/` và tên công cụ có dòng trong `outputs/times.csv` (công cụ bị bỏ qua hết theo luật chi phí chưa có thư mục nhưng vẫn hiện, điểm 0), trừ `extract` (do `run_extract.py` ở phần B tạo) và tên bắt đầu bằng dấu chấm.
+- `score.py` coi là công cụ OCR: thư mục con của `outputs/` và tên công cụ có dòng trong `outputs/times.csv` (công cụ bị bỏ qua hết theo luật chi phí hoặc lỗi hết chưa có thư mục nhưng vẫn hiện, điểm 0), trừ `extract` (do `run_extract.py` ở phần B tạo) và tên bắt đầu bằng dấu chấm. Ở bảng theo trường, công cụ chưa có file `.txt` nào hiện "–" ở mọi trường (chưa đọc được ảnh nào, khác với đọc mà sai = 0).
 
 Chọn công cụ theo 4 tiêu chí: điểm đầy đủ thông tin, tốc độ, chi phí mỗi ảnh (cloud tính tiền sau mức miễn phí), có chạy offline không. Với app sinh viên, thường kết luận là: dùng công cụ chạy offline cho tên/thành phần, và dùng công cụ mạnh hơn, trong mức miễn phí, cho ảnh hạn sử dụng.
 
@@ -150,7 +156,7 @@ OCR chỉ cho ra một đống chữ. Bước thứ hai là **rút trích**: t�
 | 2 | `dict` | từ điển (`dict/brands.txt`, `ingredients.txt`, `storage.txt`) + so khớp mờ bằng rapidfuzz | chịu được OCR mất dấu, sai vài ký tự | chỉ biết những gì có trong từ điển; bạn phải bổ sung |
 | 3 | `yake` | keyword extractor thống kê thật sự: trả về 40 cụm từ "nổi bật" nhất | không cần dạy gì | không gắn được cụm từ với trường nào; chấm bằng cách xem giá trị đúng có nằm trong 40 cụm không |
 | 4 | `underthesea` | NLP tiếng Việt: tách từ + NER nhận diện tên tổ chức (cho nhà sản xuất, thương hiệu), số dùng luật | hiểu tên riêng tiếng Việt | chậm, model nặng, NER học từ báo chí nên bao bì có thể lạ |
-| 5 | `llm` | đưa text OCR cho mô hình ngôn ngữ, yêu cầu trả JSON đúng 11 trường | chịu lỗi OCR tốt nhất, hiểu ngữ cảnh | chậm; **chỉ chạy bằng Ollama trên máy** (`LLM_PROVIDER=ollama`, mặc định, miễn phí; cần cài Ollama + `ollama pull qwen2.5:7b`), không gọi Anthropic API |
+| 5 | `llm` | đưa text OCR cho mô hình ngôn ngữ, yêu cầu trả JSON đúng 11 trường | chịu lỗi OCR tốt nhất, hiểu ngữ cảnh | chậm; **chỉ chạy bằng Ollama trên máy** (`LLM_PROVIDER=ollama`, mặc định, miễn phí; cần Ollama bản zip ở `D:\ollama\app`, model ở `D:\ollama\models`, `ollama pull qwen2.5:3b`; `qwen2.5:7b` chỉ khi máy RAM nhiều), không gọi Anthropic API |
 
 Luật và từ điển làm việc trên text **đã bỏ dấu** (để chịu được OCR mất dấu), nên giá trị rút ra có thể không dấu; điểm chấm cũng bỏ dấu hai bên nên không bị thiệt.
 
@@ -162,6 +168,10 @@ python run_extract.py --extractors regex,dict,yake      # bỏ qua cái chậm (
 python run_extract.py --ocr tesseract --extractors llm   # chỉ 1 tổ hợp (llm chạy bằng Ollama, cần Ollama đang chạy)
 python score_combo.py                     # → outputs/summary_combo.md
 ```
+
+- Chạy lại không mất công: sản phẩm đã có file kết quả `outputs/extract/<ocr>__<extractor>/<mã>.json` với `_status` là `ok` thì bỏ qua; file kết quả lỗi (vd Ollama quá giờ) sẽ được chạy lại ở lần sau.
+- `llm` (Ollama): `OLLAMA_MODEL` chọn model (mặc định `qwen2.5:3b`), `OLLAMA_TIMEOUT` là số giây chờ mỗi sản phẩm (mặc định 180; máy chậm đặt 600). Ollama phải đang chạy (`ollama.exe serve`, xem Bước 4).
+- Thứ tự ghép text các ảnh của một sản phẩm: `front`, `ingredients`, `nutrition`, `back`, `date`.
 
 ## Đọc kết quả phần B
 
