@@ -187,7 +187,7 @@ python score_combo.py                     # → outputs/summary_combo.md
   (3) bỏ mức tham chiếu "nhu cầu năng lượng 2000 kcal";
   (4) đạm / béo / carb mất đơn vị g hoặc g đọc thành 9 / 4 / 2: lấy số đầu tiên sau nhãn rõ ràng (nhãn béo "fat" không tính "calories from fat"); "(g)" in trước số cũng được nhờ luật này, không cần luật riêng;
   (5) "7,09" là 7,0 g (chữ g dính sau số thập phân đọc thành 9; rủi ro: số thật như 18,49 mà mất g thì thành 18,4);
-  (6) hạn in liền 6 số sau HSD / EXP, chỉ nhận khi là ngày hợp lệ ddmmyy (ngày 01–31, tháng 01–12);
+  (6) hạn in liền 6 số (ddmmyy) sau HSD / EXP, chỉ kiểm khoảng ngày 01–31, tháng 01–12 (không kiểm lịch: 30/02 vẫn nhận; năm không kiểm; chỉ xét chuỗi 6 số đầu tiên sau nhãn), ngoài khoảng thì bỏ;
   (7) số sau nhãn "khối lượng tịnh" đọc sai (`khol luong`, `khoi iuong`, `tjnh`).
   Thứ tự so với luật cũ: (1), (2), (4), (5) chỉ dùng khi luật cũ không ra gì; (3) bỏ mức tham chiếu khỏi text trước khi chạy mọi luật năng lượng; (6) được xét trước "ngày cuối cùng trong text" và áp cả cho `dict`; (7) được xét trước luật cũ (số + đơn vị đầu tiên ở 15 dòng đầu). Đã bỏ 2 luật vì chỉ thấy ở 1 sản phẩm: nhãn "đạm (g)" (8936025773181) và "g đọc thành 9" sau khối lượng tịnh (8936036027099). Sửa luật xong thì xóa `outputs/extract/*__regex`, `*__dict`, `*__underthesea` rồi chạy lại.
 - Cột giây/sản phẩm trong `summary_combo.md` tính cả file kết quả lỗi (vd Ollama quá giờ cũng được tính số giây đã chờ).
@@ -211,7 +211,7 @@ Kết quả đợt `ocr-b` (05/11/2026, 31 mã, 239 điểm, sau khi sửa luậ
 | tesseract | 12% | 13% | 12% | 11% | 15% |
 
 - EasyOCR + `llm` (qwen2.5:3b qua Ollama) 37% là cao nhất nhưng mất khoảng 129 giây mỗi sản phẩm trên CPU; EasyOCR + `regex` 30% gần như tức thì (trước sửa luật 16%; Tesseract + regex 7% → 12%).
-- So với trước sửa luật (1.434 ô của regex / dict / underthesea × 2 OCR): rỗng → đúng 81 ô, sai → đúng 6, rỗng → sai 63 (số sai thay cho ô trống, chủ yếu đạm / béo), đúng → sai 0, đúng → rỗng 0.
+- So với trước sửa luật (1.434 ô của regex / dict / underthesea × 2 OCR): rỗng → đúng 81 ô, sai → đúng 6, rỗng → sai 63 (số sai thay cho ô trống, chủ yếu đạm / béo: 52 ô số OCR dính 2 số liền hoặc lấy nhầm số khác sau nhãn, 6 ô "0 g" đọc thành "09", 2 ô "00" của "Saturated Fat", 3 ô HSD "200223" hợp lệ nhưng đọc sai), đúng → sai 0, đúng → rỗng 0.
 - Mất thông tin ở bước rút trích (OCR đã đọc được mà extractor ra sai / rỗng): EasyOCR + regex 71% → 48%, EasyOCR + llm 36%, yake 79–81%.
 - `han_su_dung` gần như không đọc được: 1/9 ô ở EasyOCR + regex / dict / underthesea, Tesseract 0/9 với mọi extractor, llm 0/9. Cách đọc HSD cho giai đoạn 3 (`tesseract.js`) mới là giả thuyết, phải đo lại.
 

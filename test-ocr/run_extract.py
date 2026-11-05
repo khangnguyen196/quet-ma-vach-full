@@ -44,9 +44,9 @@ def grab(pattern, t, group=1):
     return m.group(group).strip() if m else ""
 
 def find_date(t):
-    """Ưu tiên ngày đứng sau nhãn HSD/EXP; rồi 6 số liền sau nhãn HSD/EXP, chỉ nhận khi là ngày hợp lệ ddmmyy
-    (ngày 01-31, tháng 01-12; không hợp lệ thì coi như chưa có); không có thì lấy ngày cuối cùng trong text
-    (NSX thường in trước HSD)."""
+    """Ưu tiên ngày đứng sau nhãn HSD/EXP; rồi 6 số liền (ddmmyy) sau nhãn HSD/EXP, chỉ kiểm khoảng ngày 01-31,
+    tháng 01-12 (không kiểm lịch: 30/02 vẫn nhận; năm không kiểm; chỉ xét chuỗi 6 số đầu tiên sau nhãn; ngoài
+    khoảng thì coi như chưa có); không có thì lấy ngày cuối cùng trong text (NSX thường in trước HSD)."""
     d = grab(r"(?:hsd|han su dung|han dung|exp(?:iry)?|best before|use by)\s*[:.\-]?\s*[^\d\n]{0,12}" + DATE, t)
     if d:
         return d
