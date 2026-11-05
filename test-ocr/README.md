@@ -181,6 +181,8 @@ python score_combo.py                     # → outputs/summary_combo.md
 - Chạy lại không mất công: sản phẩm đã có file kết quả `outputs/extract/<ocr>__<extractor>/<mã>.json` với `_status` là `ok` thì bỏ qua; file kết quả lỗi (vd Ollama quá giờ) sẽ được chạy lại ở lần sau.
 - `llm` (Ollama): `OLLAMA_MODEL` chọn model (mặc định `qwen2.5:3b`), `OLLAMA_TIMEOUT` là số giây chờ mỗi sản phẩm (mặc định 180; máy chậm đặt 600). Ollama phải đang chạy (`ollama.exe serve`, xem Bước 4).
 - Thứ tự ghép text các ảnh của một sản phẩm: `front`, `ingredients`, `nutrition`, `back`, `date`.
+- `regex` (và `underthesea`, vì dùng `regex` cho số) có thêm luật dự phòng chịu lỗi OCR lặp lại: nhãn "năng lượng" / "calories" đọc sai, đơn vị kcal / g đọc sai, mất hoặc in trước số, "7,09" là 7,0 g, hạn in liền 6 số sau HSD, nhãn "khối lượng tịnh" đọc sai. Luật cũ chạy trước, luật mới chỉ dùng khi luật cũ không ra gì. Sửa luật xong thì xóa `outputs/extract/*__regex`, `*__dict`, `*__underthesea` rồi chạy lại.
+- Cột giây/sản phẩm trong `summary_combo.md` tính cả file kết quả lỗi (vd Ollama quá giờ cũng được tính số giây đã chờ).
 
 ## Đọc kết quả phần B
 
@@ -192,6 +194,8 @@ python score_combo.py                     # → outputs/summary_combo.md
 So với `summary.md` (phần A): phần A đo "OCR **có chứa** thông tin không", phần B đo "extractor **đưa ra** được không". Chênh lệch giữa hai bảng là phần thông tin bị mất ở bước rút trích, không phải lỗi OCR. Ví dụ OCR đọc được "Năng lượng 437 kcal" (A đúng) nhưng regex đòi "kcal" đứng ngay sau số còn OCR in "437 kcaI" (chữ I hoa) thì B sai.
 
 Thường thấy: `regex`/`dict` đủ dùng cho khối lượng, kcal, đạm, béo khi OCR tốt; `llm` vượt trội ở tên, nhà sản xuất, bảo quản và khi OCR nhiều lỗi; `yake` thấp nhất vì nó không được thiết kế cho việc này (và đó chính là bài học của phần so sánh).
+
+Kết quả đợt `ocr-b` (05/11/2026, 31 mã, 239 điểm, sau khi sửa luật regex): EasyOCR + `llm` (qwen2.5:3b qua Ollama) 37% là cao nhất nhưng mất khoảng 129 giây mỗi sản phẩm trên CPU; EasyOCR + `regex` 30% gần như tức thì; Tesseract mọi extractor chỉ 12–15%. `han_su_dung` gần như không đọc được ở mọi tổ hợp. Chi tiết ở PLAN.md mục 8, dòng E.
 
 ## Prompt dán vào Claude Code cho phần B
 
