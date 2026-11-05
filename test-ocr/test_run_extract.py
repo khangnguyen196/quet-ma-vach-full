@@ -153,14 +153,15 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx(text2)["nang_luong_kcal"], "510")
 
     def test_p5d_nutrient_unit_g_read_as_digit_or_missing(self):
-        # "g" đọc thành "9", "4", "2" cách số, hoặc mất hẳn; đơn vị "(g)" in trước số.
+        # "g" đọc thành "9", "4", "2" cách số, hoặc mất hẳn; đơn vị "(g)" in trước số
+        # (không cần luật riêng: luật dự phòng lấy số đầu tiên sau nhãn chung "chất đạm", "chất béo", "hydrat cacbon").
         out = self.rx("Carbohydrate 2,0 9 Chất đạm 2,5 9 Chất béo 1,4 9")
         self.assertEqual((out["carb_g"], out["dam_g"], out["beo_g"]), ("2,0", "2,5", "1,4"))
         out = self.rx("Chất đạm/ Protein 3,1 4 Chất béo/ Fat 3,6 4 Carbohydrate 4,7 9 Calci 110 mg")
         self.assertEqual((out["dam_g"], out["beo_g"], out["carb_g"]), ("3,1", "3,6", "4,7"))
         out = self.rx("Chất béo 3,5 Chất đạm 2,6 2 Carbohydrat 17 Can-xi 106 mg")
         self.assertEqual((out["beo_g"], out["dam_g"], out["carb_g"]), ("3,5", "2,6", "17"))
-        out = self.rx("Đạm (g) 0,7 lắc đều Chất béo (g) 0,4 Hydrat cacbon (g) 16,5")
+        out = self.rx("Chất đạm (g) 0,7 lắc đều Chất béo (g) 0,4 Hydrat cacbon (g) 16,5")
         self.assertEqual((out["dam_g"], out["beo_g"], out["carb_g"]), ("0,7", "0,4", "16,5"))
 
     def test_p5e_nutrient_g_glued_as_9_after_decimal(self):
@@ -175,9 +176,9 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("NSX 01/02/2025\nHSD / EXP:\n200223 08:33 NSX / PRD:")["han_su_dung"], "200223")
 
     def test_p5g_net_weight_label_misread(self):
-        # Nhãn "khối lượng tịnh" đọc sai (khol / khoi iuong / kho' luong), "g" đọc thành "9";
+        # Nhãn "khối lượng tịnh" đọc sai (khol / khoi iuong / kho' luong);
         # ưu tiên số sau nhãn này hơn số đầu tiên (vd "trong 90 g" của bảng dinh dưỡng).
-        self.assertEqual(self.rx("Giá trị dinh dưỡng trong 90 g\nKhol luong tinh: 108 9")["khoi_luong"], "108 g")
+        self.assertEqual(self.rx("Giá trị dinh dưỡng trong 90 g\nKhol luong tinh: 108 g")["khoi_luong"], "108 g")
         self.assertEqual(self.rx("Trong 100 ml\nKhoi iuong tinh: 33 g/ 1,16 oz")["khoi_luong"], "33 g")
 
     def test_p5h_clean_text_unchanged(self):
@@ -195,6 +196,37 @@ class RegexOcrRulesTest(unittest.TestCase):
             "han_su_dung": "01/08/2025"})
         # Không nhãn HSD: vẫn lấy ngày cuối cùng như cũ.
         self.assertEqual(self.rx("Ngày sản xuất 01.02.2025\nDùng tốt nhất trước 01.02.2026")["han_su_dung"], "01.02.2026")
+
+    # ---- Vòng 2 (sau review): sửa luật bắt nhầm, bỏ luật chỉ thấy ở 1 sản phẩm, test giữ hành vi ----
+    def test_p5i_fat_label_skips_calories_from_fat(self):
+        # Nhãn béo dự phòng không lấy số sau "Calories from Fat" (năng lượng từ chất béo, không phải gam béo).
+        self.assertEqual(self.rx("Calories from Fat: 20 Total Fat 2,5")["beo_g"], "2,5")
+        # "Total Fat" đọc sai thành "IotalTat": không còn nhãn béo nào -> để trống, không lấy 20.
+        self.assertEqual(self.rx("Calories from Fat: 20 IotalTat 96")["beo_g"], "")
+
+    def test_p5j_rules_seen_in_one_product_removed(self):
+        # Nhãn "đạm (g)" và "g đọc thành 9" sau khối lượng tịnh chỉ thấy ở 1 sản phẩm -> đã bỏ.
+        self.assertEqual(self.rx("Đạm (g) 0,7 lắc đều")["dam_g"], "")
+        self.assertEqual(self.rx("Khol luong tinh: 108 9")["khoi_luong"], "")
+
+    def test_p5k_date_six_digits_must_be_valid_ddmmyy(self):
+        # 6 số liền sau HSD chỉ nhận khi là ngày hợp lệ ddmmyy (ngày 01-31, tháng 01-12).
+        self.assertEqual(self.rx("HSD: 848224")["han_su_dung"], "")
+        self.assertEqual(self.rx("HSD:071026")["han_su_dung"], "071026")
+
+    def test_p5l_carb_two_decimals_ending_9_with_g_unit(self):
+        # Có đơn vị g thì luật cũ lấy nguyên số, không cắt số 9 cuối (unglue_g chỉ dùng khi mất g).
+        self.assertEqual(self.rx("Carbohydrate 18,79 g")["carb_g"], "18,79")
+
+    def test_p5m_calories_from_fat_alone_is_not_energy(self):
+        # "Calories from fat" là năng lượng từ chất béo, không phải năng lượng sản phẩm.
+        self.assertEqual(self.rx("Calories from fat: 50")["nang_luong_kcal"], "")
+
+    def test_p5n_new_rules_run_before_old_rules(self):
+        # Luật (6): HSD 6 số được xét trước "ngày cuối cùng trong text".
+        self.assertEqual(self.rx("HSD:071026\nIn ngày 01/02/2027")["han_su_dung"], "071026")
+        # Luật (7): số sau nhãn "khối lượng tịnh" được xét trước luật cũ (số + đơn vị đầu tiên ở 15 dòng đầu).
+        self.assertEqual(self.rx("Giá trị dinh dưỡng trong 100 g\nKhối lượng tịnh: 200 g")["khoi_luong"], "200 g")
 
 
 class OutputEncodingTest(TmpDirCase):
