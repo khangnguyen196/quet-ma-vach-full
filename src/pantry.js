@@ -9,6 +9,13 @@ export const SOON_DAYS = 7;
 
 const MS_PER_DAY = 86400000;
 
+/** Số lượng lớn nhất cho 1 món (chặn số quá lớn như 1e308 làm vỡ giao diện). */
+export const QTY_MAX = 999;
+
+/** Khoảng năm nhận khi người dùng nhập hạn (chặn gõ nhầm "0026" thay cho "2026"). */
+export const YEAR_MIN = 2000;
+export const YEAR_MAX = 2100;
+
 /**
  * Đổi "YYYY-MM-DD" thành Date lúc 0 giờ theo giờ địa phương (không theo UTC).
  * Ngày không có thật (vd "2026-02-31") hoặc sai dạng thì trả null.
@@ -20,6 +27,15 @@ export function parseDate(s) {
   // new Date(2026, 1, 31) tự nhảy sang 03/03: kiểm lại để bắt ngày không có thật
   if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return null;
   return date;
+}
+
+/**
+ * Hạn người dùng vừa nhập (thêm / sửa) có dùng được không: ngày có thật và năm từ 2000 đến 2100.
+ * Chỉ dùng khi nhập; dữ liệu đã lưu vẫn đọc bằng parseDate (không lọc theo năm, để không mất món cũ).
+ */
+export function isEntryDate(s) {
+  const date = parseDate(s);
+  return date != null && date.getFullYear() >= YEAR_MIN && date.getFullYear() <= YEAR_MAX;
 }
 
 /**
@@ -63,10 +79,10 @@ export function formatDate(s) {
   return `${d}/${m}/${y}`;
 }
 
-/** Số lượng hợp lệ là số nguyên ≥ 1; không hợp lệ thì trả null. */
+/** Số lượng hợp lệ là số nguyên từ 1 đến QTY_MAX (999); không hợp lệ thì trả null. */
 export function toQty(v) {
   // Chỉ nhận số hoặc chuỗi (từ ô nhập); true/false, mảng… đều không hợp lệ
   if (typeof v !== "number" && (typeof v !== "string" || v.trim() === "")) return null;
   const n = Number(v);
-  return Number.isInteger(n) && n >= 1 ? n : null;
+  return Number.isInteger(n) && n >= 1 && n <= QTY_MAX ? n : null;
 }

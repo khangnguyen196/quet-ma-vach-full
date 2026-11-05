@@ -1,5 +1,5 @@
 // Lịch sử quét và tủ đồ, lưu trong localStorage (chỉ trên máy này).
-import { parseDate, toQty } from "./pantry.js";
+import { parseDate, isEntryDate, toQty, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 
 function read(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -28,8 +28,8 @@ const PANTRY_KEY = "qmv-pantry";
 const PANTRY_BACKUP_KEY = "qmv-pantry-backup";
 const NAME_MAX = 120;
 
-// Chuỗi gốc khi đọc thấy dữ liệu tủ đồ hỏng. Trước lần ghi đầu tiên sẽ chép sang PANTRY_BACKUP_KEY
-// để không mất dữ liệu cũ (người dùng / người sửa app còn lấy lại được).
+// Chuỗi gốc khi đọc thấy dữ liệu tủ đồ hỏng (hoặc phải sửa lại). Trước lần ghi kế tiếp sẽ chép sang
+// khóa backup để không mất dữ liệu cũ (người dùng / người sửa app còn lấy lại được). Xem backupBroken().
 let brokenRaw = null;
 
 /** Lỗi do người dùng nhập sai hoặc không lưu được: message là câu tiếng Việt để hiện ra màn hình. */
@@ -60,6 +60,15 @@ function cleanItem(x) {
   };
 }
 
+/**
+ * cleanItem có làm đổi món này không: một khóa có trong món gốc bị bỏ, hoặc khóa có ở cả 2 bên mà giá trị khác.
+ * Khóa THIẾU ở món gốc (vd dạng cũ chưa có brand, addedAt) không tính là đổi.
+ * Không so bằng JSON.stringify cả object: kết quả phụ thuộc thứ tự khóa, và dạng cũ sẽ bị coi là hỏng.
+ */
+function isChanged(orig, clean) {
+  return Object.keys(orig).some((k) => !Object.hasOwn(clean, k) || orig[k] !== clean[k]);
+}
+
 /** Đọc tủ đồ. Dữ liệu hỏng thì không báo lỗi: trả phần đọc được (hoặc []) và ghi cảnh báo ra console. */
 export function getPantry() {
   let raw;
@@ -73,22 +82,39 @@ export function getPantry() {
     brokenRaw = raw;
     return [];
   }
-  const items = data.filter(isValidItem).map(cleanItem);
-  if (items.length !== data.length) {
-    console.warn(`Tủ đồ: bỏ qua ${data.length - items.length} món hỏng (thiếu id hoặc sai ngày).`);
-    brokenRaw = raw;
-  }
+  const valid = data.filter(isValidItem);
+  const items = valid.map(cleanItem);
+  const dropped = data.length - items.length;
+  const changed = valid.filter((x, i) => isChanged(x, items[i])).length;
+  if (dropped) console.warn(`Tủ đồ: bỏ qua ${dropped} món hỏng (thiếu id hoặc sai ngày).`);
+  if (changed) console.warn(`Tủ đồ: sửa lại ${changed} món có trường sai kiểu hoặc thừa.`);
+  if (dropped || changed) brokenRaw = raw; // lần lưu tới sẽ backup chuỗi gốc
   return items;
+}
+
+/**
+ * Chép chuỗi hỏng sang khóa backup, không bao giờ ghi đè backup cũ:
+ * - chưa có PANTRY_BACKUP_KEY → ghi vào đó;
+ * - đã có và giống hệt → thôi (không chép 2 lần cùng một bản);
+ * - đã có và khác → ghi vào khóa mới "qmv-pantry-backup-<thời điểm>".
+ * Lỗi khi ghi (bộ nhớ đầy…) thì ném ra cho savePantry xử lý.
+ */
+function backupBroken(raw) {
+  const first = localStorage.getItem(PANTRY_BACKUP_KEY);
+  if (first == null) { localStorage.setItem(PANTRY_BACKUP_KEY, raw); return; }
+  if (first === raw) return;
+  const t = Date.now();
+  let key = `${PANTRY_BACKUP_KEY}-${t}`;
+  for (let i = 1; localStorage.getItem(key) != null; i++) key = `${PANTRY_BACKUP_KEY}-${t}-${i}`; // trùng mili giây
+  localStorage.setItem(key, raw);
+  console.warn(`Tủ đồ: đã có bản backup cũ, bản hỏng lần này lưu ở khóa ${key}.`);
 }
 
 /** Ghi tủ đồ; không ghi được (bộ nhớ đầy, bị chặn) thì ném PantryError. */
 function savePantry(list) {
   try {
-    if (brokenRaw != null) {
-      // Không ghi đè bản backup đã có (giữ bản hỏng đầu tiên).
-      if (localStorage.getItem(PANTRY_BACKUP_KEY) == null) localStorage.setItem(PANTRY_BACKUP_KEY, brokenRaw);
-      else console.warn("Tủ đồ: đã có bản backup cũ, không ghi đè.");
-    }
+    // Backup lỗi thì dừng luôn (nhảy xuống catch), KHÔNG ghi đè dữ liệu gốc
+    if (brokenRaw != null) backupBroken(brokenRaw);
     localStorage.setItem(PANTRY_KEY, JSON.stringify(list));
     brokenRaw = null;
   } catch (e) {
@@ -96,11 +122,14 @@ function savePantry(list) {
   }
 }
 
-/** Kiểm hạn và số lượng; sai thì ném PantryError. Trả số lượng đã đổi sang số. */
+/** Kiểm hạn và số lượng người dùng nhập; sai thì ném PantryError. Trả số lượng đã đổi sang số. */
 function checkDateQty(expiresOn, qty) {
-  if (!parseDate(expiresOn)) throw pantryError("Cần chọn hạn sử dụng.");
+  if (expiresOn == null || String(expiresOn).trim() === "") throw pantryError("Cần chọn hạn sử dụng.");
+  if (!isEntryDate(expiresOn)) {
+    throw pantryError(`Hạn sử dụng không hợp lệ (năm cần 4 chữ số, từ ${YEAR_MIN} đến ${YEAR_MAX}).`);
+  }
   const n = toQty(qty);
-  if (n == null) throw pantryError("Số lượng phải là số nguyên từ 1 trở lên.");
+  if (n == null) throw pantryError(`Số lượng phải là số nguyên từ 1 đến ${QTY_MAX}.`);
   return n;
 }
 

@@ -255,7 +255,7 @@ table.info tr:last-child td { border-bottom: 0; }
 
 /* Thanh trên cùng: tên app + nút Tủ đồ */
 .topbar { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
-.topbar .pantry-btn { flex: 0 0 auto; min-height: 40px; font-variant-numeric: tabular-nums; }
+.topbar .pantry-btn { flex: 0 0 auto; min-height: 44px; font-variant-numeric: tabular-nums; }
 
 /* Form thêm vào tủ đồ / sửa món */
 form.add-pantry {
@@ -298,5 +298,5 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 .pantry-item.soon .pi-status { color: var(--soon-ink); }
 .pantry-item.expired .pi-status { color: var(--expired-ink); }
 .pantry-item .actions { margin-top: 8px; }
-.pantry-item .btn { min-height: 40px; background: transparent; }
+.pantry-item .btn { min-height: 44px; background: transparent; }
 .pantry-item .btn.primary { background: var(--ink); }

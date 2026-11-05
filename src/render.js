@@ -1,6 +1,6 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
 import { NOVA_VI, NUTRIENT_ROWS } from "./off.js";
-import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry } from "./pantry.js";
+import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX } from "./pantry.js";
 
 export const esc = (s) => String(s == null ? "" : s)
   .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -145,7 +145,7 @@ export function renderAddForm({ code, name = "", brand = "" }) {
       <input name="expiresOn" type="date" required>
     </label>
     <label>Số lượng
-      <input name="qty" type="number" min="1" step="1" value="1" inputmode="numeric" required>
+      <input name="qty" type="number" min="1" max="${QTY_MAX}" step="1" value="1" inputmode="numeric" required>
     </label>
   </div>
   <button class="btn primary" type="submit">Thêm vào tủ đồ</button>
@@ -163,7 +163,7 @@ function renderEditForm(x) {
       <input name="expiresOn" type="date" required value="${esc(x.expiresOn)}">
     </label>
     <label>Số lượng
-      <input name="qty" type="number" min="1" step="1" inputmode="numeric" required value="${esc(x.qty)}">
+      <input name="qty" type="number" min="1" max="${QTY_MAX}" step="1" inputmode="numeric" required value="${esc(x.qty)}">
     </label>
   </div>
   <div class="actions">
