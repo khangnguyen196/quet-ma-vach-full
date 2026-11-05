@@ -73,8 +73,10 @@ quet-ma-vach/
 Tra 1 sản phẩm theo mã vạch:
 
 ```
-GET https://world.openfoodfacts.org/api/v2/product/{MÃ}.json?fields=product_name,brands,...
+GET https://world.openfoodfacts.org/api/v2/product/{MÃ}.json?fields=product_name,brands,...&app_name=quet-ma-vach-full&app_version=0.1.0
 ```
+
+Định danh app bằng app_name / app_version trên URL (05/11/2026). Tài liệu chính thức (openfoodfacts.github.io/openfoodfacts-server/api/, mục Authentication) nêu 2 tham số này cho lệnh ghi; lệnh đọc dùng User-Agent mà trình duyệt không đặt được, nên app gửi bằng tham số URL (suy rộng), không thêm header.
 
 - Tìm thấy: `{ "status": 1, "product": { ... } }`
 - Không có: `{ "status": 0 }` (HTTP 404, hoặc HTTP 200 với mã như `0000000000000`)
@@ -129,6 +131,7 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Thương hiệu, khối lượng, phân loại, ảnh đang bị ẩn khi API trống, chưa hiện "chưa có dữ liệu" như quy tắc CLAUDE.md (sửa ở giai đoạn sau).
 - Đã xử lý: app tách loại lỗi khi tra cứu. HTTP 404 (hoặc `status` khác 1) → "không tìm thấy"; 5xx/429 → "Open Food Facts đang lỗi hoặc quá tải (HTTP …)"; HTTP 200 mà JSON hỏng → cùng câu đó nhưng không kèm mã HTTP; quá 9 giây → "phản hồi chậm"; fetch bị từ chối → "Không kết nối được tới Open Food Facts", gợi ý "Kiểm tra mạng, hoặc Open Food Facts đang quá tải" (Safari không phân biệt được mất mạng với trang lỗi 503 thiếu CORS); lỗi dữ liệu khi hiển thị → "Không hiển thị được dữ liệu"; lỗi khác không rõ loại (ví dụ lỗi lập trình) → "Có lỗi bất thường khi tra cứu", nhờ chụp lại dòng chữ nhỏ. Dưới câu báo có dòng nhỏ `tên lỗi: nội dung lỗi`, và lỗi luôn được ghi ra console. Lưu ý: mã `0000000000000` được trả HTTP 200 kèm `{status: 0}`, không phải 404.
 - iPhone Safari báo "Không kết nối được" với 8934563163150 dù mở thẳng URL API ra JSON: chưa tìm ra nguyên nhân chắc chắn. Đã đo trên máy tính: URL app gọi trả 200 trong 0,7–0,9 giây, có header CORS; dữ liệu đúng kiểu. Giả thuyết mạnh nhất: lúc đó Open Food Facts trả trang lỗi 503 không kèm header CORS (đã thấy với API search, 11/2026) → Safari chặn và ném `TypeError: Load failed`, app không biết là 503 nên báo mất mạng. Cần thử lại trên iPhone và đọc dòng lỗi nhỏ để chốt.
+- Đã xử lý (05/11/2026): app gửi app_name / app_version cho Open Food Facts; muốn bỏ thì xóa 2 tham số trong src/off.js.
 - Lịch sử chỉ lưu mã tìm thấy; mã không có trên Open Food Facts thì không vào lịch sử (hiện tại như vậy; chờ chủ dự án xác nhận có muốn lưu cả mã không tìm thấy không).
 
 ## 8. Việc cần làm tiếp (cập nhật 05/11/2026)

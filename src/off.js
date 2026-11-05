@@ -2,6 +2,11 @@
 
 const BASE = import.meta.env.VITE_OFF_API || "https://world.openfoodfacts.org/api/v2";
 
+// Tên và phiên bản app gửi kèm mỗi lần tra, để Open Food Facts biết lượt gọi đến từ app nào.
+// APP_VERSION khớp "version" trong package.json: đổi phiên bản thì đổi cả 2 chỗ cùng lúc.
+const APP_NAME = "quet-ma-vach-full";
+const APP_VERSION = "0.1.0";
+
 const FIELDS = [
   "code", "product_name", "product_name_vi", "product_name_en", "brands", "quantity", "categories",
   "image_front_url", "nutriscore_grade", "nova_group", "ecoscore_grade",
@@ -80,7 +85,16 @@ export async function getProduct(code) {
   try {
     let res;
     try {
-      res = await fetch(`${BASE}/product/${code}.json?fields=${FIELDS}`, { signal: ctrl.signal });
+      // Định danh app bằng app_name / app_version trên URL.
+      // Nguồn: https://openfoodfacts.github.io/openfoodfacts-server/api/ (mục Authentication), nguyên văn:
+      //   "READ operations (getting info about a product, etc...) do not require authentication other than the custom User-Agent."
+      //   "We however ask that you send the app_name, app_version and app_uuid parameters in your write queries."
+      // Trình duyệt không cho đặt User-Agent, nên app gửi app_name / app_version bằng tham số URL trên lệnh đọc này.
+      // Đây là suy rộng từ hướng dẫn cho lệnh ghi (tài liệu không nói riêng cho app chạy trong trình duyệt).
+      // Không thêm header (để vẫn là GET đơn giản, không gây CORS preflight); không gửi app_uuid.
+      const url = `${BASE}/product/${code}.json?fields=${FIELDS}`
+        + `&app_name=${encodeURIComponent(APP_NAME)}&app_version=${encodeURIComponent(APP_VERSION)}`;
+      res = await fetch(url, { signal: ctrl.signal });
     } catch (e) {
       // Hết giờ thì fetch ném AbortError; còn lại (mất mạng, bị chặn, CORS…) Safari ném TypeError "Load failed".
       throw withKind(e, ctrl.signal.aborted ? "timeout" : "network");
