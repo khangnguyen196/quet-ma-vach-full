@@ -1,5 +1,5 @@
 """
-Test nhỏ cho phần đếm lượt gọi Google trong run_ocr.py và phần đọc times.csv trong score.py.
+Test nhỏ cho phần đếm lượt gọi Google trong run_ocr.py, phần đọc times.csv trong score.py và hàm found() so khớp giá trị trong score.py.
 KHÔNG gọi Google / Azure thật: hàm OCR Google được thay bằng hàm giả, mọi file ghi vào thư mục tạm.
 
 Chạy (trong thư mục test-ocr):
@@ -210,6 +210,36 @@ class ReadTimesTest(unittest.TestCase):
             times, errors = score.read_times(pathlib.Path(d) / "khong_co.csv")
         self.assertEqual(dict(times), {})
         self.assertEqual(dict(errors), {})
+
+
+class FoundTest(unittest.TestCase):
+    """Hàm found() của score.py: so khớp giá trị số (ngày, số thập phân) trong text OCR."""
+
+    def test_9a_date_with_dots_ending_in_zero(self):
+        self.assertEqual(score.found("19.09.20", "HSD:19.09.20"), 1.0)
+
+    def test_9b_date_missing_last_digit(self):
+        self.assertEqual(score.found("19.09.20", "HSD:19.09.2"), 0.0)
+
+    def test_9c_two_dates_in_text(self):
+        self.assertEqual(score.found("11.01.24", "HSD:11.01.24 NSX:12.05.23"), 1.0)
+
+    def test_9d_date_without_dots(self):
+        self.assertEqual(score.found("280920", "HSD: 280920"), 1.0)
+
+    def test_9e_decimal_zero_keeps_old_behavior(self):
+        self.assertEqual(score.found("7.0", "Chất đạm 7 g"), 1.0)
+        self.assertEqual(score.found("7.0", "Chất đạm 7,0 g"), 1.0)
+
+    def test_9f_decimal_comma(self):
+        self.assertEqual(score.found("346.4", "346,4 kcal"), 1.0)
+
+    def test_9g_zero_value_not_match_everything(self):
+        self.assertEqual(score.found("0.0", "Năng lượng 12 kcal"), 0.0)
+
+    def test_9h_value_never_becomes_empty_pattern(self):
+        # Giá trị chỉ gồm 0 và dấu chấm không được thành mẫu rỗng (mẫu rỗng khớp mọi text).
+        self.assertEqual(score.found(".0", "Năng lượng 12 kcal"), 0.0)
 
 
 if __name__ == "__main__":
