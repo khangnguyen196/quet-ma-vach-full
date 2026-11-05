@@ -3,7 +3,7 @@ Chấm điểm tổ hợp OCR x extractor từ outputs/extract/<ocr>__<extractor
 Khác score.py: ở đây extractor phải TỰ ĐƯA RA giá trị (không chỉ "có trong text").
 Ra: outputs/results_combo.csv và outputs/summary_combo.md (ma trận OCR x extractor).
 """
-import csv, re, json, pathlib, unicodedata, statistics
+import csv, re, sys, json, pathlib, unicodedata, statistics
 from collections import defaultdict
 from rapidfuzz import fuzz
 
@@ -58,6 +58,12 @@ def score_product(truth_row, data):
     return scores
 
 def main():
+    # In tiếng Việt được cả khi đưa kết quả ra file / pipe (Windows mặc định cp1252 -> UnicodeEncodeError).
+    # Chỉ đổi khi luồng có reconfigure (test thay stdout bằng StringIO không có hàm này).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     truth = {}
     with open("truth.csv", encoding="utf-8") as f:
         for row in csv.DictReader(f):

@@ -6,10 +6,13 @@ Dùng:  python run_extract.py
        python run_extract.py --extractors regex,dict,yake
        python run_extract.py --ocr tesseract,easyocr --extractors llm
 
+Chạy lại không mất công: file <mã>.json đã ok thì bỏ qua; file lỗi (_status khác "ok") thì chạy lại.
+
 Extractor "llm" chỉ chạy bằng Ollama trên máy (LLM_PROVIDER=ollama, mặc định, miễn phí).
+Model: OLLAMA_MODEL (mặc định qwen2.5:3b). Thời gian chờ mỗi sản phẩm: OLLAMA_TIMEOUT giây (mặc định 180).
 Dự án KHÔNG dùng API Claude / Anthropic: LLM_PROVIDER khác "ollama" thì llm bị bỏ qua.
 """
-import os, re, json, time, argparse, pathlib, unicodedata, traceback
+import os, re, sys, json, math, time, argparse, pathlib, unicodedata, traceback
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,7 +21,8 @@ EXT_DIR = OUT / "extract"
 DICT = pathlib.Path("dict")
 FIELDS = ["ten", "thuong_hieu", "khoi_luong", "thanh_phan_dau", "nang_luong_kcal", "dam_g",
           "beo_g", "carb_g", "nha_san_xuat", "bao_quan", "han_su_dung"]
-IMAGE_ORDER = ["front", "back", "date"]   # ghép text theo thứ tự này
+IMAGE_ORDER = ["front", "ingredients", "nutrition", "back", "date"]   # ghép text theo thứ tự này
+OLLAMA_TIMEOUT_DEFAULT = 180   # giây, khi OLLAMA_TIMEOUT không đặt / rỗng / không phải số / <= 0
 
 # ---------- tiện ích ----------
 def strip_accents(s: str) -> str:
@@ -197,12 +201,22 @@ def llm_provider():
     """Giá trị LLM_PROVIDER đã bỏ khoảng trắng và đổi về chữ thường (" Ollama " -> "ollama")."""
     return os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
 
+def ollama_timeout():
+    """Số giây chờ Ollama trả lời, đọc từ OLLAMA_TIMEOUT. Không đặt, rỗng, không phải số hoặc <= 0 -> 180."""
+    try:
+        v = float(os.environ.get("OLLAMA_TIMEOUT", "").strip())
+    except ValueError:
+        return OLLAMA_TIMEOUT_DEFAULT
+    if not math.isfinite(v) or v <= 0:   # "nan", "inf", số âm, 0
+        return OLLAMA_TIMEOUT_DEFAULT
+    return int(v) if v.is_integer() else v
+
 def extract_llm(text):
     if llm_provider() != "ollama":
         raise RuntimeError("Dự án chỉ chạy llm bằng Ollama (LLM_PROVIDER=ollama), không gọi API Claude / Anthropic.")
     import requests
-    r = requests.post("http://localhost:11434/api/generate", timeout=180,
-                      json={"model": os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"), "prompt": LLM_PROMPT + text,
+    r = requests.post("http://localhost:11434/api/generate", timeout=ollama_timeout(),
+                      json={"model": os.environ.get("OLLAMA_MODEL", "qwen2.5:3b"), "prompt": LLM_PROMPT + text,
                             "stream": False, "format": "json"})
     r.raise_for_status()
     return _parse_json(r.json()["response"])
@@ -224,7 +238,22 @@ def product_text(ocr_dir: pathlib.Path, code: str) -> str:
     key = lambda p: (IMAGE_ORDER.index(p.stem.split("__", 1)[1]) if p.stem.split("__", 1)[1] in IMAGE_ORDER else 99, p.name)
     return "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sorted(files, key=key))
 
+def needs_run(out_file: pathlib.Path) -> bool:
+    """Có cần chạy (lại) sản phẩm này không: chưa có file, file không đọc được, hoặc _status khác "ok" (lần trước lỗi)."""
+    if not out_file.exists():
+        return True
+    try:
+        return json.loads(out_file.read_text(encoding="utf-8")).get("_status") != "ok"
+    except (OSError, ValueError, AttributeError):
+        return True
+
 def main():
+    # In tiếng Việt được cả khi đưa kết quả ra file / pipe (Windows mặc định cp1252 -> UnicodeEncodeError).
+    # Chỉ đổi khi luồng có reconfigure (test thay stdout bằng StringIO không có hàm này).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--ocr", default="", help="chỉ dùng kết quả của các OCR này (mặc định: tất cả)")
     ap.add_argument("--extractors", default=",".join(EXTRACTORS))
@@ -251,7 +280,7 @@ def main():
             print(f"\n=== OCR {ocr_dir.name} + {ext} ===")
             for code in codes:
                 out_file = out_dir / f"{code}.json"
-                if out_file.exists():
+                if not needs_run(out_file):   # file ok giữ nguyên; file lỗi / hỏng thì chạy lại
                     continue
                 text = product_text(ocr_dir, code)
                 t0 = time.perf_counter()
