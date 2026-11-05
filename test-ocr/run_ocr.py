@@ -81,7 +81,9 @@ def load_usage():
 
 def save_usage(usage):
     """Ghi bộ đếm ra file tạm rồi thay file cũ, để không bao giờ còn file ghi dở.
-    Ghi hoặc thay lỗi (kể cả Ctrl+C): xóa file tạm (xóa lỗi thì bỏ qua), rồi ném lại lỗi gốc; file cũ giữ nguyên."""
+    Ghi hoặc thay lỗi (kể cả Ctrl+C): xóa file tạm (xóa lỗi thì bỏ qua), rồi ném lại lỗi gốc; file cũ giữ nguyên.
+    Riêng Ctrl+C rơi ngay sau khi os.replace đã thay file xong: file đã là bản mới (lượt này đã được đếm) dù
+    lượt gọi chưa diễn ra, tức đếm thừa 1 lượt, không bao giờ đếm thiếu."""
     tmp = USAGE.with_name(USAGE.name + ".tmp")
     try:
         tmp.write_text(json.dumps(usage, ensure_ascii=False, indent=1), encoding="utf-8")

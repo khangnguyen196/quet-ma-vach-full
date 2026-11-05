@@ -1,6 +1,7 @@
 """
 Test nhỏ cho phần đếm lượt gọi Google và Azure trong run_ocr.py (trần lần chạy, trần tháng, bộ đếm hỏng, ghi bộ đếm),
-phần đọc times.csv và danh sách công cụ trong score.py, và hàm found() so khớp giá trị trong score.py.
+phần đọc times.csv và danh sách công cụ trong score.py, hàm found() so khớp giá trị trong score.py,
+và in tiếng Việt khi stdout / stderr là file cp1252 (score.main(), run_ocr.main() với Tesseract giả).
 KHÔNG gọi Google / Azure thật: hàm OCR Google / Azure được thay bằng hàm giả, mọi file ghi vào thư mục tạm.
 
 Chạy (trong thư mục test-ocr):
@@ -409,7 +410,7 @@ class FoundTest(unittest.TestCase):
         self.assertEqual(score.found("0.0", "Năng lượng 12 kcal"), 0.0)
 
     def test_9h_value_never_becomes_empty_pattern(self):
-        # Giá trị chỉ gồm 0 và dấu chấm không được thành mẫu rỗng (mẫu rỗng khớp mọi text).
+        # Giá trị bắt đầu bằng dấu chấm (vd `.0`) không được thành mẫu rỗng (mẫu rỗng khớp mọi text).
         self.assertEqual(score.found(".0", "Năng lượng 12 kcal"), 0.0)
 
 
