@@ -138,13 +138,15 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Đã xử lý (05/11/2026): app gửi app_name / app_version cho Open Food Facts; muốn bỏ thì xóa 2 tham số trong src/off.js.
 - Lịch sử chỉ lưu mã tìm thấy; chốt: giữ như hiện tại (chủ dự án, 05/11/2026).
 - Quyết định tủ đồ (gd2, 05/11/2026): (1) mã không tìm thấy vẫn thêm vào tủ được, tên bắt buộc nhập tay (lỗi mạng / máy chủ thì không có form thêm); (2) logic hạn sử dụng (số ngày còn lại, trạng thái, sắp xếp, định dạng ngày) nằm ở `src/pantry.js`, không đụng giao diện và localStorage; (3) còn 0 ngày tính là vàng (sắp hết hạn), chữ "Hạn cuối là hôm nay".
+- Lỗi có từ trước: tắt camera trong khoảng 50 ms sau khi bật thì html5-qrcode ném 'play() request was interrupted' (scanner.js, chưa sửa).
+- Việc nhỏ để sau: render.js chép tay chuỗi 'Sản phẩm chưa có tên' từ off.js; nên export hằng từ off.js.
 
 ## 8. Việc cần làm tiếp (cập nhật 05/11/2026)
 
-Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma-vach-full/ (repo https://github.com/khangnguyen196/quet-ma-vach-full). Lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy. Đợt `khoi-dong`, `sua-va-dua-len` và `chi-phi-1` (trần 60 lượt Google mỗi lần chạy, 800 lượt/tháng; app gửi app_name/app_version; main cb5f449) đã đóng. Quy tắc làm việc (toàn quyền, chỉ dùng mức miễn phí, không dùng API Claude/Anthropic) nằm trong `.claude/du-an.md`.
+Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma-vach-full/ (repo https://github.com/khangnguyen196/quet-ma-vach-full); giai đoạn 2 (xuất xứ / bảo quản, tủ đồ) lên main trong đợt `gd2` (05/11/2026). Lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions tự build + deploy. Đợt `khoi-dong`, `sua-va-dua-len` và `chi-phi-1` (trần 60 lượt Google mỗi lần chạy, 800 lượt/tháng; app gửi app_name/app_version; main cb5f449) đã đóng. Quy tắc làm việc (toàn quyền, chỉ dùng mức miễn phí, không dùng API Claude/Anthropic) nằm trong `.claude/du-an.md`.
 
 ### Chủ dự án tự làm (máy không làm thay được)
-- [ ] Thử tủ đồ trên iPhone Safari ở link app: tra mã, thêm vào tủ (chọn hạn, số lượng), mở "Tủ đồ", sửa, xóa, tải lại trang vẫn còn.
+- [ ] Thử tủ đồ trên iPhone Safari ở link app: tra mã, thêm vào tủ (chọn hạn, số lượng), mở "Tủ đồ", sửa, xóa, tải lại trang vẫn còn; chạm đúp "Thêm vào tủ đồ" chỉ thêm 1 món; bấm "Sửa" xem bảng chọn ngày có tự bật không.
 - [x] Trước đợt `anh-mang`: thêm vào `.claude/du-an.md` ngoại lệ cho Claude Code điền `test-ocr/truth.csv` một lần (hồ sơ đang cấm sửa truth.csv). (05/11/2026: chủ dự án đã thêm, du-an.md dòng 59)
 - [x] Thử nút "Bật camera" trên iPhone ở link app. (05/11/2026: đạt, giai đoạn 1 xong)
 - [x] Xác nhận lịch sử chỉ lưu mã tìm thấy, xem mục 7. (05/11/2026: giữ như hiện tại)
