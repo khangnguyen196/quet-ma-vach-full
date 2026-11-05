@@ -56,11 +56,16 @@ def list_tools(out):
 def all_tools(out):
     """Mọi công cụ cần có trong summary = thư mục con của outputs (list_tools) + tên công cụ có ít nhất 1 dòng
     trong outputs/times.csv. run_ocr.py chỉ tạo outputs/<công cụ>/ khi có ảnh ok, nên công cụ bị bỏ qua hết
-    (vd Google chạm trần tháng) chỉ có dòng trong times.csv. Vẫn bỏ "extract" và tên bắt đầu bằng dấu chấm."""
+    (vd Google chạm trần tháng) hoặc lỗi hết chỉ có dòng trong times.csv. Vẫn bỏ "extract" và tên bắt đầu bằng dấu chấm."""
     names = set(list_tools(out)) if out.is_dir() else set()
     names |= {r["tool"] for r in last_rows(out / "times.csv")
               if r["tool"] and r["tool"] != "extract" and not r["tool"].startswith(".")}
     return sorted(names)
+
+def has_txt(out, tool):
+    """True nếu công cụ có ít nhất 1 file .txt trong outputs/<công cụ>/ (đọc được ít nhất 1 ảnh)."""
+    d = out / tool
+    return d.is_dir() and any(d.glob("*.txt"))
 
 def read_text(out, tool, code):
     """Ghép text OCR của mọi ảnh thuộc mã `code` của công cụ `tool`. Chưa có thư mục công cụ -> chuỗi rỗng."""
@@ -154,11 +159,14 @@ def main():
 
     lines += ["", "## Tỷ lệ đúng theo trường (%)", "",
               "| Trường | " + " | ".join(ranking) + " |", "|---|" + "---|" * len(ranking)]
+    # Công cụ chưa có file .txt nào (bị bỏ qua hết / lỗi hết, chỉ có dòng trong times.csv) hiện "–" ở mọi trường,
+    # để không nhầm "0%" là đã đọc mà sai. Bảng xếp hạng ở trên vẫn ghi điểm 0.
+    with_txt = {tool for tool in ranking if has_txt(OUT, tool)}
     for f in FIELDS:
         cells = []
         for tool in ranking:
             v = per_field[tool][f]
-            cells.append(f"{100 * sum(v) / len(v):.0f}" if v else "–")
+            cells.append(f"{100 * sum(v) / len(v):.0f}" if v and tool in with_txt else "–")
         lines.append(f"| {f} | " + " | ".join(cells) + " |")
     lines += ["", "Cách chấm: số phải khớp chính xác; chữ khớp mờ ≥ 85/100; thành phần tính tỷ lệ tìm thấy. "
               "Ô trống trong truth.csv không chấm. Ảnh chưa có kết quả (lỗi, bỏ qua) không góp chữ nào vào phần chấm. "
