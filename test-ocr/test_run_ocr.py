@@ -28,6 +28,7 @@ class GoogleRunLimitTest(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
         root = pathlib.Path(self.tmp.name)
         self.photos, self.out = root / "photos", root / "outputs"
         self.calls = 0
@@ -52,7 +53,6 @@ class GoogleRunLimitTest(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        self.addCleanup(self.tmp.cleanup)
 
     def fake_google(self, path):
         self.calls += 1
@@ -89,7 +89,7 @@ class GoogleRunLimitTest(unittest.TestCase):
         for code, name in images:
             self.assertFalse((self.out / "google" / f"{code}__{name}.txt").exists(), f"{code}/{name} không được có file .txt")
 
-    def test_1_dung_o_60_luot(self):
+    def test_1_stops_at_60_calls(self):
         images = self.make_photos(65)
         self.run_main()
         self.assertEqual(self.calls, 60)
@@ -99,7 +99,7 @@ class GoogleRunLimitTest(unittest.TestCase):
         self.assertEqual(len(list((self.out / "google").glob("*.txt"))), 60)
         self.assertFalse((self.out / "api_usage.lock").exists())
 
-    def test_2_luot_loi_van_bi_dem(self):
+    def test_2_failed_calls_are_counted(self):
         images = self.make_photos(65)
         self.fail_pattern = lambda n: n % 3 != 0   # lỗi, lỗi, được, lỗi, lỗi, được… (tối đa 2 lỗi liên tiếp)
         self.run_main()
@@ -111,7 +111,7 @@ class GoogleRunLimitTest(unittest.TestCase):
         self.assertEqual(self.skipped(), images[60:])
         self.assert_no_txt(images[60:])
 
-    def test_3_cham_tran_thang_800(self):
+    def test_3_month_cap_800(self):
         images = self.make_photos(65)
         self.out.mkdir()
         (self.out / "api_usage.json").write_text(json.dumps({"google": {run_ocr.month_key(): 790}}), encoding="utf-8")
@@ -122,7 +122,7 @@ class GoogleRunLimitTest(unittest.TestCase):
         self.assertEqual(len(self.skipped()), 55)
         self.assert_no_txt(images[10:])
 
-    def test_4_ranh_gioi_thang_giu_hanh_vi_cu(self):
+    def test_4_month_edge_keeps_old_behavior(self):
         self.make_photos(65)
         with mock.patch.object(run_ocr, "near_month_edge", lambda now: True):
             self.run_main()
@@ -133,7 +133,7 @@ class GoogleRunLimitTest(unittest.TestCase):
 
 
 class ReadTimesTest(unittest.TestCase):
-    def test_5_score_read_times(self):
+    def test_5_read_times_skips_cost_rows(self):
         self.assertEqual(score.SKIP_STATUS, run_ocr.SKIP_STATUS)
         with tempfile.TemporaryDirectory() as d:
             p = pathlib.Path(d) / "times.csv"
@@ -151,7 +151,7 @@ class ReadTimesTest(unittest.TestCase):
         self.assertEqual(sorted(times["google"]), [2.0, 4.0])   # dòng bỏ qua không vào thời gian trung bình
         self.assertEqual(times["tesseract"], [1.5])
 
-    def test_5b_read_times_khong_co_file(self):
+    def test_5b_read_times_missing_file(self):
         with tempfile.TemporaryDirectory() as d:
             times, errors = score.read_times(pathlib.Path(d) / "khong_co.csv")
         self.assertEqual(dict(times), {})

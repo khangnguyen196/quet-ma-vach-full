@@ -4,3 +4,4 @@ work/
 photos/
 .env
 *.json
+__pycache__/
