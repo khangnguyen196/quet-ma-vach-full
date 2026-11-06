@@ -121,6 +121,33 @@ function backupBroken(raw) {
   const key = newBackupKey();
   localStorage.setItem(key, raw);
   console.warn(`Tủ đồ: đã có bản backup cũ, bản hỏng lần này lưu ở khóa ${key}.`);
+  pruneBackups(key);
+}
+
+/** Số khóa "qmv-pantry-backup-<thời điểm>" giữ lại tối đa (khóa gốc "qmv-pantry-backup" không tính, không bao giờ xóa). */
+const BACKUP_KEEP = 5;
+const STAMPED_BACKUP = /^qmv-pantry-backup-(\d+)(?:-(\d+))?$/;
+
+/**
+ * Gọi SAU KHI đã ghi xong bản backup mới (newKey): giữ newKey + các khóa "qmv-pantry-backup-<thời điểm>[-n]" mới nhất,
+ * tổng tối đa BACKUP_KEEP; xóa bản cũ hơn. Mới / cũ theo số thời điểm rồi số -n trong tên khóa.
+ * Không đụng khóa gốc "qmv-pantry-backup" và khóa không đúng dạng. Xóa lỗi thì chỉ ghi console.warn
+ * (bản mới đã an toàn, không làm hỏng việc đang làm).
+ * Ví dụ: có -1000 … -6000 (6 khóa) + vừa ghi -7000 → xóa -1000 và -2000.
+ */
+function pruneBackups(newKey) {
+  try {
+    const stamped = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      const m = key == null ? null : STAMPED_BACKUP.exec(key);
+      if (m && key !== newKey) stamped.push({ key, t: Number(m[1]), n: Number(m[2] ?? 0) });
+    }
+    stamped.sort((a, b) => b.t - a.t || b.n - a.n); // mới nhất trước
+    for (const { key } of stamped.slice(BACKUP_KEEP - 1)) localStorage.removeItem(key);
+  } catch (e) {
+    console.warn("Tủ đồ: không dọn được bản backup cũ:", e);
+  }
 }
 
 /** Khóa backup mới chưa dùng: "qmv-pantry-backup-<thời điểm>" (trùng mili giây thì thêm "-1", "-2"…). */
@@ -207,6 +234,7 @@ export function removeFromPantry(id) {
  * Trước khi "Thay toàn bộ": chép chuỗi tủ đồ hiện tại sang khóa mới "qmv-pantry-backup-<thời điểm>".
  * Không có tủ (chưa có khóa, chuỗi rỗng, hoặc danh sách rỗng "[]") thì không cần chép.
  * Đã có bản giống hệt ở bất kỳ khóa backup nào thì thôi; không bao giờ ghi đè backup cũ.
+ * Ghi xong thì giữ tối đa 5 khóa "qmv-pantry-backup-<thời điểm>" mới nhất (pruneBackups), khóa gốc giữ nguyên.
  * Đọc / ghi lỗi thì ném ra (nơi gọi dừng, không ghi gì). Trả khóa đã ghi (hoặc null).
  */
 function backupBeforeReplace() {
@@ -215,6 +243,7 @@ function backupBeforeReplace() {
   if (hasBackup(raw)) return null;
   const key = newBackupKey();
   localStorage.setItem(key, raw);
+  pruneBackups(key);
   return key;
 }
 
