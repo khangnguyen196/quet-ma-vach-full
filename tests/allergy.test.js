@@ -69,6 +69,42 @@ describe("normalize: allergenKeys / traceKeys / hasAllergenData", () => {
     assert.deepEqual(normalize(raw({ additives_tags: [""] }), "123").additives, []);
   });
 
+  test("tag có khoảng trắng hai đầu → bỏ khoảng trắng rồi mới so (sua-cuoi, gd3-a (3))", () => {
+    const p = normalize(raw({ allergens_tags: [" en:milk ", "	en:gluten"], traces_tags: ["en:peanuts  "], additives_tags: [" en:e621 "] }), "123");
+    assert.deepEqual(p.allergenKeys, ["gluten", "milk"]);
+    assert.deepEqual(p.allergens, ["Sữa", ALLERGEN_VI.gluten]); // giữ thứ tự gốc, không còn khoảng trắng
+    assert.deepEqual(p.traceKeys, ["peanuts"]);
+    assert.deepEqual(p.traces, ["Đậu phộng"]);
+    assert.deepEqual(p.additives, ["E621"]);
+    assert.equal(p.hasAllergenData, true);
+  });
+
+  test("tag chỉ có tiền tố ngôn ngữ ('en:', ' fr: ') → bỏ, không tính là có dữ liệu (sua-cuoi, gd3-a (3))", () => {
+    for (const bad of [["en:"], [" en: "], ["fr:"], ["en:", " "]]) {
+      const p = normalize(raw({ allergens_tags: bad, traces_tags: bad, additives_tags: bad }), "123");
+      assert.equal(p.hasAllergenData, false, JSON.stringify(bad));
+      assert.deepEqual(p.allergens, [], JSON.stringify(bad));
+      assert.deepEqual(p.traces, []);
+      assert.deepEqual(p.additives, []);
+    }
+  });
+
+  test("tag 'none' (en:none, fr:none, none) → bỏ, không hiện chip 'none' (sua-cuoi, gd3-a (6))", () => {
+    for (const bad of [["en:none"], ["fr:none"], ["none"], [" en:none "], ["en:NONE"]]) {
+      const p = normalize(raw({ allergens_tags: bad, traces_tags: bad, additives_tags: bad }), "123");
+      assert.equal(p.hasAllergenData, false, JSON.stringify(bad));
+      assert.deepEqual(p.allergens, [], JSON.stringify(bad));
+      assert.deepEqual(p.traces, []);
+      assert.deepEqual(p.additives, []);
+      assert.ok(!renderProduct(p).toLowerCase().includes(">none<"), JSON.stringify(bad));
+    }
+    const mixed = normalize(raw({ allergens_tags: ["en:none", "en:milk"], traces_tags: ["en:none"] }), "123");
+    assert.deepEqual(mixed.allergenKeys, ["milk"]);
+    assert.deepEqual(mixed.allergens, ["Sữa"]);
+    assert.deepEqual(mixed.traces, []);
+    assert.equal(mixed.hasAllergenData, true);
+  });
+
   test("giữ nguyên allergens / traces cũ", () => {
     const p = normalize(raw({ allergens_tags: ["en:milk", "fr:lait"], traces_tags: ["en:peanuts"] }), "123");
     assert.deepEqual(p.allergens, ["Sữa", "lait"]);
