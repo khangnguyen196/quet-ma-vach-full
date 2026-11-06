@@ -96,6 +96,20 @@ describe("whenActivated", () => {
     assert.equal(await settled(p), true);
   });
 
+  test("xong (activated) thì gỡ listener statechange: số listener đang gắn về 0", async () => {
+    const w = fakeWorker("activating");
+    let attached = 0;
+    const add = w.addEventListener.bind(w);
+    const remove = w.removeEventListener.bind(w);
+    w.addEventListener = (type, fn) => { if (type === "statechange") attached++; add(type, fn); };
+    w.removeEventListener = (type, fn) => { if (type === "statechange") attached--; remove(type, fn); };
+    const p = whenActivated(w);
+    assert.equal(attached, 1);
+    w.go("activated");
+    assert.equal(await settled(p), true);
+    assert.equal(attached, 0);
+  });
+
   test("đang cài rồi bị bỏ (redundant) → xong, không treo", async () => {
     const w = fakeWorker("installing");
     const p = whenActivated(w);
