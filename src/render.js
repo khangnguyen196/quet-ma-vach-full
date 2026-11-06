@@ -1,6 +1,10 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
-import { NOVA_VI, NUTRIENT_ROWS } from "./off.js";
-import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX } from "./pantry.js";
+import { NOVA_VI, NUTRIENT_ROWS, NO_NAME } from "./off.js";
+import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
+
+// Giới hạn năm của ô chọn ngày, khớp với kiểm tra ở storage.js (checkDateQty vẫn kiểm lại khi lưu).
+const DATE_MIN = `${YEAR_MIN}-01-01`;
+const DATE_MAX = `${YEAR_MAX}-12-31`;
 
 export const esc = (s) => String(s == null ? "" : s)
   .replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -123,9 +127,6 @@ export function renderError(code, kind, detail) {
 <p>${hint}</p>${info ? `\n<p class="src">${esc(info)}</p>` : ""}</div>`;
 }
 
-// Tên off.js normalize() đặt khi sản phẩm không có tên
-const NO_NAME = "Sản phẩm chưa có tên";
-
 /**
  * Form "Thêm vào tủ đồ" dưới kết quả tra.
  * Mã không tìm thấy thì gọi với name = "": ô tên để trống, người dùng bắt buộc nhập.
@@ -142,7 +143,7 @@ export function renderAddForm({ code, name = "", brand = "" }) {
   </label>
   <div class="row">
     <label>Hạn sử dụng
-      <input name="expiresOn" type="date" required>
+      <input name="expiresOn" type="date" min="${DATE_MIN}" max="${DATE_MAX}" required>
     </label>
     <label>Số lượng
       <input name="qty" type="number" min="1" max="${QTY_MAX}" step="1" value="1" inputmode="numeric" required>
@@ -160,7 +161,7 @@ function renderEditForm(x) {
 <form class="pantry-edit" data-id="${esc(x.id)}">
   <div class="row">
     <label>Hạn sử dụng
-      <input name="expiresOn" type="date" required value="${esc(x.expiresOn)}">
+      <input name="expiresOn" type="date" min="${DATE_MIN}" max="${DATE_MAX}" required value="${esc(x.expiresOn)}">
     </label>
     <label>Số lượng
       <input name="qty" type="number" min="1" max="${QTY_MAX}" step="1" inputmode="numeric" required value="${esc(x.qty)}">

@@ -259,7 +259,8 @@ pantryList.addEventListener("click", (ev) => {
     editingId = id;
     say(pantryMsg);
     showPantryList();
-    itemEl(id)?.querySelector("input")?.focus();
+    // Đặt con trỏ vào ô số lượng, không vào ô ngày: iPhone tự bật bảng chọn ngày khi ô ngày được focus.
+    itemEl(id)?.querySelector('input[name="qty"]')?.focus();
   } else if (btn.dataset.action === "cancel") {
     editingId = null;
     showPantryList();

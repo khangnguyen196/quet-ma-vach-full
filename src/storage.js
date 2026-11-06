@@ -92,17 +92,29 @@ export function getPantry() {
   return items;
 }
 
+/** Đã có bản backup giống hệt raw chưa: xét khóa PANTRY_BACKUP_KEY và mọi khóa "qmv-pantry-backup-…". */
+function hasBackup(raw) {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key == null) continue;
+    if (key !== PANTRY_BACKUP_KEY && !key.startsWith(`${PANTRY_BACKUP_KEY}-`)) continue;
+    if (localStorage.getItem(key) === raw) return true;
+  }
+  return false;
+}
+
 /**
  * Chép chuỗi hỏng sang khóa backup, không bao giờ ghi đè backup cũ:
+ * - đã có bản giống hệt ở PANTRY_BACKUP_KEY hoặc bất kỳ khóa "qmv-pantry-backup-…" nào → thôi
+ *   (không chép 2 lần cùng một bản);
  * - chưa có PANTRY_BACKUP_KEY → ghi vào đó;
- * - đã có và giống hệt → thôi (không chép 2 lần cùng một bản);
- * - đã có và khác → ghi vào khóa mới "qmv-pantry-backup-<thời điểm>".
- * Lỗi khi ghi (bộ nhớ đầy…) thì ném ra cho savePantry xử lý.
+ * - đã có PANTRY_BACKUP_KEY (khác) → ghi vào khóa mới "qmv-pantry-backup-<thời điểm>".
+ * Lỗi khi đọc / ghi (bộ nhớ đầy…) thì ném ra cho savePantry xử lý.
  */
 function backupBroken(raw) {
+  if (hasBackup(raw)) return;
   const first = localStorage.getItem(PANTRY_BACKUP_KEY);
   if (first == null) { localStorage.setItem(PANTRY_BACKUP_KEY, raw); return; }
-  if (first === raw) return;
   const t = Date.now();
   let key = `${PANTRY_BACKUP_KEY}-${t}`;
   for (let i = 1; localStorage.getItem(key) != null; i++) key = `${PANTRY_BACKUP_KEY}-${t}-${i}`; // trùng mili giây

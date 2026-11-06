@@ -130,6 +130,9 @@ export async function getProduct(code) {
  */
 const allergenVi = (a) => (Object.hasOwn(ALLERGEN_VI, a) ? ALLERGEN_VI[a] : a);
 
+/** Tên đặt cho sản phẩm khi API không có tên (render.js dùng để biết không điền sẵn vào form tủ đồ). */
+export const NO_NAME = "Sản phẩm chưa có tên";
+
 /** Đổi dữ liệu thô của Open Food Facts sang dạng app dùng. */
 export function normalize(p, code) {
   const n = p.nutriments && typeof p.nutriments === "object" ? p.nutriments : {};
@@ -139,7 +142,7 @@ export function normalize(p, code) {
 
   return {
     code: str(p.code) || code,
-    name: str(p.product_name_vi) || str(p.product_name) || str(p.product_name_en) || "Sản phẩm chưa có tên",
+    name: str(p.product_name_vi) || str(p.product_name) || str(p.product_name_en) || NO_NAME,
     brand: str(p.brands),
     quantity: str(p.quantity),
     category: cats.length ? cats[cats.length - 1] : "",
