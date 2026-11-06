@@ -92,9 +92,55 @@ def unglue_g(v):
     Rủi ro: số thật có 2 chữ số thập phân tận cùng 9 mà mất chữ g thì bị cắt (vd '18,49' thành '18,4')."""
     return v[:-1] if re.fullmatch(r"\d+[.,]\d+9", v) else v
 
+# ---- Luật đợt sua-nho cho đạm / béo / carb (mỗi luật có ở text OCR thật của >= 2 sản phẩm;
+#      thà để trống còn hơn ra số sai) ----
+# (a) Đạm / béo / carb trên 100 g là vô lý: để trống, không thử luật khác. Thấy ở: "1449" (8936017368111),
+#     "569" / "1199" (8936028641487, mất dấu phẩy, g đọc thành 9), "466" (8936025773181), "471" (8936071070340),
+#     "1809" / "8898" (8936221043071), "4129" / "669" (8936221044160), "3009" / "729" (8938501141040),
+#     "1622" (8936012061321), "555584" (8935049501503, dict).
+# (d) "569" là 5,6 g bị mất dấu phẩy và g đọc thành 9: KHÔNG chèn lại dấu phẩy (ô đạm "1449" của 8936017368111 sẽ
+#     thành 14,4 trong khi đáp án là 7,0). Số nguyên >= 3 chữ số không bắt đầu bằng 0 mà tận cùng 9 thì >= 109,
+#     nên (a) đã để trống, không cần luật riêng.
+GRAM_MAX = 100
+
+def gram_max(v):
+    """Giá trị gam > 100 (đúng "> 100", không phải >=) thì trả "", còn lại giữ nguyên."""
+    try:
+        return "" if float(v.replace(",", ".")) > GRAM_MAX else v
+    except ValueError:
+        return v
+
+# (b) Nhãn béo không lấy số của "chất béo bão hòa / chuyển hóa", "saturated fat", "trans fat", kể cả khi OCR đọc sai:
+#     bỏ khỏi text CẢ cụm nhãn lẫn số đi kèm trước khi chạy luật béo (như REF_INTAKE với năng lượng).
+#     Thấy ở: "chat beo bao hoa 0,3 g" (8934614031322), "chat beo bao hoa] saturated fat 240 mg" (8936079120276),
+#     "chatbeobaohoalsaturated fat 1809" (8936221043071), "chat beo bao hoal saturated| fat 5,6g" và
+#     "chatheobaohda/sauated fat 589" (8936221044160), "trans fats 1,9 mg saturated fat 9120,7 mg" (8936016140060),
+#     "saturatec 496  fat 00" (8938501141477), "sat fat less than 209" (8938501141040).
+#     Chỉ bắt cụm có "bao hoa" / "chuyen hoa" hoặc "sat... fat" / "trans fat", nên "Total Fat" / "Chất béo" đứng trước
+#     vẫn giữ nguyên.
+LB_SAT_VI = r"(?:chat ?[bh][a-z]{0,2} ?)?(?:bao|chuyen) ?h[a-z]{1,2}(?:l|(?![a-z]))"  # "bao hoa", "baohda", "baohoal"...
+LB_SAT_EN = r"(?:sat[a-z]*|trans)\W{0,3}(?:\d+\W{0,3})?fats?(?![a-z])"            # "saturated| fat", "saturatec 496  fat"
+SAT_FAT = re.compile(r"(?:" + LB_SAT_VI + r"|" + LB_SAT_EN + r")(?:[^\d\n]{0,25}" + NUM + r"\s*(?:mg|g|9)?)?")
+# "calories from fat" (năng lượng từ chất béo) không phải gam béo; bỏ cả khi có nhiều dấu cách giữa "from" và "fat".
+FROM_FAT = re.compile(r"from\s+fat")
+
+def fat_text(t):
+    """Text dùng cho luật béo (regex và dict): đã bỏ cụm béo bão hòa / chuyển hóa (kèm số) và "from fat"."""
+    return FROM_FAT.sub(" ", SAT_FAT.sub(" ", t))
+
+# (c) Luật dự phòng (không có đơn vị g): số nguyên >= 2 chữ số bắt đầu bằng 0 ("09", "00") là "0 g" đọc sai nhưng
+#     không chắc là 0: để trống. Thấy ở: "Protein 09", "Fat 09" (8935001214274), "Fat 00" (8938501141477).
+LEADING_ZERO = re.compile(r"0\d+")
+
 def gram_after(strict_labels, loose_labels, t):
-    """Số gam sau nhãn: luật cũ (số + g) trước; không có thì luật dự phòng chịu lỗi OCR."""
-    return first_number_after(strict_labels, t) or unglue_g(loose_number_after(loose_labels, t, NOT_GRAM))
+    """Số gam sau nhãn: luật cũ (số + g) trước; không có thì luật dự phòng chịu lỗi OCR.
+    Giá trị cuối > 100 thì để trống (luật a), không thử luật khác."""
+    v = first_number_after(strict_labels, t)
+    if not v:
+        v = unglue_g(loose_number_after(loose_labels, t, NOT_GRAM))
+        if LEADING_ZERO.fullmatch(v):
+            v = ""
+    return gram_max(v)
 
 # Nhãn "khối lượng tịnh" đọc sai: "khol luong tinh", "khoi iuong tinh", "kho' luong tinh", "khei luong tinh", "tjnh".
 LB_KHOI_LUONG = r"kh[a-z']{1,2} ?[li1]u[a-z]{0,2}ng ?t[a-z]nh|the tich thuc|net ?w(?:eigh)?t"
@@ -130,8 +176,8 @@ def extract_regex(text):
         or grab(NUM + r"\s*kcal", te) or loose_number_after(ENERGY_LABELS, te, NOT_KCAL)
     # Luật dự phòng chỉ dùng nhãn rõ ràng (không dùng "dam", "beo", "tinh bot"... vì hay gặp trong phần thành phần).
     out["dam_g"] = gram_after(["chat dam", "dam", "protein"], ["chat dam", "protein"], t)
-    # Nhãn béo dự phòng bỏ "calories from fat" (năng lượng từ chất béo, không phải số gam béo).
-    out["beo_g"] = gram_after(["chat beo", "beo", "fat", "lipid"], ["chat beo", r"(?<!from )fat", "lipid"], t)
+    # Luật béo chạy trên fat_text: đã bỏ "calories from fat" và cụm béo bão hòa / chuyển hóa (luật b).
+    out["beo_g"] = gram_after(["chat beo", "beo", "fat", "lipid"], ["chat beo", "fat", "lipid"], fat_text(t))
     out["carb_g"] = gram_after([r"carbohydrat\w*", "carb", "hydrat cacbon", "duong bot", "tinh bot", "glucid"],
                                [r"carbohydrat\w*", "hydrat cacbon", "glucid"], t)
     out["nha_san_xuat"] = grab(r"(?:san xuat boi|nha san xuat|san xuat tai|manufactured by)\s*[:\-]?\s*([^\n]{5,120})", t) \
@@ -177,17 +223,19 @@ def extract_dict(text):
     ingr_hits = sorted(best_in_text(_ingr, 92, seg=m.group(0) if m else t), key=lambda h: h[1])
     out["thanh_phan_dau"] = [h[2] for h in ingr_hits[:3]]
 
-    def number_on_line(labels, unit=r"g\b"):
-        for l in lines:
+    def number_on_line(labels, unit=r"g\b", src=None):
+        for l in (lines if src is None else src):
             if any(fuzz.partial_ratio(lb, l) >= 85 for lb in labels):
                 m = re.search(NUM + r"\s*" + unit, l)
                 if m:
                     return m.group(1)
         return ""
     out["nang_luong_kcal"] = number_on_line(["nang luong", "energy"], r"k?cal")
-    out["dam_g"] = number_on_line(["chat dam", "protein"])
-    out["beo_g"] = number_on_line(["chat beo", "fat"])
-    out["carb_g"] = number_on_line(["carbohydrate", "duong bot", "tinh bot", "glucid"])
+    # Đạm / béo / carb > 100 thì để trống (luật a); béo đọc trên text đã bỏ cụm béo bão hòa / chuyển hóa (luật b).
+    fat_lines = [l.strip() for l in fat_text(t).splitlines() if l.strip()]
+    out["dam_g"] = gram_max(number_on_line(["chat dam", "protein"]))
+    out["beo_g"] = gram_max(number_on_line(["chat beo", "fat"], src=fat_lines))
+    out["carb_g"] = gram_max(number_on_line(["carbohydrate", "duong bot", "tinh bot", "glucid"]))
     out["nha_san_xuat"] = next((l for l in lines if any(fuzz.partial_ratio(k, l) >= 85 for k in ["cong ty", "tnhh", "co phan"])), "")
     st_hits = best_in_text(_storage, 85)
     out["bao_quan"] = max(st_hits, key=lambda h: h[0])[2] if st_hits else ""

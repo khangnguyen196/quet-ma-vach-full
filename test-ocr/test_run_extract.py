@@ -239,6 +239,81 @@ class RegexOcrRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("HSD: 300226")["han_su_dung"], "300226")
 
 
+class GramRulesTest(unittest.TestCase):
+    """Luật đợt sua-nho cho đạm / béo / carb: thà để trống còn hơn ra số sai.
+    Chuỗi lấy theo text OCR thật (mã sản phẩm ghi ở từng ca)."""
+
+    def rx(self, text):
+        return run_extract.extract_regex(text)
+
+    def dc(self, text):
+        return run_extract.extract_dict(text)
+
+    def grams(self, out):
+        return (out["dam_g"], out["beo_g"], out["carb_g"])
+
+    def test_s1a_over_100_strict_loose_dict_empty(self):
+        # (a) > 100 g thì để trống, ở cả luật cũ (số + g), luật dự phòng và dict.
+        self.assertEqual(self.grams(self.rx("Chất đạm 1449 g Chất béo 101 g Carbohydrat 4129 g")), ("", "", ""))
+        self.assertEqual(self.grams(self.rx("Chất đạm 1449 Chất béo 1809 Carbohydrate 555584")), ("", "", ""))
+        self.assertEqual(self.grams(self.dc("Chất đạm 1449 g\nChất béo 101 g\nCarbohydrate 4129 g")), ("", "", ""))
+        # Đúng "> 100": 100 vẫn giữ; 100,5 bị bỏ.
+        self.assertEqual(self.rx("Carbohydrate 100 g")["carb_g"], "100")
+        self.assertEqual(self.rx("Carbohydrate 100,5 g")["carb_g"], "")
+        self.assertEqual(self.dc("Carbohydrate 100 g")["carb_g"], "100")
+        # Luật cũ ra > 100 thì để trống luôn, KHÔNG thử luật dự phòng (dù sau đó có "Protein 7,0").
+        self.assertEqual(self.rx("Chất đạm 150 g Protein 7,0")["dam_g"], "")
+        # Số bình thường không đổi.
+        self.assertEqual(self.grams(self.rx("Chất đạm 7,0 g Chất béo 18,49 g Carbohydrat 62 g")), ("7,0", "18,49", "62"))
+        self.assertEqual(self.grams(self.dc("Chất đạm 7,0 g\nChất béo 18,49 g\nCarbohydrate 62 g")), ("7,0", "18,49", "62"))
+
+    def test_s1b_fat_label_skips_saturated_and_trans_fat(self):
+        # (b) EasyOCR 8936221044160: luật cũ "chat beo" bắt 5,6 của "Chất béo bão hòal Saturated| Fat"; đáp án 10,8.
+        out = self.rx("Chất béo/ Total fat: 10,84 Chất đạm/ Protein: 6,69 Chất béo bão hòal Saturated| Fat 5,6g")
+        self.assertNotEqual(out["beo_g"], "5,6")
+        self.assertEqual(out["beo_g"], "10,84")   # số sau "Total fat" ('4' là g đọc sai, ngoài phạm vi luật này)
+        # Tesseract 8936221044160: "Chathéobaohda/sauated fat 589" (thêm biến thể số <= 100 để không nhờ luật a).
+        self.assertEqual(self.rx("Chất béo/ Total fat: =\nChathéobaohda/sauated fat 589")["beo_g"], "")
+        self.assertEqual(self.rx("Chất béo/ Total fat: =\nChathéobaohda/sauated fat 5,8")["beo_g"], "")
+        # 8936221043071: "ChấtbéobãohòalSaturated Fat 1809".
+        self.assertEqual(self.rx("Chất béol Total Fat au ChấtbéobãohòalSaturated Fat 1809 Natri")["beo_g"], "")
+        self.assertEqual(self.rx("Chất béol Total Fat au ChấtbéobãohòalSaturated Fat 3,6 Natri")["beo_g"], "")
+        # 8938501141477: "Saturatec 496  Fat 00".
+        self.assertEqual(self.rx("Calories from Fat: 20 IotalTat 96 Daily Value 259 Saturatec 496  Fat 00")["beo_g"], "")
+        self.assertEqual(self.rx("IotalTat 96 Saturatec 496  Fat 2,5")["beo_g"], "")
+        # 8936016140060 / 8936079120276: "Saturated Fat" / "Trans Fat" kèm đơn vị g.
+        self.assertEqual(self.rx("Trans Fat 0 g Saturated Fat 1,2 g")["beo_g"], "")
+        self.assertEqual(self.rx("Chất béo bão hòa / Saturated Fat 2 g\nTổng chất béo / Total Fat 3,0 g")["beo_g"], "3,0")
+        self.assertEqual(self.rx("Chất béo chuyển hóa 0 g Chất béo 7 g")["beo_g"], "7")
+        self.assertEqual(self.dc("Chất béo bão hòa/Saturated fat 11 g\nNatri 130 mg")["beo_g"], "")
+        # "Total Fat" / "Chất béo" đứng trước vẫn lấy đúng.
+        text = "Tổng chất béo]Total Fat 3,0g 15% Chất béo bão hòa] Saturated Fat 240 mg 10%"
+        self.assertEqual(self.rx(text)["beo_g"], "3,0")
+        self.assertEqual(self.dc(text)["beo_g"], "3,0")
+        self.assertEqual(self.rx("Total Fat 3,0g")["beo_g"], "3,0")
+        self.assertEqual(self.dc("Total Fat 3,0g")["beo_g"], "3,0")
+
+    def test_s1b2_calories_from_fat_many_spaces(self):
+        # "calories from fat" bỏ cả khi có nhiều dấu cách giữa "from" và "fat".
+        self.assertEqual(self.rx("Calories from   Fat: 20 IotalTat 96")["beo_g"], "")
+        self.assertEqual(self.rx("Calories from   Fat: 20 Total Fat 2,5")["beo_g"], "2,5")
+
+    def test_s1c_loose_leading_zero_integer_empty(self):
+        # (c) luật dự phòng: "09", "00" (0 g đọc sai) -> trống, KHÔNG đổi thành "0".
+        out = self.rx("Chất đạm protein 09 Chất béo / Fat 09")      # 8935001214274
+        self.assertEqual((out["dam_g"], out["beo_g"]), ("", ""))
+        self.assertEqual(self.rx("Fat 00 Cholesterol 0 9")["beo_g"], "")  # 8938501141477
+        # "0" và "0,5" giữ nguyên.
+        out = self.rx("Protein 0 Fat 0,5 Carbohydrate 0")
+        self.assertEqual(self.grams(out), ("0", "0,5", "0"))
+
+    def test_s1d_lost_comma_and_g_as_9_empty_not_reinserted(self):
+        # (d) "569" là 5,6 g mất dấu phẩy, g đọc thành 9: để trống (nhờ luật a), không chèn dấu phẩy.
+        self.assertEqual(self.rx("Chất béo 569")["beo_g"], "")
+        self.assertEqual(self.rx("Carbohydrate 1199")["carb_g"], "")
+        self.assertEqual(self.rx("Protein 1449")["dam_g"], "")   # 8936017368111: chèn dấu phẩy sẽ ra 14,4 (đáp án 7,0)
+
+
 class OutputEncodingTest(TmpDirCase):
     """Như `python run_extract.py > file` / `python score_combo.py > file` trên Windows: stdout, stderr là file cp1252."""
 
