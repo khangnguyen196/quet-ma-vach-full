@@ -67,19 +67,26 @@ function loadSw(code, { cacheNames = [], fetchImpl } = {}) {
   const log = { opened: [], put: [], fetched: [], deleted: [], skipWaiting: 0, claim: 0, matched: [] };
   const stores = new Map(cacheNames.map((n) => [n, new Map()]));
   const keyOf = (req) => (typeof req === "string" ? req : req.url);
+  // Như trình duyệt: địa chỉ tương đối ("./index.html") được đổi ra địa chỉ đầy đủ theo phạm vi của service worker.
+  const absKey = (req) => new URL(keyOf(req), SCOPE).href;
+  const stripSearch = (url) => { const u = new URL(url); u.search = ""; return u.href; };
   const caches = {
     async open(name) {
       log.opened.push(name);
       if (!stores.has(name)) stores.set(name, new Map());
       const store = stores.get(name);
-      return { async put(req, res) { log.put.push(keyOf(req)); store.set(keyOf(req), res); } };
+      return { async put(req, res) { log.put.push(keyOf(req)); store.set(absKey(req), res); } };
     },
     async keys() { return [...stores.keys()]; },
     async delete(name) { log.deleted.push(name); return stores.delete(name); },
     async match(req, opts = {}) {
       log.matched.push({ key: keyOf(req), opts: { ...opts } }); // chép sang object ngoài vm để deepEqual so được
       const store = stores.get(opts.cacheName);
-      return store?.get(keyOf(req));
+      if (!store) return undefined;
+      const key = absKey(req);
+      if (!opts.ignoreSearch) return store.get(key);
+      for (const [k, v] of store) if (stripSearch(k) === stripSearch(key)) return v;
+      return undefined;
     }
   };
   class FakeRequest {
@@ -186,7 +193,7 @@ describe("buildServiceWorker", () => {
     assert.deepEqual(online.log.fetched, [{ url: SCOPE, cache: "no-cache" }]);
 
     const offline = loadSw(code, { cacheNames: ["qmv-shell-v1abc"], fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
-    offline.stores.get("qmv-shell-v1abc").set("./index.html", "giao diện đã lưu");
+    offline.stores.get("qmv-shell-v1abc").set(SCOPE + "index.html", "giao diện đã lưu");
     assert.equal(await dispatchFetch(offline.listeners, { method: "GET", url: SCOPE + "?a=1", mode: "navigate" }), "giao diện đã lưu");
     assert.deepEqual(offline.log.matched, [{ key: "./index.html", opts: { cacheName: "qmv-shell-v1abc", ignoreSearch: true } }]);
   });
