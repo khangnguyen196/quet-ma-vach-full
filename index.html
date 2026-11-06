@@ -4,6 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Quét mã vạch đồ ăn</title>
+  <!-- PWA (giai đoạn 3): manifest, icon, màu thanh trình duyệt. Đường dẫn tương đối vì base "./" -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon-180.png">
+  <meta name="theme-color" content="#1F7A4D" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121311" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Quét đồ ăn">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -11,6 +21,11 @@
 </head>
 <body>
 <main>
+  <!-- Thanh báo bản mới (service worker, src/pwa.js): ẩn sẵn, nằm trong luồng trang, không tự tải lại -->
+  <div id="updateBar" class="update-bar" role="status" hidden>
+    <span>Đã có bản mới.</span>
+    <button id="btnReload" class="btn" type="button">Tải lại</button>
+  </div>
   <header>
     <div class="topbar">
       <h1 id="appName">Quét mã vạch đồ ăn</h1>
