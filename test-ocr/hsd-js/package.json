@@ -1,0 +1,13 @@
+{
+  "name": "hsd-js",
+  "private": true,
+  "type": "module",
+  "description": "Thí nghiệm đo đọc hạn sử dụng bằng tesseract.js (chưa đưa vào app)",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "jimp": "^1.6.1",
+    "tesseract.js": "^7.0.0"
+  }
+}

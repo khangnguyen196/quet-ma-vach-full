@@ -5,3 +5,5 @@ photos/
 .env
 *.json
 __pycache__/
+!hsd-js/package.json
+!hsd-js/package-lock.json

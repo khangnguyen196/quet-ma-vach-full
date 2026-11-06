@@ -1,0 +1,10 @@
+code,file_nguon,x,y,w,h,ghi_chu
+8936028641487,date.jpg,785,2727,1165,123,Dòng HSD:11.01.24 (chấm kim); NSX nằm dòng riêng ngay trên nên loại (lề trên chỉ ~5 px vì 2 dòng sát nhau); bỏ giờ 13:45:30 phía sau vì chữ nghiêng làm khung dính chữ B của dòng NSX
+8936221044160,date.jpg,570,2606,1655,194,Trọn dòng HSD:131126 32 I; NSX dòng riêng ngay trên nên loại
+8934588022111,date.jpg,1790,1972,935,248,Dòng HSD:010424; chữ nghiêng ~6 độ nên khung chữ nhật không tách hẳn được dòng NSX: lấy trọn HSD:010424 và dính nửa dưới chữ NSX bên trái; bỏ mã lô 42A phía sau (lấy thêm sẽ dính thêm NSX)
+8935001214274,date.jpg,1072,1150,168,602,Chữ in dọc (xoay 90 độ) và nghiêng; khung chỉ cắt không xoay; lấy trọn HSD:19.09.20 và dính mép phải cột NSX bên trái; bỏ mã lô WMT LD phía sau
+8936012061321,date.jpg,410,428,1060,148,Trọn dòng in 011224 T41 02 (nhãn HSD / EXP in sẵn ở dòng trên nên không lấy); dòng NSX 020624 ngay dưới nên loại
+8934673818391,date.jpg,1195,982,1070,166,Trọn dòng in 200923 B1 01 (nhãn HSD/EXP in sẵn ở dòng trên nên không lấy); dòng NSX 200323 ngay dưới nên loại
+8936017368111,front.jpg,145,400,47,225,Không có date.jpg; HSD in dọc (xoay 90 độ) trên mặt trước; ảnh nhỏ (cột chữ rộng ~35 px); khung chỉ cắt không xoay; lấy HSD:280920 và bỏ mã lô phía sau (đè lên chữ in Nước cốt); NSX cột riêng bên phải nên loại
+8934673300759,front.jpg,520,470,252,62,Không có date.jpg; dòng HSD:071026 trên cổ chai mặt trước; dòng dưới L 20:17-07 (mã lô / giờ) loại
+8936017367107,ingredients.jpg,1404,2697,502,62,Không có date.jpg; nhãn dán trên ảnh thành phần: before : 05 / Oct / 2021; bỏ chữ Best/best phía trước vì các dòng nghiêng dính chữ dòng trên / dưới; mép trên dính chân chữ 650 ml
