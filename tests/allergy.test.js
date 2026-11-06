@@ -422,5 +422,9 @@ describe("chip dị ứng tra tên tiếng Việt bằng chữ thường (ket-th
     assert.deepEqual(p.allergens, ["constructor"]);
     assert.deepEqual(p.traces, ["Constructor"]);
     for (const a of [...p.allergens, ...p.traces]) assert.equal(typeof a, "string");
+    // "__proto__" cũng ra chữ, không ra Object.prototype
+    const q = normalize(raw({ allergens_tags: ["en:__proto__"] }), "123");
+    assert.deepEqual(q.allergens, ["__proto__"]);
+    assert.equal(typeof q.allergens[0], "string");
   });
 });
