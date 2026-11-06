@@ -26,6 +26,15 @@ export function addHistory(code, name) {
 // ---- Hồ sơ dị ứng (giai đoạn 3): danh sách khóa nhóm, vd ["milk", "peanuts"] ----
 const ALLERGY_KEY = "qmv-allergy-profile";
 
+/**
+ * Sự kiện "storage" (tab khác của app đổi localStorage) có thể đã đổi hồ sơ dị ứng không:
+ * đúng khóa hồ sơ, hoặc key null (tab kia xóa sạch localStorage).
+ * Ví dụ: window.addEventListener("storage", (ev) => { if (isAllergyProfileKey(ev.key)) … });
+ */
+export function isAllergyProfileKey(key) {
+  return key === null || key === ALLERGY_KEY;
+}
+
 /** Đọc hồ sơ dị ứng; dữ liệu hỏng (không phải JSON, không phải mảng, khóa lạ) → chỉ giữ phần hợp lệ hoặc []. */
 export function getAllergyProfile() {
   return cleanAllergyProfile(read(ALLERGY_KEY, []));

@@ -8,7 +8,7 @@ import {
 } from "./render.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
-  getAllergyProfile, setAllergyProfile, importPantryData
+  getAllergyProfile, setAllergyProfile, importPantryData, isAllergyProfileKey
 } from "./storage.js";
 import { buildExport, exportFileName, parseImport, IMPORT_MAX_BYTES } from "./backup.js";
 import { compareWaitMs } from "./compare.js";
@@ -202,6 +202,23 @@ allergyProfileEl.addEventListener("change", (ev) => {
       + "Cảnh báo vẫn theo lựa chọn này cho tới khi tải lại trang; tải lại trang sẽ mất lựa chọn.", true);
   }
   redrawAllergyAlert();
+});
+
+// Mở app ở 2 tab: tab kia đổi hồ sơ → tab này đọc lại, vẽ lại ô tick + khung cảnh báo của kết quả đang hiện
+// (và màn So sánh nếu đang mở). Không gọi mạng, không vẽ lại cả kết quả (giữ chữ đang gõ).
+// Sự kiện "storage" chỉ bắn ở tab KHÁC tab vừa ghi.
+window.addEventListener("storage", (ev) => {
+  try {
+    if (ev.storageArea && ev.storageArea !== localStorage) return; // sessionStorage: không liên quan
+    if (!isAllergyProfileKey(ev.key)) return;
+    allergyProfile = getAllergyProfile();
+    showAllergyProfile();
+    say(allergyMsg, `Hồ sơ đã đổi ở tab khác (${allergyProfile.length} nhóm)`);
+    redrawAllergyAlert();
+    if (!screenCompare.hidden) drawCompare();
+  } catch (e) {
+    console.warn("Không cập nhật được hồ sơ dị ứng từ tab khác:", e);
+  }
 });
 
 // ---- Tra cứu ----
