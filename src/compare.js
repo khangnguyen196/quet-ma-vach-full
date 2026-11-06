@@ -27,3 +27,16 @@ export function compareRows(a, b) {
     key, label, unit, a: valueOf(a, field), b: valueOf(b, field)
   }));
 }
+
+/**
+ * Màn So sánh: phải chờ thêm bao nhiêu ms trước khi gọi Open Food Facts lần nữa, để 2 lần gọi mạng cách nhau
+ * ít nhất gapMs (kể cả 2 lượt so sánh khác nhau). lastCallAt: thời điểm (ms) lần gọi mạng trước, null / undefined /
+ * -Infinity = chưa gọi lần nào. Đồng hồ lùi hoặc số hỏng → chờ đủ gapMs (không bao giờ chờ quá gapMs).
+ * Ví dụ: compareWaitMs(10000, 10300) → 700; compareWaitMs(10000, 11500) → 0.
+ */
+export function compareWaitMs(lastCallAt, now, gapMs = 1000) {
+  if (lastCallAt == null || lastCallAt === -Infinity) return 0;
+  const wait = lastCallAt + gapMs - now;
+  if (!Number.isFinite(wait) || now < lastCallAt) return gapMs;
+  return Math.min(gapMs, Math.max(0, wait));
+}

@@ -11,6 +11,7 @@ import {
   getAllergyProfile, setAllergyProfile, importPantryData
 } from "./storage.js";
 import { buildExport, exportFileName, parseImport, IMPORT_MAX_BYTES } from "./backup.js";
+import { compareWaitMs } from "./compare.js";
 import { initPwa } from "./pwa.js";
 
 initPwa(); // service worker + thanh "Đã có bản mới" (chỉ ở bản build)
@@ -547,6 +548,28 @@ compareHist.forEach((sel, i) => sel.addEventListener("change", () => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Màn So sánh gọi Open Food Facts cách nhau ít nhất 1 giây, kể cả 2 lượt khác nhau (bấm So sánh liên tiếp).
+// Lần lấy từ cache trong bộ nhớ (isProductCached) không gọi mạng nên không tính.
+const COMPARE_GAP_MS = 1000;
+let lastCompareCallAt = null; // thời điểm (Date.now) lần gọi mạng gần nhất của màn So sánh
+
+/**
+ * Tra 1 bên cho lượt so sánh id: cần gọi mạng thì chờ đủ khoảng giãn trước; trong lúc chờ mà lượt đã đổi
+ * (người dùng bấm So sánh lần nữa) thì thôi, KHÔNG gọi mạng, trả null.
+ */
+async function fetchSideSpaced(code, id) {
+  if (!isProductCached(code)) {
+    for (let wait = compareWaitMs(lastCompareCallAt, Date.now(), COMPARE_GAP_MS); wait > 0;
+      wait = compareWaitMs(lastCompareCallAt, Date.now(), COMPARE_GAP_MS)) {
+      await sleep(wait);
+      if (id !== compareTurn) return null;
+    }
+    if (id !== compareTurn) return null;
+    if (!isProductCached(code)) lastCompareCallAt = Date.now();
+  }
+  return fetchSide(code);
+}
+
 /** Tra 1 bên để so sánh (KHÔNG thêm vào lịch sử). Không ném lỗi: lỗi trả về dạng { status: "error" }. */
 async function fetchSide(code) {
   let data;
@@ -580,16 +603,14 @@ compareForm.addEventListener("submit", async (ev) => {
   const id = ++compareTurn;
   lastCompare = null;
   compareResult.innerHTML = "";
-  // Tra LẦN LƯỢT (không song song). Mã A phải gọi mạng và mã B cũng phải gọi mạng thì nghỉ 1 giây giữa 2 lần gọi.
+  // Tra LẦN LƯỢT (không song song). 2 lần gọi mạng của màn So sánh luôn cách nhau >= 1 giây (fetchSideSpaced),
+  // lượt cũ đã bị thay thì không gọi tiếp.
   say(compareMsg, `Đang tra cứu mã ${codes[0]}…`);
-  const aNeedsNetwork = !isProductCached(codes[0]);
-  const sideA = await fetchSide(codes[0]);
-  if (id !== compareTurn) return;
-  if (aNeedsNetwork && !isProductCached(codes[1])) await sleep(1000);
-  if (id !== compareTurn) return;
+  const sideA = await fetchSideSpaced(codes[0], id);
+  if (!sideA || id !== compareTurn) return;
   say(compareMsg, `Đang tra cứu mã ${codes[1]}…`);
-  const sideB = await fetchSide(codes[1]);
-  if (id !== compareTurn) return;
+  const sideB = await fetchSideSpaced(codes[1], id);
+  if (!sideB || id !== compareTurn) return;
 
   lastCompare = [sideA, sideB];
   say(compareMsg);
