@@ -4,14 +4,14 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 
 ## Tổng kết
 
-Tóm tắt cả dự án (cập nhật 06/11/2026, đợt `ket-thuc`); chi tiết và số đo ở mục 2, mục 8 và `test-ocr/README.md`.
+Tóm tắt cả dự án (cập nhật 06/11/2026, đợt `don-nho`); chi tiết và số đo ở mục 2, mục 8 và `test-ocr/README.md`.
 
 **Đã xong theo giai đoạn**
 - Giai đoạn 1 – Tra cứu: xong 05/11/2026 (code ở đợt `khoi-dong`, `sua-va-dua-len`; chủ dự án thử trên iPhone Safari đạt). "Chụp ảnh mã" đọc bằng `zxing-wasm` trước từ đợt `sua-cuoi` (06/11/2026).
 - Giai đoạn 2 – Thông tin thêm + Tủ đồ ăn: xong 05/11/2026 (đợt `gd2`; thử tủ đồ trên iPhone đạt 12 bước).
 - Giai đoạn 3: hồ sơ dị ứng (06/11/2026, đợt `gd3-a`); so sánh 2 sản phẩm và PWA (06/11/2026, đợt `hoan-thien`). Đọc HSD từ ảnh tạm hoãn (bên dưới).
 - Giai đoạn 4: xuất / nhập tủ đồ bằng file JSON và nút góp sản phẩm lên Open Food Facts (06/11/2026, đợt `hoan-thien`).
-- Sửa lỗi sau lần thử iPhone toàn bộ app: đợt `sua-cuoi` (06/11/2026); thử iPhone sau `sua-cuoi` đạt 9/9 (mục 8). Đợt `ket-thuc` (06/11/2026): 2 việc để sau nhỏ (c), (d) của `sua-cuoi`, README "Dùng app", tổng kết này.
+- Sửa lỗi sau lần thử iPhone toàn bộ app: đợt `sua-cuoi` (06/11/2026); thử iPhone sau `sua-cuoi` đạt 9/9 (mục 8). Đợt `ket-thuc` (06/11/2026): 2 việc để sau nhỏ (c), (d) của `sua-cuoi`, README "Dùng app", tổng kết này. Đợt `don-nho` (06/11/2026): chip dị ứng bỏ tên trùng, `.gitattributes` xuống dòng LF.
 
 **Tạm hoãn**
 - Đọc hạn sử dụng từ ảnh (`hsd-app`): đo ở `gd3-a` bằng `tesseract.js` trên ảnh cắt vùng HSD: đọc thẳng 2/9, xử lý ảnh 1/9, dưới ngưỡng 5/9; chữ in chấm kim và chữ in dọc không đọc được. Người dùng nhập hạn bằng tay.
@@ -32,7 +32,6 @@ Tóm tắt cả dự án (cập nhật 06/11/2026, đợt `ket-thuc`); chi tiế
 - Deploy chỉ đổi `index.html` thì tab đang mở không hiện thanh bản mới (Việc để sau hoan-thien (h)).
 - `import('./zxing-reader.js')` chưa có giới hạn thời gian (Việc để sau sua-cuoi (a), để nguyên).
 - wasm treo thì mỗi lần chọn ảnh vẫn chờ 10 giây (Việc để sau sua-cuoi (b), để nguyên).
-- Chip dị ứng có thể lặp tên khi cùng nhóm có 2 tag (vd 'en:milk' + 'fr:milk' → 'Sữa, Sữa') (Việc để sau ket-thuc (a)).
 - `test-ocr` (Việc để sau dòng E, `ocr-b` / `sua-nho`): câu lệnh `LLM_PROMPT` cho `han_su_dung`; luật (7) ra "711l"; `find_date` dùng `finditer`; kiểm lịch thật bằng `datetime`; nhãn "chất béo trans"; bảng theo dòng 2 cột giá trị; nhãn "fat" khớp "Fatty acids"; nhãn bão hòa có "(g)" đứng sau; chữ rác giữa nhãn bão hòa và số; `dict` ra số chất đạm ở bảng cột đầy đủ.
 
 ## 1. Mục tiêu
@@ -371,5 +370,8 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
   Quyết định của dieu-phoi (06/11/2026, ket-thuc vòng 0): (1) làm (c) chip dị ứng tra bằng chữ thường, (d) cờ e.timeout + isZxingTimeout; (2) (a), (b) để nguyên (lý do ở dòng Việc để sau sua-cuoi); (3) README gộp các mục cho người dùng vào "Dùng app"; (4) 1 vòng code, lên main và kiểm Pages một lần; kết quả Pages ghi ở báo cáo cuối đợt, không commit docs thêm.
   Kiểm cuối vòng 1 (06/11/2026, nhánh `ket-thuc`, chưa lên main): `npm test` 170 → 179 test (allergy 44 → 48, barcode 25 → 30; các file khác giữ nguyên), test viết trước, chạy đỏ trên code cũ (allergy 2/4 đỏ, barcode 5/5 đỏ) rồi mới sửa; không đổi test cũ. `npm run build` sạch, `dist/sw.js` 0 chữ "wasm", VERSION sw.js 7c57e183aa6e, assets index-DZ-mgG9V.js / index-B2KD9IO1.css. Test Python `test-ocr` 61/61, `hsd-js` 16/16. Playwright trên bản build local (dưới /quet-ma-vach-full/, 390 px, Open Food Facts trả giả, 0 request thật): chip "Sữa" cho tag "EN:Milk" (context serviceWorkers: "block", mã giả 2000000000008, route bắt 1 lần, khung đỏ "có Sữa") và 2 ảnh thật ra 8936079121822: Chromium 10/10, WebKit 10/10; `kiem-vong3` (wasm chậm / lỗi) 11/11 cả Chromium lẫn WebKit (câu hướng dẫn sau 10,4–11,1 giây, dòng nhỏ "chưa tải xong sau 10 giây (mạng chậm)", như sua-cuoi vòng 4); hồi quy `kiem-vong2` chế độ sáng: Chromium 26/26, WebKit 24/24.
   Quyết định của dieu-phoi (06/11/2026, ket-thuc vòng 1): code-reviewer vòng 1 0 NGHIÊM TRỌNG / 0 NÊN SỬA / 4 GỢI Ý; làm trước khi lên main (vòng 2, chỉ docs + comment + 1 ca test, bản build không đổi): (1) dòng đợt ghi lên main / kiểm Pages ở báo cáo cuối đợt; (2) README thêm khung xám "chưa có dữ liệu dị ứng"; (3) chip lặp tên ghi việc để sau; (4) comment ready() + khóa "__proto__" trong test chip.
-  Việc để sau (ket-thuc): [ ] (a) chip dị ứng có thể lặp tên khi cùng nhóm có 2 tag (vd 'en:milk' + 'fr:milk', hoặc 'en:milk' + 'EN:Milk' → 'Sữa, Sữa'); đã có từ trước, chỉ là hiển thị, không sai chiều an toàn; cách sửa: bỏ tên trùng sau .map(allergenVi) + test.
+  Việc để sau (ket-thuc): [x] (a) chip dị ứng có thể lặp tên khi cùng nhóm có 2 tag (vd 'en:milk' + 'fr:milk', hoặc 'en:milk' + 'EN:Milk' → 'Sữa, Sữa'); đã có từ trước, chỉ là hiển thị, không sai chiều an toàn; cách sửa: bỏ tên trùng sau .map(allergenVi) + test (đã làm ở don-nho).
   Vòng 2 (06/11/2026, nhánh `ket-thuc`, chưa lên main): `npm test` 179/179 (số test không đổi, ca "__proto__" thêm vào test "'en:constructor' ra chữ 'constructor', không ra hàm"; thử đổi tạm `Object.hasOwn` sang toán tử `in` thì đỏ, đổi lại thì xanh); `npm run build` sạch, `dist/sw.js` 0 chữ "wasm", VERSION sw.js 7c57e183aa6e, assets index-DZ-mgG9V.js / index-B2KD9IO1.css / zxing-reader-DwRlE3FT.js / zxing_reader-BCjuyud6.wasm, giống hệt vòng 1 (bản build không đổi, không chạy lại Playwright).
+
+- [x] **Đợt `don-nho`** (06/11/2026): 2 việc nhỏ. (1) Việc để sau ket-thuc (a): chip dị ứng bỏ tên trùng sau khi đổi sang tiếng Việt (hàm `uniqueNames` trong `src/off.js`, bỏ trùng theo đúng chữ, giữ thứ tự lần xuất hiện đầu, trong từng danh sách allergens / traces): 'en:milk' + 'fr:milk' hay 'en:milk' + 'EN:Milk' chỉ ra 1 chip "Sữa"; `allergenKeys` / `traceKeys` không đổi. Test viết trước, chạy đỏ trên code cũ (6/186 fail) rồi mới sửa (186/186). (2) `.gitattributes` (`* text=auto eol=lf`): file text trên máy xuống dòng LF như trên GitHub, bản build trên máy ra cùng VERSION với bản CI (trước đó máy có `core.autocrlf=true` nên `dist/index.html` CRLF, VERSION máy 7c57e183aa6e khác Pages 3215f6540a80). Build trên máy ở bước P2 (chưa đổi code) ra 3215f6540a80 = Pages; VERSION máy cuối đợt = df4173e7a3e4, kết quả so với Pages ghi ở báo cáo cuối đợt.
+  Quyết định của dieu-phoi (06/11/2026, don-nho vòng 0): (1) `.gitattributes` 1 dòng vì `text=auto` đã nhận PNG là nhị phân, repo không có .bat / .ps1; (2) đưa worktree về LF bằng `git rm --cached -r` + `reset --hard` trong worktree; (3) bỏ trùng theo tên tiếng Việt, đúng từng chữ, trong từng danh sách; (4) ghi PLAN trước khi lên main, không commit docs sau khi lên main.

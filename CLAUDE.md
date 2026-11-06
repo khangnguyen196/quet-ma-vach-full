@@ -38,6 +38,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - Không đổi thư viện quét hay cách gọi API nếu chưa hỏi.
 - Giữ số dependency tối thiểu; cài thêm gói thì nói lý do.
 - Service worker không bao giờ cache request khác tên miền (Open Food Facts, Google Fonts): chỉ giữ giao diện của app.
+- Xuống dòng LF cho mọi file text (.gitattributes) để VERSION build trên máy giống bản trên Pages.
 
 ## Test nhanh
 - Mã có đủ dữ liệu: `8934563163150`. Mã thiếu dữ liệu: `8934563651138`. Mã không tồn tại: `0000000000000`. Mã có dữ liệu dị ứng: `8993175532457` (allergens_tags `en:gluten, en:milk, en:soybeans`; traces_tags `en:eggs, en:milk, en:nuts, en:peanuts`, kiểm 06/11/2026).
