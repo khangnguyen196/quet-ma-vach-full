@@ -9,7 +9,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - HTML + CSS + JavaScript thuần (ES modules), bundler Vite. **Không** đưa React/Vue/TypeScript vào trừ khi được yêu cầu.
 - `html5-qrcode` để quét; `tesseract.js` chỉ cài khi tới giai đoạn 3.
 - Dữ liệu: Open Food Facts API v2 (không cần key). Lưu trữ: localStorage.
-- Lệnh: `npm run dev` (dev có HTTPS), `npm run build`, `npm run preview`.
+- Lệnh: `npm run dev` (dev có HTTPS), `npm run build`, `npm run preview`, `npm test` (test node của app ở `tests/`).
 - Đưa lên web: lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions (workflow "Deploy GitHub Pages", `.github/workflows/deploy.yml`) tự chạy `npm ci` + `npm run build` rồi deploy `dist/` lên GitHub Pages. Không cần build hay upload tay.
 
 ## Cấu trúc
@@ -31,6 +31,6 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - Giữ số dependency tối thiểu; cài thêm gói thì nói lý do.
 
 ## Test nhanh
-- Mã có đủ dữ liệu: `8934563163150`. Mã thiếu dữ liệu: `8934563651138`. Mã không tồn tại: `0000000000000`.
+- Mã có đủ dữ liệu: `8934563163150`. Mã thiếu dữ liệu: `8934563651138`. Mã không tồn tại: `0000000000000`. Mã có dữ liệu dị ứng: `8993175532457` (allergens_tags `en:gluten, en:milk, en:soybeans`; traces_tags `en:eggs, en:milk, en:nuts, en:peanuts`, kiểm 06/11/2026).
 - Link app (bản đã deploy): https://khangnguyen196.github.io/quet-ma-vach-full/ – điện thoại mở thẳng link này, đã là HTTPS thật nên không cần chấp nhận chứng chỉ.
 - Bản dev trên máy (`npm run dev`): camera chỉ chạy trên HTTPS/localhost; trên điện thoại mở `https://<ip-máy-tính>:5173` và chấp nhận chứng chỉ tự ký.

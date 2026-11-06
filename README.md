@@ -11,6 +11,15 @@ npm run dev
 ```
 Máy tính: mở `https://localhost:5173`. Điện thoại cùng Wi-Fi: mở địa chỉ `https://192.168.x.x:5173` mà terminal in ra, chấp nhận chứng chỉ tự ký.
 
+## Hồ sơ dị ứng
+Ở màn Tra cứu, mở khung "Hồ sơ dị ứng" và tick các nhóm bạn bị dị ứng (sữa, đậu phộng, gluten…). Tick là lưu ngay trên máy này (localStorage), tải lại trang vẫn còn. Khi tra một sản phẩm, đầu kết quả có khung đỏ nếu Open Food Facts ghi sản phẩm có nhóm trong hồ sơ, khung vàng nếu "có thể lẫn vết", hoặc một câu nhắc khi Open Food Facts chưa có dữ liệu dị ứng. Cảnh báo chỉ dựa trên dữ liệu cộng đồng của Open Food Facts, có thể thiếu hoặc sai: **không thay cho việc đọc nhãn trên bao bì**, app không bao giờ ghi sản phẩm là an toàn.
+
+## Test
+```
+npm test
+```
+Chạy test node của app trong `tests/` (dùng `node:test` có sẵn, không cần cài thêm gì; cần Node 21 trở lên vì lệnh dùng mẫu `tests/*.test.js`).
+
 ## Build để đưa lên mạng
 ```
 npm run build
