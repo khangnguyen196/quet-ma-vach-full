@@ -7,8 +7,8 @@ import { createHash } from "node:crypto";
  * Chọn cách xử lý 1 request trong service worker.
  * urlString: địa chỉ request; scopeString: phạm vi của service worker (vd https://x.github.io/quet-ma-vach-full/);
  * mode: request.mode ("navigate" khi mở trang).
- * Trả: "navigate" (mạng trước, mất mạng thì index.html đã lưu), "asset" (đã lưu trước, không có thì mạng),
- * "skip" (không đụng: khác tên miền, ngoài phạm vi, manifest, icon, sw.js…).
+ * Trả: "navigate" (mạng trước, mất mạng thì index.html đã lưu), "asset" (đã lưu trước, không có thì mạng:
+ * file trong assets/, manifest.webmanifest, icons/), "skip" (không đụng: khác tên miền, ngoài phạm vi, sw.js…).
  * Hàm này được chép nguyên văn vào sw.js bằng routeFor.toString(): KHÔNG dùng biến / hàm bên ngoài nó.
  */
 export function routeFor(urlString, scopeString, mode) {
@@ -23,6 +23,8 @@ export function routeFor(urlString, scopeString, mode) {
   if (!url.pathname.startsWith(scope.pathname)) return "skip";
   if (mode === "navigate") return "navigate";
   if (url.pathname.startsWith(scope.pathname + "assets/")) return "asset";
+  if (url.pathname === scope.pathname + "manifest.webmanifest") return "asset";
+  if (url.pathname.startsWith(scope.pathname + "icons/")) return "asset";
   return "skip";
 }
 
@@ -119,7 +121,8 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
-  // File trong assets/ (tên có mã băm, không đổi nội dung): đã lưu trước, không có thì mạng (không ghi thêm vào cache).
+  // File trong assets/ (tên có mã băm, không đổi nội dung), manifest, icons/: đã lưu trước, không có thì mạng
+  // (không ghi thêm vào cache). Manifest / icon đổi nội dung thì mã phiên bản đổi, bản mới lưu lại từ đầu.
   event.respondWith(caches.match(req, { cacheName: CACHE }).then((hit) => hit || fetch(req)));
 });
 `;
