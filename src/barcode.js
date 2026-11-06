@@ -5,8 +5,35 @@
 export const ZXING_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE"];
 
 /**
+ * Nén mã UPC-A 12 số về UPC-E 8 số theo luật chuẩn (số 0 bị lược), trả null nếu mã không nén được.
+ * UPC-A = hệ số (0/1) + 5 số nhà sản xuất (m) + 5 số sản phẩm (p) + số kiểm. Ví dụ "012345000065" → "01234565".
+ */
+function upcaToUpce(upca) {
+  if (!/^[01]\d{11}$/.test(upca)) return null;
+  const ns = upca[0], m = upca.slice(1, 6), p = upca.slice(6, 11), c = upca[11];
+  let body = null;
+  if ("012".includes(m[2]) && m.slice(3) === "00" && p.startsWith("00")) body = m.slice(0, 2) + p.slice(2) + m[2];
+  else if (m.slice(3) === "00" && p.startsWith("000")) body = m.slice(0, 3) + p.slice(3) + "3";
+  else if (m[4] === "0" && p.startsWith("0000")) body = m.slice(0, 4) + p[4] + "4";
+  else if (p.startsWith("0000") && "56789".includes(p[4])) body = m + p[4];
+  return body ? ns + body + c : null;
+}
+
+/** Mã 8 số in trên bao bì zxing-wasm ghi trong extra ('{"UPCE":"01234565"}' hoặc object); không có / hỏng → null. */
+function upceFromExtra(extra) {
+  let data = extra;
+  if (typeof extra === "string") {
+    try { data = JSON.parse(extra); } catch { return null; }
+  }
+  const v = data && typeof data === "object" ? data.UPCE : null;
+  return typeof v === "string" && /^\d{8}$/.test(v) ? v : null;
+}
+
+/**
  * Chọn mã từ mảng kết quả của zxing-wasm (readBarcodes): lấy kết quả đầu tiên hợp lệ (isValid),
  * đúng định dạng app nhận và là 8–14 chữ số. Mã UPC-A trả 12 số (bỏ số 0 đầu zxing-wasm thêm vào).
+ * Mã UPC-E trả 8 số như html5-qrcode (zxing-wasm trả 13 số dạng mở rộng: lấy mã 8 số trong extra, không có thì
+ * tự nén lại; không nén được thì 12 số như UPC-A).
  * Không có thì trả null (không ném lỗi).
  */
 export function pickCode(results) {
@@ -18,6 +45,10 @@ export function pickCode(results) {
     // Mã UPC-A (12 số): zxing-wasm trả dạng EAN-13 có số 0 đầu ("0036000291452"); html5-qrcode (camera,
     // cách đọc ảnh cũ) trả 12 số. Bỏ số 0 đầu để cùng 1 sản phẩm luôn ra cùng 1 mã (lịch sử, tủ đồ không bị trùng).
     if ((r.format === "EAN13" || r.format === "UPCA") && text.length === 13 && text[0] === "0") return text.slice(1);
+    // Mã UPC-E: html5-qrcode trả 8 số in trên bao bì ("01234565"), zxing-wasm 3.1.6 trả 13 số ("0012345000065").
+    if (r.format === "UPCE" && text.length === 13 && text[0] === "0") {
+      return upceFromExtra(r.extra) || upcaToUpce(text.slice(1)) || text.slice(1);
+    }
     return text;
   }
   return null;
