@@ -15,14 +15,14 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 
 ## Cấu trúc
 - `src/main.js` – nối sự kiện, điều phối. Không chứa logic gọi API hay HTML dài.
-- `src/scanner.js` – mọi thứ về camera / đọc ảnh (camera: html5-qrcode; ảnh: zxing-wasm trước, html5-qrcode dự phòng).
+- `src/scanner.js` – mọi thứ về camera / đọc ảnh (camera: html5-qrcode; ảnh: zxing-wasm trước, html5-qrcode dự phòng; chờ tải wasm tối đa 10 giây (`ZXING_LOAD_TIMEOUT_MS`), hết giờ thì đọc bằng html5-qrcode, lần tải dở chạy tiếp cho lần chụp sau).
 - `src/zxing-reader.js` – bọc zxing-wasm (chỉ import động khi chọn ảnh); wasm lấy từ file của app, không từ CDN.
 - `src/barcode.js` – chọn mã từ kết quả zxing-wasm, ghép dòng lỗi "đã thử những gì" (thuần, không DOM, không import thư viện).
 - `src/off.js` – gọi API và hàm `normalize()` đổi dữ liệu thô sang object tiếng Việt sạch. Mọi mapping (tên dị ứng, NOVA…) nằm ở đây.
 - `src/render.js` – hàm trả về chuỗi HTML từ object đã normalize. Luôn escape dữ liệu từ API bằng `esc()`.
 - `src/storage.js` – đọc/ghi localStorage, bọc try/catch.
 - `src/pantry.js` – tính số ngày còn hạn, trạng thái, sắp xếp, định dạng ngày (không DOM, không localStorage); `isValidItem` / `cleanItem` / `NAME_MAX` cũng ở đây.
-- `src/compare.js` – so sánh 2 sản phẩm: 6 chỉ số trên 100 g / 100 ml (không DOM, không tự tính).
+- `src/compare.js` – so sánh 2 sản phẩm: 6 chỉ số trên 100 g / 100 ml, thời gian chờ giữa 2 lần gọi mạng (`compareWaitMs`) (không DOM, không tự tính).
 - `src/backup.js` – xuất / nhập tủ đồ bằng file JSON: tạo file, kiểm định dạng, gộp (không DOM).
 - `src/pwa.js` – đăng ký service worker (chỉ ở bản build) + thanh "Đã có bản mới".
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
