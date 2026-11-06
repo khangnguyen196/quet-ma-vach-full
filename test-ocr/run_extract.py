@@ -136,7 +136,10 @@ def gram_max(v):
 #       vẫn bỏ "2 g" như cũ;
 #     - giữa 2 nhãn liền nhau (NEAR) cho thêm "(g)" / "(mg)";
 #     - "Chất béo trans" (không có chữ fat) chưa là nhãn; ca cột VI có "trans" ("Chất béo Chất béo bão hòa Chất béo
-#       trans 10g 3g 0g") qua được nhờ SAT_GAP dừng ở "chat b", không nhờ luật cột.
+#       trans 10g 3g 0g") qua được vì SAT_GAP không nhảy qua chữ, nên chỉ bỏ nhãn "chất béo bão hòa", không bỏ số.
+#     Vòng 4 (review vòng 3): khoảng giữa nhãn bão hòa / chuyển hóa và số chỉ gồm dấu cách / dấu câu, cộng cụm
+#       "less than" (8938501141040); không nhảy qua chữ, nên không ăn số của Natri / Carbohydrate... khi bảng đọc
+#       theo cột; giữa 2 số của cột cho thêm "|".
 LB_VI_HEAD = r"(?:chat ?[bh][a-z]{0,2} ?(?:khong ?)?)?"       # "chat beo ", "chatheo", "chat beo khong "
 LB_VI_HEAD_STRICT = r"chat ?[bh][a-z]{0,2} ?(?:khong ?)?"      # như trên nhưng bắt buộc có "chat b.."
 LB_VI_TAIL = r" ?h[a-z]{1,2}(?:l|(?![a-z]))"                  # "hoa", "hda", "hoal"
@@ -155,12 +158,13 @@ LB_TOTAL = r"(?<![a-z])(?:total ?fat(?![a-z])|tong ?chat ?beo|chat ?[bh][a-z]{0,
 UNIT_PAREN = r"\([ \t]*m?g[ \t]*\)"                                # "(g)", "(mg)" sau nhãn
 NEAR = r"(?:[^\da-z\n]|" + UNIT_PAREN + r"){0,8}"                 # giữa 2 nhãn liền nhau: dấu cách / dấu câu / "(g)"
 # Ngay sau các nhãn của cột: >= 2 số liền nhau trên cùng dòng (số thứ hai không kèm %).
-COLUMN_NUMBERS = (r"(?=(?:[^\da-z\n]|" + UNIT_PAREN + r")*\d+(?:[.,]\d+)?[ \t]*(?:mg|g|9)?[ \t]+\d"
+COLUMN_NUMBERS = (r"(?=(?:[^\da-z\n]|" + UNIT_PAREN + r")*\d+(?:[.,]\d+)?[ \t]*(?:mg|g|9)?[ \t|]+\d"
                   r"(?![\d.,]*[ \t]*%))")
 TOTAL_COLUMN = (r"(?P<keep>" + LB_TOTAL + r")" + NEAR + LB_SAT_ANY_STRICT + r"(?:" + NEAR + LB_SAT_ANY + r")*"
                 + COLUMN_NUMBERS)
 SAT_COLUMN = r"(?:" + LB_SAT + NEAR + LB_TRANS + r"|" + LB_TRANS + NEAR + LB_SAT + r")(?:" + NEAR + LB_SAT_ANY + r")*"
-SAT_GAP = r"(?:(?!fat|beo|chat ?[bh]|trans|sat|total|lipid)[^\d\n]){0,25}"
+# Giữa nhãn bão hòa / chuyển hóa và số: chỉ dấu cách / dấu câu (cộng "less than"), không nhảy qua chữ.
+SAT_GAP = r"[^\da-z\n]{0,12}(?:less ?than[^\da-z\n]{0,12})?"
 SAT_FAT = re.compile(TOTAL_COLUMN + r"|" + SAT_COLUMN + r"|" + LB_SAT_ANY + r"(?:" + SAT_GAP + NUM + r"[ \t]*(?:mg|g|9)?)?")
 # "calories from fat" (năng lượng từ chất béo) không phải gam béo; bỏ cả khi có nhiều dấu cách giữa "from" và "fat".
 FROM_FAT = re.compile(r"from\s+fat")

@@ -383,6 +383,33 @@ class GramRulesTest(unittest.TestCase):
                 with self.subTest(kind="dong", text=text, extractor=name):
                     self.assertEqual(f(text)["beo_g"], want)
 
+    # Review vòng 3: khoảng giữa nhãn bão hòa / chuyển hóa và số không nhảy qua chữ (trừ "less than"), nên bảng cột
+    # có nhãn chất khác (Natri, Carbohydrate…) sau nhãn bão hòa không bỏ nhầm số béo tổng, không ra số chất khác.
+    # (ca, text, mong rx, mong dc, dc được phép, số không bao giờ được ra)
+    SAT_GAP_CASES = [
+        ("N1", "Chất béo Chất béo bão hòa Natri 10g 3g 50mg", "10", "10", {"10", ""}, {"3", "50"}),
+        ("N2", "Chất béo Chất béo bão hòa Carbohydrate 10g 3g 30g", "10", "10", {"10", ""}, {"3", "30"}),
+        # Bảng cột đầy đủ: béo là 8 (thứ 5); thà để trống. dc không có subTest: dict lấy số + g đầu tiên trên dòng có
+        # "chat beo" nên ra "5" (của chất đạm) ở cả 45181af, 374eed2 và code mới; ngoài phạm vi SAT_GAP.
+        ("N3", "Năng lượng Chất đạm Carbohydrat Đường Chất béo Chất béo bão hòa Natri "
+               "200 kcal 5 g 30 g 10 g 8 g 3 g 50 mg", "", None, None, {"200", "5", "30", "10", "3", "50"}),
+        ("N4", "Total Fat Saturated Fat 10 g | 3 g", "10", "10", {"10", ""}, {"3"}),
+        ("N5", "Total Fat 7g Sat Fat Less than 20g 25g", "7", "7", {"7"}, {"20", "25"}),   # dạng 8938501141040
+        ("N6", "Chất béo 5 g Chất béo bão hòa: 2 g", "5", "5", {"5"}, {"2"}),
+        ("N7", "Chất béo bão hòa Natri 3g 50mg", "", "", {""}, {"3", "50"}),
+    ]
+
+    def test_s1h_sat_gap_no_letters(self):
+        for case, text, want_rx, want_dc, allowed_dc, never in self.SAT_GAP_CASES:
+            for name, f, want, allowed in (("rx", self.rx, want_rx, {want_rx}), ("dc", self.dc, want_dc, allowed_dc)):
+                if want is None:
+                    continue
+                with self.subTest(case=case, text=text, extractor=name):
+                    beo = f(text)["beo_g"]
+                    self.assertNotIn(beo, never)
+                    self.assertIn(beo, allowed)
+                    self.assertEqual(beo, want)   # giá trị thật ra
+
 
 class OutputEncodingTest(TmpDirCase):
     """Như `python run_extract.py > file` / `python score_combo.py > file` trên Windows: stdout, stderr là file cp1252."""
