@@ -61,8 +61,19 @@ const str = (v) => {
   return "";
 };
 
-/** Danh sách *_tags: chỉ nhận mảng, lấy phần tử là chuỗi khác rỗng ("" hay "  " không tính là có dữ liệu). */
-const tags = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim() !== "") : []);
+/**
+ * Danh sách *_tags: chỉ nhận mảng, lấy phần tử là chuỗi, bỏ khoảng trắng hai đầu (" en:milk " → "en:milk").
+ * Bỏ tag không mang thông tin (không tính là có dữ liệu): rỗng / chỉ khoảng trắng, chỉ có tiền tố ngôn ngữ ("en:"),
+ * và tag "none" (vd "en:none", "fr:none", "none"; không phân biệt hoa thường).
+ */
+const tags = (v) => (Array.isArray(v)
+  ? v.filter((x) => typeof x === "string")
+    .map((x) => x.trim())
+    .filter((x) => {
+      const value = x.replace(/^[a-z]{2,3}:/i, "").trim();
+      return value !== "" && value.toLowerCase() !== "none";
+    })
+  : []);
 
 // Chờ tối đa 9 giây. Đo trên máy tính (11/2026): mỗi lần gọi khoảng 0,7–0,9 giây.
 const TIMEOUT_MS = 9000;
