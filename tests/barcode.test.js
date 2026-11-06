@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   pickCode, scanFailureText, raceTimeout, ZXING_FORMATS, ZXING_LOAD_TIMEOUT_MS, ZXING_TIMEOUT_MESSAGE
 } from "../src/barcode.js";
+// makeZxingTimeoutError / isZxingTimeout (thêm ở ket-thuc): gọi qua barcodeMod để file vẫn chạy khi hàm chưa có
+import * as barcodeMod from "../src/barcode.js";
 
 /** 1 kết quả giả của zxing-wasm (chỉ các trường app đọc). */
 const res = (text, format = "EAN13", isValid = true) => ({ text, format, isValid });
@@ -200,5 +202,46 @@ describe("raceTimeout (giới hạn thời gian tải wasm, sua-cuoi vòng 3)", 
     });
     assert.equal(t, "zxing-wasm: chưa tải xong sau 10 giây (mạng chậm); html5-qrcode: NotFoundException (đã thử 4 lần)");
     assert.ok(!/\(.*\(/.test(t.split(";")[0]), t);
+  });
+});
+
+describe("cờ hết giờ tải wasm: makeZxingTimeoutError / isZxingTimeout (ket-thuc)", () => {
+  const make = (...a) => barcodeMod.makeZxingTimeoutError(...a);
+  const isTimeout = (e) => barcodeMod.isZxingTimeout(e);
+
+  test("makeZxingTimeoutError: Error tên 'ZxingLoadError', câu ZXING_TIMEOUT_MESSAGE, timeout === true", () => {
+    assert.equal(typeof barcodeMod.makeZxingTimeoutError, "function");
+    const e = make();
+    assert.ok(e instanceof Error);
+    assert.equal(e.name, "ZxingLoadError");
+    assert.equal(e.message, ZXING_TIMEOUT_MESSAGE);
+    assert.equal(e.timeout, true);
+    assert.notEqual(make(), e, "mỗi lần gọi tạo lỗi mới");
+  });
+
+  test("isZxingTimeout: true với lỗi do makeZxingTimeoutError tạo", () => {
+    assert.equal(typeof barcodeMod.isZxingTimeout, "function");
+    assert.equal(isTimeout(make()), true);
+  });
+
+  test("isZxingTimeout: lỗi cùng tên, cùng câu mà không có cờ timeout → false", () => {
+    const e = new Error(ZXING_TIMEOUT_MESSAGE);
+    e.name = "ZxingLoadError";
+    assert.equal(isTimeout(e), false);
+    e.timeout = "true"; // cờ phải đúng là true, không phải chuỗi
+    assert.equal(isTimeout(e), false);
+  });
+
+  test("isZxingTimeout: null / undefined / giá trị không phải lỗi → false, không ném", () => {
+    for (const v of [null, undefined, "", 0, ZXING_TIMEOUT_MESSAGE, {}]) assert.equal(isTimeout(v), false, String(v));
+  });
+
+  test("isZxingTimeout: lỗi tên khác dù có cờ timeout → false", () => {
+    const e = new Error(ZXING_TIMEOUT_MESSAGE);
+    e.timeout = true;
+    assert.equal(isTimeout(e), false);
+    e.name = "TimeoutError";
+    assert.equal(isTimeout(e), false);
+    assert.equal(isTimeout({ name: "ZxingLoadError", timeout: false }), false);
   });
 });
