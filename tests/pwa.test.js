@@ -4,7 +4,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { pageAssetUrls, isPageCurrent } from "../src/pwa.js";
+import { pageAssetUrls, isPageCurrent, whenActivated } from "../src/pwa.js";
 
 const BASE = "https://khangnguyen196.github.io/quet-ma-vach-full/";
 const JS = BASE + "assets/index-CpU82utc.js";
@@ -60,6 +60,49 @@ describe("isPageCurrent", () => {
 
   test("cacheStorage không có (undefined) → false, không ném lỗi", async () => {
     assert.equal(await isPageCurrent([JS], undefined), false);
+  });
+});
+
+/** service worker giả: có state + sự kiện statechange (EventTarget có sẵn trong node). */
+function fakeWorker(state) {
+  const w = new EventTarget();
+  w.state = state;
+  w.go = (next) => { w.state = next; w.dispatchEvent(new Event("statechange")); };
+  return w;
+}
+/** Promise đã xong chưa (sau 1 vòng hàng đợi). */
+const settled = async (p) => {
+  let done = false;
+  p.then(() => { done = true; });
+  await new Promise((r) => setTimeout(r, 0));
+  return done;
+};
+
+describe("whenActivated", () => {
+  test("null / đã activated / redundant → xong ngay", async () => {
+    assert.equal(await settled(whenActivated(null)), true);
+    assert.equal(await settled(whenActivated(undefined)), true);
+    assert.equal(await settled(whenActivated(fakeWorker("activated"))), true);
+    assert.equal(await settled(whenActivated(fakeWorker("redundant"))), true);
+  });
+
+  test("đang activating → chỉ xong khi sang activated (cache bản cũ đã xóa xong)", async () => {
+    const w = fakeWorker("activating");
+    const p = whenActivated(w);
+    assert.equal(await settled(p), false);
+    w.go("activating");
+    assert.equal(await settled(p), false);
+    w.go("activated");
+    assert.equal(await settled(p), true);
+  });
+
+  test("đang cài rồi bị bỏ (redundant) → xong, không treo", async () => {
+    const w = fakeWorker("installing");
+    const p = whenActivated(w);
+    w.go("installed");
+    assert.equal(await settled(p), false);
+    w.go("redundant");
+    assert.equal(await settled(p), true);
   });
 });
 

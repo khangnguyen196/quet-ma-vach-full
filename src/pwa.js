@@ -40,6 +40,26 @@ export async function isPageCurrent(urls, cacheStorage) {
 }
 
 /**
+ * Chờ service worker xong bước kích hoạt (state "activated": bước activate, gồm xóa cache bản cũ, đã chạy xong)
+ * hoặc bị bỏ ("redundant"). worker null / đã xong thì trả về ngay.
+ * @param {{ state: string, addEventListener(type: string, fn: () => void): void,
+ *           removeEventListener(type: string, fn: () => void): void } | null | undefined} worker
+ * @returns {Promise<void>}
+ */
+export function whenActivated(worker) {
+  const done = () => !worker || worker.state === "activated" || worker.state === "redundant";
+  if (done()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onChange = () => {
+      if (!done()) return;
+      worker.removeEventListener("statechange", onChange);
+      resolve();
+    };
+    worker.addEventListener("statechange", onChange);
+  });
+}
+
+/**
  * Đăng ký service worker. Lỗi chỉ ghi console.warn, app vẫn chạy bình thường.
  * Thanh bản mới (#updateBar) chỉ hiện khi trang đang được 1 service worker cũ điều khiển và có bản mới thay
  * (lần cài đầu tiên không hiện), và file JS / CSS của trang không còn trong cache bản mới (trang đã là bản mới
@@ -55,9 +75,12 @@ export function initPwa() {
   sw.addEventListener("controllerchange", async () => {
     if (!hadController || shown || !bar) return;
     // Lần mở đầu sau deploy: service worker bản 1 hỏi mạng trước nên trang tải về đã là bản 2, rồi bản 2 cài xong,
-    // clients.claim() → controllerchange. Lúc đó trang đã mới, không cần thanh. Cách phân biệt: bản mới xóa cache
-    // của bản cũ ở bước activate TRƯỚC clients.claim(), nên file JS / CSS của trang cũ không còn trong cache nào;
-    // còn file của trang đang mở vẫn có trong cache (của bản mới) thì trang đã là bản mới.
+    // nhận điều khiển → controllerchange. Lúc đó trang đã mới, không cần thanh. Cách phân biệt: bản mới xóa cache
+    // của bản cũ ở bước activate, nên khi bản mới đã "activated" thì file JS / CSS của trang cũ không còn trong
+    // cache nào; còn file của trang đang mở vẫn có trong cache (của bản mới) thì trang đã là bản mới.
+    // Phải chờ "activated": với trang đang được bản cũ điều khiển, trình duyệt bắn controllerchange ngay khi bản mới
+    // BẮT ĐẦU kích hoạt, lúc cache bản cũ chưa bị xóa (đã thử: Chromium thấy cả 2 cache lúc controllerchange).
+    await whenActivated(sw.controller);
     if (await isPageCurrent(pageAssetUrls(import.meta.url, document), globalThis.caches)) return;
     if (shown) return; // trong lúc chờ kiểm cache có thể đã có 1 controllerchange khác hiện thanh
     shown = true;
