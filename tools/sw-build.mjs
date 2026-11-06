@@ -61,6 +61,8 @@ export function buildServiceWorker({ version, files }) {
 const VERSION = ${JSON.stringify(String(version))};
 const CACHE = "qmv-shell-" + VERSION;
 const PRECACHE = ${JSON.stringify(files, null, 2)};
+// Mở trang khi sóng yếu: chờ mạng tối đa chừng này mili giây, quá thì dùng index.html đã lưu (nếu có).
+const NAV_TIMEOUT_MS = 3000;
 
 ${routeFor.toString()}
 
@@ -96,10 +98,25 @@ self.addEventListener("fetch", (event) => {
   if (route === "skip") return; // không respondWith: trình duyệt tự đi mạng như không có service worker
   if (route === "navigate") {
     // Mở trang: mạng trước, bỏ qua bộ nhớ đệm HTTP để bản mới hiện ngay; mất mạng thì dùng index.html đã lưu.
-    event.respondWith(fetch(req, { cache: "no-cache" }).catch(async () => {
-      const cached = await caches.match("./index.html", { cacheName: CACHE, ignoreSearch: true });
-      return cached || Response.error();
-    }));
+    // Mạng chậm: quá NAV_TIMEOUT_MS mà đã có bản lưu thì trả bản lưu (request mạng vẫn chạy tiếp, không bị hủy,
+    // kết quả không ghi vào cache); chưa có bản lưu thì chờ mạng tiếp.
+    event.respondWith((async () => {
+      const cachedPage = () => caches.match("./index.html", { cacheName: CACHE, ignoreSearch: true });
+      const network = fetch(req, { cache: "no-cache" });
+      network.catch(() => {}); // đã trả bản lưu rồi mạng mới lỗi: không để lỗi lọt ra ngoài
+      let timer;
+      const timeout = new Promise((resolve) => { timer = setTimeout(resolve, NAV_TIMEOUT_MS); });
+      try {
+        const first = await Promise.race([network.then((res) => ({ res })), timeout.then(() => null)]);
+        if (first) return first.res;
+        const cached = await cachedPage();
+        return cached || await network;
+      } catch {
+        return (await cachedPage()) || Response.error();
+      } finally {
+        clearTimeout(timer);
+      }
+    })());
     return;
   }
   // File trong assets/ (tên có mã băm, không đổi nội dung): đã lưu trước, không có thì mạng (không ghi thêm vào cache).
