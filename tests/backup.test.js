@@ -1,13 +1,13 @@
 // Test xuất / nhập tủ đồ (src/backup.js + importPantryData của storage.js) với localStorage giả.
 // Chạy: npm test
-import { test, describe, before, after, beforeEach } from "node:test";
+import { test, describe, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   buildExport, exportFileName, parseImport, mergePantry, mergeProfile,
   IMPORT_MAX_CHARS, IMPORT_MAX_ITEMS
 } from "../src/backup.js";
-import { importPantryData, getPantry, getAllergyProfile } from "../src/storage.js";
+import { importPantryData, getPantry, getAllergyProfile, addToPantry } from "../src/storage.js";
 import { NAME_MAX } from "../src/pantry.js";
 import { renderPantry, renderImportSummary } from "../src/render.js";
 
@@ -255,6 +255,66 @@ describe("importPantryData với localStorage giả", () => {
     assert.deepEqual(r.allergyProfile, ["eggs"]);
     assert.deepEqual(getPantry().map((x) => x.id), ["a1"]);
     assert.equal(store[PROFILE], undefined);
+  });
+
+  test("7 lần Thay toàn bộ (tủ khác nhau) → còn 5 khóa có thời điểm mới nhất + khóa gốc (sua-cuoi, hoan-thien (e))", () => {
+    store["qmv-pantry-backup"] = "backup gốc";
+    store["qmv-pantry-backup-abc"] = "khóa không đúng dạng <thời điểm>, không đụng";
+    let now = 1762400000000;
+    const t = mock.method(Date, "now", () => now);
+    try {
+      for (let i = 1; i <= 7; i++) {
+        store[PANTRY] = JSON.stringify([item("lan" + i)]);
+        now += 1000;
+        importPantryData(parseImport(fileOf({ pantry: [item("moi" + i)] })), "replace", []);
+      }
+    } finally {
+      t.mock.restore();
+    }
+    const stamped = backupKeys().filter((k) => /^qmv-pantry-backup-\d+(-\d+)?$/.test(k));
+    assert.deepEqual(stamped, [3, 4, 5, 6, 7].map((i) => `qmv-pantry-backup-${1762400000000 + i * 1000}`));
+    for (const i of [3, 4, 5, 6, 7]) assert.equal(store[`qmv-pantry-backup-${1762400000000 + i * 1000}`], JSON.stringify([item("lan" + i)]));
+    assert.equal(store["qmv-pantry-backup"], "backup gốc");
+    assert.equal(store["qmv-pantry-backup-abc"], "khóa không đúng dạng <thời điểm>, không đụng");
+  });
+
+  test("cùng mili giây (khóa có -1, -2): vẫn giữ 5 bản mới nhất theo thứ tự ghi", () => {
+    const t = mock.method(Date, "now", () => 1762400000000);
+    try {
+      for (let i = 1; i <= 7; i++) {
+        store[PANTRY] = JSON.stringify([item("lan" + i)]);
+        importPantryData(parseImport(fileOf({ pantry: [item("moi" + i)] })), "replace", []);
+      }
+    } finally {
+      t.mock.restore();
+    }
+    const keys = backupKeys();
+    assert.equal(keys.length, 5, keys.join(", "));
+    const kept = keys.map((k) => JSON.parse(store[k])[0].id).sort();
+    assert.deepEqual(kept, ["lan3", "lan4", "lan5", "lan6", "lan7"]);
+  });
+
+  test("ghi bản backup mới lỗi → không xóa khóa backup nào", () => {
+    store["qmv-pantry-backup"] = "backup gốc";
+    for (let i = 1; i <= 6; i++) store[`qmv-pantry-backup-${1000 + i}`] = "cũ " + i;
+    const before = { ...store };
+    store[PANTRY] = JSON.stringify([item("cu")]);
+    throwOn = (k) => k.startsWith("qmv-pantry-backup-");
+    assert.throws(() => importPantryData(parseImport(fileOf()), "replace", []), (e) => e.name === "PantryError");
+    for (const k of Object.keys(before)) assert.equal(store[k], before[k], k);
+  });
+
+  test("backup dữ liệu hỏng (bản thứ 2 trở đi) cũng giữ tối đa 5 khóa có thời điểm, không xóa khóa gốc", () => {
+    store["qmv-pantry-backup"] = "backup gốc";
+    for (let i = 1; i <= 5; i++) store[`qmv-pantry-backup-${1000 + i}`] = "cũ " + i;
+    store[PANTRY] = "không phải JSON";
+    assert.deepEqual(getPantry(), []);
+    addToPantry({ code: "1", name: "Mới", expiresOn: "2026-12-01", qty: 1 });
+    const stamped = backupKeys().filter((k) => k !== "qmv-pantry-backup");
+    assert.equal(stamped.length, 5, stamped.join(", "));
+    assert.ok(!stamped.includes("qmv-pantry-backup-1001"), "bản cũ nhất bị xóa");
+    assert.ok(stamped.some((k) => store[k] === "không phải JSON"), "bản hỏng vừa chép vẫn còn");
+    assert.equal(store["qmv-pantry-backup"], "backup gốc");
   });
 
   test("tên chứa <img onerror> giữ nguyên là chữ, renderPantry escape", () => {
