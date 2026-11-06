@@ -428,3 +428,46 @@ describe("chip dị ứng tra tên tiếng Việt bằng chữ thường (ket-th
     assert.equal(typeof q.allergens[0], "string");
   });
 });
+
+describe("chip dị ứng không lặp tên sau khi đổi sang tiếng Việt (don-nho)", () => {
+  test("allergens 'en:milk' + 'fr:milk' → một chip 'Sữa'", () => {
+    const p = normalize(raw({ allergens_tags: ["en:milk", "fr:milk"] }), "123");
+    assert.deepEqual(p.allergens, ["Sữa"]);
+  });
+
+  test("allergens 'en:milk' + 'EN:Milk' → một chip 'Sữa'", () => {
+    const p = normalize(raw({ allergens_tags: ["en:milk", "EN:Milk"] }), "123");
+    assert.deepEqual(p.allergens, ["Sữa"]);
+  });
+
+  test("traces 'en:nuts' + 'fr:nuts' → một chip đúng tên trong ALLERGEN_VI", () => {
+    const p = normalize(raw({ traces_tags: ["en:nuts", "fr:nuts"] }), "123");
+    assert.deepEqual(p.traces, [ALLERGEN_VI.nuts]);
+    assert.deepEqual(p.traces, ["Các loại hạt"]);
+  });
+
+  test("giữ thứ tự lần xuất hiện đầu", () => {
+    const p = normalize(raw({ allergens_tags: ["en:gluten", "en:milk", "fr:gluten"] }), "123");
+    assert.deepEqual(p.allergens, [ALLERGEN_VI.gluten, "Sữa"]);
+  });
+
+  test("tag lạ: cùng chữ thì bỏ trùng, khác chữ (hoa / thường) thì giữ cả hai", () => {
+    assert.deepEqual(normalize(raw({ allergens_tags: ["en:abc", "fr:abc"] }), "123").allergens, ["abc"]);
+    assert.deepEqual(normalize(raw({ allergens_tags: ["en:Abc", "en:abc"] }), "123").allergens, ["Abc", "abc"]);
+  });
+
+  test("không bỏ trùng giữa 2 danh sách: milk ở cả allergens và traces → mỗi bên vẫn có 'Sữa'", () => {
+    const p = normalize(raw({ allergens_tags: ["en:milk", "fr:milk"], traces_tags: ["en:milk", "de:milk"] }), "123");
+    assert.deepEqual(p.allergens, ["Sữa"]);
+    assert.deepEqual(p.traces, ["Sữa"]);
+  });
+
+  test("allergenKeys / traceKeys không đổi", () => {
+    const p = normalize(raw({
+      allergens_tags: ["en:milk", "fr:milk", "EN:Milk", "en:gluten", "fr:gluten"],
+      traces_tags: ["en:nuts", "fr:nuts", "en:milk"]
+    }), "123");
+    assert.deepEqual(p.allergenKeys, ["gluten", "milk"]);
+    assert.deepEqual(p.traceKeys, ["milk", "nuts"]);
+  });
+});
