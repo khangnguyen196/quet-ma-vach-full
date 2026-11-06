@@ -192,6 +192,27 @@ describe("buildServiceWorker", () => {
   });
 });
 
+describe("cache giả giống trình duyệt: khóa là địa chỉ đầy đủ theo phạm vi (sua-cuoi, hoan-thien (g))", () => {
+  const code = buildServiceWorker({ version: "v1abc", files: FILES });
+
+  test("index.html lưu dưới địa chỉ đầy đủ (như trình duyệt thật) → mất mạng vẫn trả bản đã lưu", async () => {
+    const offline = loadSw(code, { cacheNames: ["qmv-shell-v1abc"], fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
+    offline.stores.get("qmv-shell-v1abc").set(SCOPE + "index.html", "giao diện đã lưu (địa chỉ đầy đủ)");
+    assert.equal(await dispatchFetch(offline.listeners, { method: "GET", url: SCOPE + "?a=1", mode: "navigate" }), "giao diện đã lưu (địa chỉ đầy đủ)");
+  });
+
+  test("install lưu './index.html' thành địa chỉ đầy đủ theo phạm vi", async () => {
+    const { listeners, stores } = loadSw(code);
+    let done;
+    listeners.install({ waitUntil(p) { done = p; } });
+    await done;
+    const keys = [...stores.get("qmv-shell-v1abc").keys()];
+    assert.ok(keys.includes(SCOPE + "index.html"), keys.join(", "));
+    assert.ok(keys.includes(SCOPE), keys.join(", "));
+    assert.ok(keys.every((k) => k.startsWith(SCOPE)), keys.join(", "));
+  });
+});
+
 describe("precacheList: danh sách lưu sẵn không có file .wasm (sua-cuoi)", () => {
   // Tên file như plugin trong vite.config.js thấy: file của bản build (có wasm của zxing-wasm) + file trong public/.
   const NAMES = [
