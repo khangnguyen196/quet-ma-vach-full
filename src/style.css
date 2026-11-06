@@ -8,6 +8,8 @@
   --rule: #D6D6CC;
   --rule-strong: #161614;
   --well: #EFEFE7;
+  /* Khung "chưa có dữ liệu dị ứng" (xám): bản sáng như --well; bản tối sáng hơn --well để tách khỏi nền trang */
+  --nodata-bg: #EFEFE7;
   --accent: #1F7A4D;
   --accent-ink: #FFFFFF;
   --warn: #A8480C;
@@ -30,6 +32,7 @@
     --rule: #2F302A;
     --rule-strong: #F1F1EA;
     --well: #1C1D19;
+    --nodata-bg: #2E2F29;
     --accent: #4FC48C;
     --accent-ink: #0A1A11;
     --warn: #F5A66C;
@@ -51,6 +54,7 @@
   --rule: #2F302A;
   --rule-strong: #F1F1EA;
   --well: #1C1D19;
+  --nodata-bg: #2E2F29;
   --accent: #4FC48C;
   --accent-ink: #0A1A11;
   --warn: #F5A66C;
@@ -328,8 +332,9 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 }
 .allergy-alert.danger { background: var(--expired-bg); color: var(--expired-ink); border-color: var(--expired-line); }
 .allergy-alert.traces { background: var(--soon-bg); color: var(--soon-ink); border-color: var(--soon-line); }
-/* Thiếu dữ liệu dị ứng: khung xám trung tính (không đỏ / vàng để không lẫn với cảnh báo có chất), nổi hơn dòng trung tính. */
-.allergy-alert.nodata { background: var(--well); color: var(--ink); border-color: var(--ink-2); }
+/* Thiếu dữ liệu dị ứng: khung xám trung tính (không đỏ / vàng để không lẫn với cảnh báo có chất), nổi hơn dòng trung tính.
+   Bản tối: nền #2E2F29 trên nền trang #121311 (tỉ lệ 1,38:1, trước là --well #1C1D19 1,10:1); chữ --ink 11,9:1. */
+.allergy-alert.nodata { background: var(--nodata-bg); color: var(--ink); border-color: var(--ink-2); }
 .allergy-note { font-size: 14px; color: var(--ink-2); }
 
 /* Xuất / nhập tủ đồ (giai đoạn 4) */
