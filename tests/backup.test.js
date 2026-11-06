@@ -9,7 +9,7 @@ import {
 } from "../src/backup.js";
 import { importPantryData, getPantry, getAllergyProfile } from "../src/storage.js";
 import { NAME_MAX } from "../src/pantry.js";
-import { renderPantry } from "../src/render.js";
+import { renderPantry, renderImportSummary } from "../src/render.js";
 
 const item = (id, extra = {}) => ({
   id, code: "8934563163150", name: "Mì " + id, brand: "Acecook", expiresOn: "2026-12-01", qty: 2, addedAt: 1762400000000, ...extra
@@ -111,6 +111,13 @@ describe("parseImport", () => {
     const r = parseImport(fileOf({ pantry: [item("a", { name: "Đầu" }), item("b"), item("a", { name: "Sau" })] }));
     assert.deepEqual(r.pantry.map((x) => x.name), ["Đầu", "Mì b"]);
     assert.equal(r.skipped, 1);
+  });
+
+  test("câu tóm tắt trước khi nhập đếm cả món hỏng lẫn món trùng", () => {
+    const r = parseImport(fileOf({ pantry: [item("a"), item("a"), null, item("b")], allergyProfile: ["milk", "gluten"] }));
+    const html = renderImportSummary(r);
+    assert.ok(html.includes('<p class="import-summary">File có 2 món, 2 nhóm dị ứng, bỏ 2 món hỏng hoặc trùng.</p>'));
+    for (const mode of ["merge", "replace", "cancel"]) assert.ok(html.includes(`data-import="${mode}"`));
   });
 
   test("tên quá dài cắt về NAME_MAX; hồ sơ hỏng được làm sạch", () => {

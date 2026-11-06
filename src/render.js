@@ -309,7 +309,7 @@ export function renderAddForm({ code, name = "", brand = "" }) {
  * Các nút có data-import để main.js bắt sự kiện.
  */
 export function renderImportSummary({ pantry, allergyProfile, skipped }) {
-  return `<p class="import-summary">File có ${pantry.length} món, ${allergyProfile.length} nhóm dị ứng, bỏ ${skipped} món hỏng.</p>
+  return `<p class="import-summary">File có ${pantry.length} món, ${allergyProfile.length} nhóm dị ứng, bỏ ${skipped} món hỏng hoặc trùng.</p>
 <div class="actions import-actions">
   <button class="btn primary" type="button" data-import="merge">Gộp vào tủ hiện tại</button>
   <button class="btn" type="button" data-import="replace">Thay toàn bộ</button>
