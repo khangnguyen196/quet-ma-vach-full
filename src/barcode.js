@@ -10,10 +10,25 @@ export const ZXING_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE"];
 export const ZXING_LOAD_TIMEOUT_MS = 10000;
 
 /**
- * Câu lỗi khi hết giờ tải wasm (message của ZxingLoadError, in ở console). scanner.js so message với câu này để
- * biết là hết giờ (status "timeout"); dòng nhỏ trên trang khi đó ghi "chưa tải xong sau 10 giây (mạng chậm)".
+ * Câu lỗi khi hết giờ tải wasm (message của ZxingLoadError, chỉ in ở console). scanner.js KHÔNG so câu này mà
+ * kiểm cờ timeout bằng isZxingTimeout() để biết là hết giờ (status "timeout"); dòng nhỏ trên trang khi đó ghi
+ * "chưa tải xong sau 10 giây (mạng chậm)".
  */
 export const ZXING_TIMEOUT_MESSAGE = `hết giờ chờ tải bộ đọc ảnh sau ${ZXING_LOAD_TIMEOUT_MS / 1000} giây, mạng chậm`;
+
+/**
+ * Lỗi hết giờ tải wasm (zxing-reader.js tạo): tên "ZxingLoadError" như lỗi tải thật, kèm cờ timeout = true
+ * để phân biệt. Ví dụ: const e = makeZxingTimeoutError(); e.timeout === true.
+ */
+export function makeZxingTimeoutError() {
+  const e = new Error(ZXING_TIMEOUT_MESSAGE);
+  e.name = "ZxingLoadError";
+  e.timeout = true;
+  return e;
+}
+
+/** true chỉ khi e là lỗi hết giờ tải wasm (tên "ZxingLoadError" và cờ timeout === true); null / undefined → false. */
+export const isZxingTimeout = (e) => e?.name === "ZxingLoadError" && e?.timeout === true;
 
 /**
  * Chạy đua promise với đồng hồ ms mili giây: promise xong trước thì trả kết quả / ném đúng lỗi của nó;

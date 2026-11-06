@@ -5,7 +5,7 @@
 // CDN jsDelivr nên PHẢI ghi đè locateFile: wasm luôn lấy từ chính app (cùng tên miền, không CDN).
 import { prepareZXingModule, purgeZXingModule, readBarcodes } from "zxing-wasm/reader";
 import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
-import { ZXING_FORMATS, ZXING_LOAD_TIMEOUT_MS, ZXING_TIMEOUT_MESSAGE, raceTimeout } from "./barcode.js";
+import { ZXING_FORMATS, ZXING_LOAD_TIMEOUT_MS, makeZxingTimeoutError, raceTimeout } from "./barcode.js";
 
 // Tùy chọn đọc (tên lấy từ readerOptions.d.ts của zxing-wasm 3.1.6):
 // tryHarder: dò kỹ hơn (chậm hơn, đúng hơn); tryRotate: tự thử xoay 90 / 180 / 270°;
@@ -50,7 +50,7 @@ async function ready() {
   }
   let timeoutError = null;
   try {
-    await raceTimeout(p, ZXING_LOAD_TIMEOUT_MS, () => (timeoutError = namedError("ZxingLoadError", ZXING_TIMEOUT_MESSAGE)));
+    await raceTimeout(p, ZXING_LOAD_TIMEOUT_MS, () => (timeoutError = makeZxingTimeoutError()));
   } catch (e) {
     if (e === timeoutError) throw e; // hết giờ: không purge
     const text = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
