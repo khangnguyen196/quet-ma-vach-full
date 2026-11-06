@@ -238,3 +238,68 @@ thông tin nhất dù OCR đã đọc được, trường nào yếu, và đề 
 regex/dict trượt vì lỗi OCR lặp đi lặp lại (vd 'kcaI', 'Thanh phan'), sửa luật trong run_extract.py, chạy lại và
 nói đã sửa gì. Không sửa truth.csv.
 ```
+
+---
+
+# Phần C – Đo đọc HSD bằng tesseract.js
+
+Thí nghiệm cho giai đoạn 3 (CHƯA đưa vào app): trên điện thoại chỉ có `tesseract.js` (Tesseract bản WebAssembly), nên đo xem nó đọc được hạn sử dụng (HSD) không khi người dùng chụp riêng vùng in HSD. Code ở `hsd-js/`, có `package.json` riêng (không thêm gói nào vào `package.json` của app).
+
+## Cài
+
+Trong thư mục `test-ocr/hsd-js` (máy ổ C ít chỗ: cache npm và dữ liệu ngôn ngữ để ở ổ D):
+
+- Git Bash: `npm_config_cache='D:\cache\npm' npm install`
+- Windows PowerShell: `$env:npm_config_cache='D:\cache\npm'; npm install`
+
+Cài `tesseract.js` 7.0.0 và `jimp` 1.6.1 (xử lý ảnh thuần JavaScript; `node_modules` khoảng 80 MB). Lần chạy đầu, `tesseract.js` tự tải dữ liệu ngôn ngữ `vie` và `eng` (khoảng 6,6 MB) về `D:\cache\tesseract-js` (đổi bằng `--cache`), lần sau đọc từ đó.
+
+## Cắt vùng HSD
+
+- `hsd-js/crops.csv` ghi khung cắt cho 9 ô `han_su_dung` của `truth.csv`: `code, file_nguon, x, y, w, h, ghi_chu` (chỉ tọa độ, không có ảnh). Tọa độ tính trên ảnh đã xoay theo EXIF (như trình duyệt hiển thị). 6 mã có `date.jpg`; 3 mã không có (8936017368111, 8934673300759, 8936017367107) thì lấy dòng in HSD trên `front.jpg` / `ingredients.jpg`. Không tìm thấy vùng HSD thì ghi "không tìm thấy" (mã đó tính sai ở cả 2 cách).
+- Khung bao dòng in HSD, chừa lề 10–20 px khi được; dòng NSX nằm riêng thì loại ra. Chữ in nghiêng làm khung chữ nhật không tách hẳn NSX thì ghi rõ ở `ghi_chu`. Khung chỉ cắt, không xoay: 2 ô chữ in dọc vẫn để dọc.
+- Khung được chọn và commit TRƯỚC khi chạy OCR lần đầu (không chỉnh khung theo kết quả).
+- `node hsd-js/crop.mjs` cắt ra `photos/<mã>/hsd/crop.jpg`. Ảnh cắt nằm trong **thư mục con `hsd/`**, không đặt thẳng trong `photos/<mã>/`, vì `run_ocr.py` đọc mọi `photos/*/*.jpg`: ảnh cắt sẽ lẫn vào bộ ảnh OCR của phần A (sau khi cắt, `run_ocr.py` vẫn thấy 96 ảnh). Ảnh cắt không commit (`photos/` đã gitignore).
+
+## Chạy
+
+Thư mục hiện tại là `test-ocr` (nơi có `photos/`, `truth.csv`, `outputs/`):
+
+```
+node hsd-js/crop.mjs      # cắt ảnh theo crops.csv
+node hsd-js/hsd.mjs       # đọc 2 cách, ghi outputs/hsd-js/results.csv và summary.md
+```
+
+Tham số (mặc định tính từ thư mục hiện tại): `--photos photos`, `--truth truth.csv`, `--out outputs/hsd-js`, `--crops <hsd-js>/crops.csv`, `--cache D:\cache\tesseract-js`. `truth.csv` chỉ đọc.
+
+2 cách, cùng một hàm rút ngày `parseExpiry` (`hsd-js/parse.mjs`):
+
+- (a) đọc thẳng: ảnh cắt nguyên, ngôn ngữ `vie+eng`, PSM (cách chia trang) mặc định, không giới hạn ký tự.
+- (b) xám + `normalize` + `contrast 0.3` của jimp, phóng 3 lần (2 lần nếu cạnh dài sau khi phóng 3 lần > 3000 px), `eng`, PSM 7 (đọc 1 dòng), chỉ nhận `0123456789/.-`. (b) không đọc được nhãn chữ (HSD, EXP…) và tháng bằng chữ.
+
+`parseExpiry`, luật đặt trước: (1) ngày ngay sau nhãn HSD / EXP / Hạn sử dụng / BB / Best before; (2) ngày có dấu `/ . -` (cho khoảng trắng quanh dấu) hoặc tháng viết tắt tiếng Anh ("05 / Oct / 2021"); (3) 6 số liền ddmmyy. Ngày ngay sau nhãn NSX / MFG / MFD / Ngày sản xuất / Ngày SX bị bỏ. Cùng mức nhiều ngày thì lấy ngày muộn nhất. Ngày phải có thật trên lịch (30/02 bỏ, 29/02 chỉ năm nhuận), năm 2 số thành 20yy, năm ngoài 2000–2100 bỏ.
+
+Test (không cần ảnh, không chạy OCR): trong `test-ocr/hsd-js` chạy `npm test` (16 test `node:test`).
+
+## Kết quả (06/11/2026, đợt `gd3-a`)
+
+| Cách | Đúng | Tạo worker | ms / ảnh TB | ms / ảnh lớn nhất |
+|---|---|---|---|---|
+| (a) đọc thẳng, vie+eng | **2/9** | 400 ms (lần đầu kèm tải dữ liệu: 1.235 ms) | 492 | 1.530 |
+| (b) xám + tương phản + phóng, eng, PSM 7, chỉ số | **1/9** | 275 ms | 399 | 1.015 |
+
+ms / ảnh = tiền xử lý + recognize. Máy đo: Intel Core i7-6820HQ 2,7 GHz (8 luồng), RAM 7,8 GB, Windows 10, Node 24.20.0, tesseract.js 7.0.0, jimp 1.6.1. Điện thoại sẽ chậm hơn.
+
+| Mã | Ảnh nguồn | Kiểu in | (a) | (b) |
+|---|---|---|---|---|
+| 8934673300759 | front.jpg | chấm kim nhòe thành nét liền | đúng | đúng |
+| 8936017367107 | ingredients.jpg | chữ in thường, tháng bằng chữ | đúng | sai: chỉ nhận số nên mất "Oct" ("05//2021") |
+| 8936028641487 | date.jpg | chấm kim | sai: chữ rác | sai: "- 1 1 1 2" |
+| 8936221044160 | date.jpg | chấm kim | sai: chữ rác | sai: "- . ." |
+| 8934588022111 | date.jpg | chấm kim, nghiêng, nắp lon | sai: chữ rác | sai: rỗng |
+| 8936012061321 | date.jpg | chấm kim | sai: chữ rác | sai: rỗng |
+| 8934673818391 | date.jpg | chấm kim, ảnh nhòe | sai: "#00977 Bl 51" | sai: "2009770" (đáp án 200923) |
+| 8936017368111 | front.jpg | chấm kim, in dọc, ảnh nhỏ | sai: chữ rác | sai: "3" |
+| 8935001214274 | date.jpg | in dọc, mờ | sai: chữ rác | sai: rỗng |
+
+Nhận xét: `tesseract.js` chỉ đọc được chữ nét liền; 5 ô in chấm kim (dot-matrix: chữ ghép từ các chấm rời) không ô nào ra ngày, 2 ô chữ in dọc cũng không (ảnh cắt không xoay). Cách (b) 1/9, chưa đạt mốc 5/9 để làm tính năng đọc HSD trong app (`hsd-app`, PLAN.md mục 8).
