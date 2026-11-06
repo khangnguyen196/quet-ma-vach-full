@@ -9,7 +9,10 @@ export const ZXING_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE"];
 // lần tải wasm dở vẫn chạy tiếp, lần chụp sau dùng lại được.
 export const ZXING_LOAD_TIMEOUT_MS = 10000;
 
-/** Câu lỗi khi hết giờ tải wasm (hiện trong dòng nhỏ: "zxing-wasm: không tải được (…)"). */
+/**
+ * Câu lỗi khi hết giờ tải wasm (message của ZxingLoadError, in ở console). scanner.js so message với câu này để
+ * biết là hết giờ (status "timeout"); dòng nhỏ trên trang khi đó ghi "chưa tải xong sau 10 giây (mạng chậm)".
+ */
 export const ZXING_TIMEOUT_MESSAGE = `hết giờ chờ tải bộ đọc ảnh sau ${ZXING_LOAD_TIMEOUT_MS / 1000} giây, mạng chậm`;
 
 /**
@@ -79,13 +82,15 @@ export function pickCode(results) {
 /**
  * Dòng lỗi nhỏ khi cả 2 cách đều không đọc được mã, ví dụ
  * "zxing-wasm: không thấy mã; html5-qrcode: NotFoundException (đã thử 4 lần)".
- * zxing: { status: "notfound", rotated } | { status: "load", detail } (không tải được) | { status: "error", detail } (ném lỗi khi đọc);
+ * zxing: { status: "notfound", rotated } | { status: "timeout" } (hết ZXING_LOAD_TIMEOUT_MS mà wasm chưa tải xong)
+ *   | { status: "load", detail } (không tải được) | { status: "error", detail } (ném lỗi khi đọc);
  * rotated: true nếu đã thử thêm lượt xoay ±15°;
  * html5: { name, message, tries } của lần thử cuối của html5-qrcode.
  */
 export function scanFailureText({ zxing = {}, html5 = {} } = {}) {
   const why = (label) => (zxing.detail ? `${label} (${zxing.detail})` : label);
-  const z = zxing.status === "load" ? why("không tải được")
+  const z = zxing.status === "timeout" ? `chưa tải xong sau ${ZXING_LOAD_TIMEOUT_MS / 1000} giây (mạng chậm)`
+    : zxing.status === "load" ? why("không tải được")
     : zxing.status === "error" ? why("lỗi khi đọc")
     : zxing.rotated ? "không thấy mã (kể cả khi xoay ±15°)" : "không thấy mã";
   const name = html5.name || "ScanError";

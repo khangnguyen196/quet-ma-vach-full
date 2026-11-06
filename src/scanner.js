@@ -1,7 +1,7 @@
 // Bật/tắt camera (html5-qrcode) và đọc mã từ ảnh ("Chụp ảnh mã": zxing-wasm trước, html5-qrcode dự phòng).
 import { Html5Qrcode, Html5QrcodeSupportedFormats as F } from "html5-qrcode";
 import { errorText } from "./render.js";
-import { pickCode, scanFailureText } from "./barcode.js";
+import { pickCode, scanFailureText, ZXING_TIMEOUT_MESSAGE } from "./barcode.js";
 
 // "Chụp ảnh mã" đọc bằng zxing-wasm trước (đọc được bao bì thật nhăn / xoay dọc mà html5-qrcode trượt).
 // zxing-wasm chỉ được tải khi chọn ảnh (import động); tải không được, ném lỗi hoặc không thấy mã thì
@@ -157,7 +157,9 @@ export function createScanner(elementId) {
       } catch (e) {
         console.warn("zxing-wasm không đọc được, chuyển sang html5-qrcode:", e);
         const load = e?.name === "ZxingLoadError";
-        zxing = { status: load ? "load" : "error", detail: load ? e.message : errorText(e) };
+        // Hết giờ tải wasm: zxing-reader.js ném ZxingLoadError với đúng câu ZXING_TIMEOUT_MESSAGE.
+        if (load && e.message === ZXING_TIMEOUT_MESSAGE) zxing = { status: "timeout" };
+        else zxing = { status: load ? "load" : "error", detail: load ? e.message : errorText(e) };
       }
 
       const seen = new Set();
