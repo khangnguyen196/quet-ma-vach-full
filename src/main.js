@@ -1,9 +1,10 @@
 // Nối các phần lại: sự kiện nút bấm → scanner / API → render.
 import { createScanner } from "./scanner.js";
-import { getProduct, normalize, cleanAllergyProfile, matchAllergies } from "./off.js";
+import { getProduct, isProductCached, normalize, cleanAllergyProfile, matchAllergies } from "./off.js";
 import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
-  renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID
+  renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
+  renderCompare, renderCompareButton, renderHistoryOptions
 } from "./render.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
@@ -19,6 +20,10 @@ const btnPantry = $("#btnPantry"), btnBack = $("#btnBack"), pantryCount = $("#pa
 const pantryTitle = $("#pantryTitle"), pantryList = $("#pantryList"), pantryMsg = $("#pantryMsg");
 const allergyProfileEl = $("#allergyProfile"), allergyOptions = $("#allergyOptions");
 const allergyCount = $("#allergyCount"), allergyMsg = $("#allergyMsg");
+const screenCompare = $("#screenCompare"), btnCompare = $("#btnCompare"), btnCompareBack = $("#btnCompareBack");
+const compareTitle = $("#compareTitle"), compareForm = $("#compareForm"), compareMsg = $("#compareMsg");
+const compareResult = $("#compareResult");
+const compareCode = [$("#compareCodeA"), $("#compareCodeB")], compareHist = [$("#compareHistA"), $("#compareHistB")];
 
 if (import.meta.env.VITE_APP_NAME) {
   $("#appName").textContent = import.meta.env.VITE_APP_NAME;
@@ -150,10 +155,16 @@ allergyProfileEl.addEventListener("change", (ev) => {
 });
 
 // ---- Tra cứu ----
+/** Bỏ ký tự không phải số; trả null nếu không đủ 8–14 chữ số (dùng chung cho Tra cứu và So sánh). */
+function cleanCode(raw) {
+  const code = String(raw || "").replace(/\D/g, "");
+  return code.length < 8 || code.length > 14 ? null : code;
+}
+
 let current = 0;
 async function lookup(raw) {
-  const code = String(raw || "").replace(/\D/g, "");
-  if (code.length < 8 || code.length > 14) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
+  const code = cleanCode(raw);
+  if (!code) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
   const id = ++current;
   codeInput.value = code;
   setMsg(`Đang tra cứu mã ${code}…`);
@@ -184,7 +195,7 @@ async function lookup(raw) {
     product = normalize(data, code);
     // Khung cảnh báo dị ứng ngay đầu kết quả (trước <article>); hồ sơ 0 nhóm thì khung rỗng.
     result.innerHTML = renderAllergyBox(matchAllergies(product, allergyProfile), allergyProfile.length)
-      + renderProduct(product) + renderAddForm(product);
+      + renderProduct(product) + renderCompareButton(product.code) + renderAddForm(product);
     shownProduct = product;
   } catch (e) {
     console.error(e);
@@ -246,25 +257,33 @@ function showPantryList(list = getPantry()) {
 /** Tìm ô của 1 món theo id (CSS.escape: id lạ có ký tự đặc biệt vẫn không làm hỏng bộ chọn). */
 const itemEl = (id) => pantryList.querySelector(`li[data-id="${CSS.escape(id)}"]`);
 
-btnPantry.addEventListener("click", async () => {
-  // Đang ở màn Tủ đồ rồi: chỉ đưa focus về tiêu đề, không vẽ lại (giữ form sửa đang mở và số đang gõ)
-  if (!screenPantry.hidden) { pantryTitle.focus(); return; }
-  if (busy) { setMsg("Đợi mở camera hoặc đọc ảnh xong rồi hãy mở Tủ đồ.", true); return; }
-  if (scanner.running) { await stopCam(); setMsg(); } // không để camera chạy ngầm khi đang xem tủ
-  editingId = null;
-  say(pantryMsg);
-  showPantryList();
-  screenLookup.hidden = true;
-  screenPantry.hidden = false;
-  pantryTitle.focus();
-});
+// ---- Đổi màn (Tra cứu / Tủ đồ / So sánh) ----
+// name: tên màn trong câu báo; title: chỗ đặt focus; onShow: vẽ lại màn ngay trước khi hiện.
+const SCREENS = {
+  lookup: { el: screenLookup, name: "Tra cứu" },
+  pantry: { el: screenPantry, name: "Tủ đồ", title: pantryTitle, onShow: () => { say(pantryMsg); showPantryList(); } },
+  compare: { el: screenCompare, name: "So sánh", title: compareTitle, onShow: () => showCompareScreen() }
+};
 
-btnBack.addEventListener("click", () => {
-  editingId = null;
-  screenPantry.hidden = true;
-  screenLookup.hidden = false;
-  btnPantry.focus();
-});
+/**
+ * Chuyển sang 1 màn. focusEl: chỗ đặt focus sau khi chuyển (mặc định là tiêu đề của màn).
+ * Trả false nếu không chuyển được (đang mở camera / đọc ảnh).
+ */
+async function showScreen(key, focusEl) {
+  const target = SCREENS[key];
+  // Đang ở màn đó rồi: chỉ đưa focus về tiêu đề, không vẽ lại (giữ form sửa đang mở và số đang gõ)
+  if (!target.el.hidden) { (focusEl || target.title)?.focus(); return true; }
+  if (busy) { setMsg(`Đợi mở camera hoặc đọc ảnh xong rồi hãy mở ${target.name}.`, true); return false; }
+  if (scanner.running) { await stopCam(); setMsg(); } // không để camera chạy ngầm khi đang ở màn khác
+  editingId = null; // đóng form sửa tủ đồ
+  target.onShow?.();
+  for (const s of Object.values(SCREENS)) s.el.hidden = s !== target;
+  (focusEl || target.title)?.focus();
+  return true;
+}
+
+btnPantry.addEventListener("click", () => showScreen("pantry"));
+btnBack.addEventListener("click", () => showScreen("lookup", btnPantry));
 
 // Ủy quyền sự kiện (event delegation): 1 listener trên #result bắt submit của form "Thêm vào tủ đồ",
 // vì form được tạo lại mỗi lần tra (gắn listener vào từng form thì phải gắn lại mỗi lần).
@@ -342,3 +361,96 @@ pantryList.addEventListener("submit", (ev) => {
 });
 
 updatePantryCount();
+
+// ---- So sánh 2 sản phẩm ----
+// Kết quả lần so sánh gần nhất: [bên A, bên B] (sản phẩm đã normalize, hoặc "không tìm thấy" / lỗi).
+// Mỗi lần mở màn So sánh thì vẽ lại từ đây theo hồ sơ dị ứng hiện tại (không gọi mạng).
+let lastCompare = null;
+let compareTurn = 0; // số thứ tự lượt so sánh, như biến current của lookup(): lượt cũ về muộn thì bỏ
+
+function drawCompare() {
+  compareResult.innerHTML = lastCompare ? renderCompare(lastCompare, allergyProfile) : "";
+}
+
+/** Vẽ lại màn So sánh khi mở: danh sách "đã quét gần đây" mới nhất + kết quả cũ theo hồ sơ hiện tại. */
+function showCompareScreen() {
+  let list = [];
+  try { list = getHistory(); } catch (e) { console.error(e); }
+  for (const sel of compareHist) {
+    sel.innerHTML = renderHistoryOptions(list);
+    sel.disabled = !list.length;
+  }
+  drawCompare();
+}
+
+btnCompare.addEventListener("click", () => showScreen("compare"));
+btnCompareBack.addEventListener("click", () => showScreen("lookup", btnCompare));
+
+// Nút "So sánh với sản phẩm khác" dưới kết quả tra: mở màn So sánh, điền sẵn mã vào bên A.
+result.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-compare-code]");
+  if (!btn) return;
+  const code = btn.dataset.compareCode;
+  if (await showScreen("compare", compareCode[1])) {
+    compareCode[0].value = code;
+    say(compareMsg);
+  }
+});
+
+// Chọn từ "đã quét gần đây" thì điền mã vào ô của bên đó, rồi đưa ô chọn về dòng đầu.
+compareHist.forEach((sel, i) => sel.addEventListener("change", () => {
+  if (!sel.value) return;
+  compareCode[i].value = sel.value;
+  sel.value = "";
+}));
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Tra 1 bên để so sánh (KHÔNG thêm vào lịch sử). Không ném lỗi: lỗi trả về dạng { status: "error" }. */
+async function fetchSide(code) {
+  let data;
+  try {
+    data = await getProduct(code);
+  } catch (e) {
+    console.error(e);
+    return { code, status: "error", kind: e?.kind || "unknown", error: e };
+  }
+  if (!data) return { code, status: "notfound" };
+  try {
+    return { code, status: "ok", product: normalize(data, code) };
+  } catch (e) {
+    console.error(e);
+    return { code, status: "error", kind: "display", error: e };
+  }
+}
+
+compareForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const codes = compareCode.map((input) => cleanCode(input.value));
+  const bad = codes.findIndex((c) => !c);
+  if (bad !== -1) {
+    say(compareMsg, `Mã vạch sản phẩm ${bad ? "B" : "A"} cần 8–14 chữ số.`, true);
+    compareCode[bad].focus();
+    return;
+  }
+  if (codes[0] === codes[1]) { say(compareMsg, "Hai mã giống nhau, nhập mã khác cho một bên.", true); return; }
+  codes.forEach((c, i) => { compareCode[i].value = c; });
+
+  const id = ++compareTurn;
+  lastCompare = null;
+  compareResult.innerHTML = "";
+  // Tra LẦN LƯỢT (không song song). Mã A phải gọi mạng và mã B cũng phải gọi mạng thì nghỉ 1 giây giữa 2 lần gọi.
+  say(compareMsg, `Đang tra cứu mã ${codes[0]}…`);
+  const aNeedsNetwork = !isProductCached(codes[0]);
+  const sideA = await fetchSide(codes[0]);
+  if (id !== compareTurn) return;
+  if (aNeedsNetwork && !isProductCached(codes[1])) await sleep(1000);
+  if (id !== compareTurn) return;
+  say(compareMsg, `Đang tra cứu mã ${codes[1]}…`);
+  const sideB = await fetchSide(codes[1]);
+  if (id !== compareTurn) return;
+
+  lastCompare = [sideA, sideB];
+  say(compareMsg);
+  drawCompare();
+});

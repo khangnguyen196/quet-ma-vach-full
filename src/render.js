@@ -1,5 +1,6 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
-import { NOVA_VI, NUTRIENT_ROWS, NO_NAME, ALLERGEN_VI, ALLERGEN_KEYS } from "./off.js";
+import { NOVA_VI, NUTRIENT_ROWS, NO_NAME, ALLERGEN_VI, ALLERGEN_KEYS, matchAllergies } from "./off.js";
+import { compareRows } from "./compare.js";
 import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 
 // Giới hạn năm của ô chọn ngày, khớp với kiểm tra ở storage.js (checkDateQty vẫn kiểm lại khi lưu).
@@ -155,17 +156,27 @@ export function renderProduct(p) {
 </article>`;
 }
 
+/**
+ * Trang "Add a product" (thêm sản phẩm) chính thức của Open Food Facts, nơi người dùng nhập mã vạch.
+ * Kiểm 06/11/2026: trang chủ world.openfoodfacts.org có link "Add a product" tới đúng địa chỉ này (HTTP 200).
+ * Không dùng link cũ "…product.pl?type=add&code=<mã>": với mã CHƯA có trên Open Food Facts link đó trả
+ * HTTP 404 "No product listed for barcode …" (sản phẩm phải được tạo trước). Trang này không điền sẵn mã,
+ * nên câu giải thích ghi mã để người dùng nhập.
+ */
+export const OFF_ADD_URL = "https://world.openfoodfacts.org/cgi/product.pl?type=search_or_add&action=display";
+
 export function renderNotFound(code) {
-  return `<div class="notfound"><p class="big">Chưa có mã ${esc(code)} trong Open Food Facts</p>
-<p>Sản phẩm này chưa được ai thêm vào. Bạn có thể <a href="https://world.openfoodfacts.org/cgi/product.pl?type=add&code=${esc(code)}" target="_blank" rel="noopener">tự thêm bằng cách chụp bao bì</a>, hoặc thử mã khác.</p></div>`;
+  const c = esc(code);
+  return `<div class="notfound"><p class="big">Chưa có mã ${c} trong Open Food Facts</p>
+<p>Sản phẩm này chưa được ai thêm vào. Bạn có thể tự thêm (cần tài khoản Open Food Facts và chụp bao bì; trên trang thêm sản phẩm, nhập mã ${c}), hoặc thử mã khác.</p>
+<p class="contribute"><a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">Góp sản phẩm này lên Open Food Facts</a></p></div>`;
 }
 
 /**
- * Báo lỗi khi tra cứu.
- * kind: "timeout" | "network" | "server" | "display" | "unknown" (kind lạ hoặc rỗng cũng coi là "unknown");
- * detail: lỗi gốc (Error, chuỗi…), hiện ở dòng chữ nhỏ qua errorText().
+ * [câu chính, dòng gợi ý] của lỗi khi tra cứu (dòng gợi ý đã escape, câu chính chưa).
+ * Dùng chung cho renderError (màn tra cứu) và cột lỗi ở màn So sánh, để 2 nơi cùng chữ.
  */
-export function renderError(code, kind, detail) {
+function errorMessages(code, kind, detail) {
   const c = esc(code);
   const status = detail?.status ? ` (HTTP ${detail.status})` : "";
   // [câu chính, dòng gợi ý]
@@ -180,10 +191,90 @@ export function renderError(code, kind, detail) {
     unknown: ["Có lỗi bất thường khi tra cứu, thử lại.",
       `Tra lại mã ${c}; nếu vẫn lỗi, chụp lại dòng chữ nhỏ bên dưới.`]
   };
-  const [main, hint] = Object.hasOwn(MESSAGES, kind) ? MESSAGES[kind] : MESSAGES.unknown;
+  return Object.hasOwn(MESSAGES, kind) ? MESSAGES[kind] : MESSAGES.unknown;
+}
+
+/**
+ * Báo lỗi khi tra cứu.
+ * kind: "timeout" | "network" | "server" | "display" | "unknown" (kind lạ hoặc rỗng cũng coi là "unknown");
+ * detail: lỗi gốc (Error, chuỗi…), hiện ở dòng chữ nhỏ qua errorText().
+ */
+export function renderError(code, kind, detail) {
+  const [main, hint] = errorMessages(code, kind, detail);
   const info = detail == null ? "" : errorText(detail);
   return `<div class="notfound"><p class="big">${esc(main)}</p>
 <p>${hint}</p>${info ? `\n<p class="src">${esc(info)}</p>` : ""}</div>`;
+}
+
+// ---- So sánh 2 sản phẩm (giai đoạn 3) ----
+
+/** Nút dưới kết quả tra (sản phẩm tìm thấy): mở màn So sánh, điền sẵn mã này vào bên A. */
+export function renderCompareButton(code) {
+  return `<p class="cmp-open"><button class="btn" type="button" data-compare-code="${esc(code)}">So sánh với sản phẩm khác</button></p>`;
+}
+
+/**
+ * Các lựa chọn của ô <select> "Chọn từ đã quét gần đây" (từ getHistory(): [{ code, name }]).
+ * Lựa chọn đầu có value rỗng (chưa chọn gì).
+ */
+export function renderHistoryOptions(list) {
+  if (!list.length) return '<option value="">Chưa quét sản phẩm nào</option>';
+  return '<option value="">Chọn từ đã quét gần đây</option>'
+    + list.map((x) => `<option value="${esc(x.code)}">${esc(x.name)} (${esc(x.code)})</option>`).join("");
+}
+
+/** Ảnh nhỏ: chỉ nhận https://; không có ảnh (hoặc ảnh tải lỗi) thì ô "Chưa có ảnh" như màn tra cứu. */
+function smallImage(image) {
+  return typeof image === "string" && image.startsWith("https://")
+    ? `<img src="${esc(image)}" alt="" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="noimg" hidden>Chưa có ảnh</div>`
+    : '<div class="noimg">Chưa có ảnh</div>';
+}
+
+/**
+ * Đầu 1 cột so sánh. side: { code, status: "ok" | "notfound" | "error", product (đã normalize, khi "ok"),
+ * kind + error (khi "error") }. Khung dị ứng có class (KHÔNG có id allergyAlert: id đó chỉ dành cho màn tra cứu).
+ */
+function renderCompareColumn(side, letter, profile) {
+  const head = `<p class="cmp-letter">Sản phẩm ${letter}</p>`;
+  if (side.status === "ok") {
+    const p = side.product;
+    const alert = renderAllergyAlert(matchAllergies(p, profile), profile.length);
+    return `${head}
+  <div class="cmp-head">${smallImage(p.image)}
+    <div class="text"><p class="cmp-name">${esc(p.name)}</p><p class="code">Mã ${esc(p.code)}</p></div>
+  </div>
+  <div class="allergy-box cmp-allergy">${alert}</div>`;
+  }
+  if (side.status === "notfound") return `${head}\n${renderNotFound(side.code)}`;
+  // Lỗi mạng / máy chủ: câu rút gọn từ renderError (cùng chữ), không có dòng lỗi kỹ thuật nhỏ.
+  const [main, hint] = errorMessages(side.code, side.kind, side.error);
+  return `${head}
+  <div class="notfound"><p class="big">${esc(main)}</p><p>${hint}</p></div>`;
+}
+
+/**
+ * Kết quả so sánh 2 sản phẩm: 2 cột đầu (ảnh, tên, mã, khung dị ứng) + bảng 6 dòng trên 100 g / 100 ml.
+ * sides: [bên A, bên B] (xem renderCompareColumn); profile: hồ sơ dị ứng (mảng khóa nhóm).
+ * Chỉ hiện số, không tô màu hay in đậm bên nào lớn / nhỏ hơn; ô thiếu ghi "chưa có dữ liệu".
+ */
+export function renderCompare(sides, profile = []) {
+  const [a, b] = sides;
+  const prod = (s) => (s && s.status === "ok" ? s.product : null);
+  const cell = (v, unit) => (v == null ? '<span class="empty">chưa có dữ liệu</span>' : `${fmt(v)} ${esc(unit)}`);
+  const rows = compareRows(prod(a), prod(b)).map((r) =>
+    `<tr><th scope="row">${esc(r.label)}</th><td>${cell(r.a, r.unit)}</td><td>${cell(r.b, r.unit)}</td></tr>`
+  ).join("");
+  return `
+<div class="cmp-cols">
+  <section class="cmp-col" aria-label="Sản phẩm A">${renderCompareColumn(a, "A", profile)}</section>
+  <section class="cmp-col" aria-label="Sản phẩm B">${renderCompareColumn(b, "B", profile)}</section>
+</div>
+<table class="cmp-table">
+  <caption>Giá trị dinh dưỡng trên 100 g / 100 ml</caption>
+  <thead><tr><th scope="col"><span class="visually-hidden">Chỉ số</span></th><th scope="col">A</th><th scope="col">B</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<p class="src">Số theo Open Food Facts (cộng đồng đóng góp, có thể thiếu hoặc sai). App không tự tính hay đổi đơn vị.</p>`;
 }
 
 /**

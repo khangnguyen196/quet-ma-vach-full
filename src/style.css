@@ -253,8 +253,10 @@ table.info td { padding: 6px 0; border-bottom: 1px solid var(--rule); vertical-a
 table.info td:first-child { color: var(--ink-2); width: 38%; padding-right: 10px; }
 table.info tr:last-child td { border-bottom: 0; }
 
-/* Thanh trên cùng: tên app + nút Tủ đồ */
-.topbar { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+/* Thanh trên cùng: tên app + nút Tủ đồ + nút So sánh. Màn hẹp (320 px) thì 2 nút xuống dòng dưới tên app. */
+.topbar { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-start; justify-content: space-between; }
+.topbar h1 { min-width: 0; overflow-wrap: anywhere; }
+.topnav { display: flex; gap: 8px; flex: 0 0 auto; }
 .topbar .pantry-btn { flex: 0 0 auto; min-height: 44px; font-variant-numeric: tabular-nums; }
 
 /* Form thêm vào tủ đồ / sửa món */
@@ -329,3 +331,42 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 /* Thiếu dữ liệu dị ứng: khung xám trung tính (không đỏ / vàng để không lẫn với cảnh báo có chất), nổi hơn dòng trung tính. */
 .allergy-alert.nodata { background: var(--well); color: var(--ink); border-color: var(--ink-2); }
 .allergy-note { font-size: 14px; color: var(--ink-2); }
+
+/* Nút "Góp sản phẩm này lên Open Food Facts" (khi không tìm thấy mã) */
+.notfound .contribute { margin-top: 12px; }
+.notfound .contribute .btn { text-decoration: none; padding: 8px 14px; }
+
+/* Màn So sánh (giai đoạn 3): chỉ hiện số, không tô màu bên nào hơn. Vừa màn 320 px, không cuộn ngang. */
+.cmp-open { margin-top: 20px; display: flex; }
+.compare-form { display: grid; gap: 12px; margin-top: 14px; }
+.cmp-pick { border: 1px solid var(--rule); border-radius: 6px; margin: 0; padding: 8px 12px 12px; min-width: 0; display: grid; gap: 8px; }
+.cmp-pick legend { font-weight: 700; padding: 0 4px; }
+.cmp-pick input, .cmp-pick select {
+  min-height: 44px; padding: 0 10px; min-width: 0; width: 100%;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--well); color: var(--ink);
+  font: inherit;
+}
+.cmp-pick input { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.cmp-pick input::placeholder { color: var(--ink-2); letter-spacing: 0; }
+#compareResult { margin-top: 20px; }
+.cmp-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.cmp-col { min-width: 0; border-top: 6px solid var(--rule-strong); padding-top: 8px; overflow-wrap: anywhere; }
+.cmp-letter { font-size: 13px; font-weight: 700; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.cmp-head { display: grid; gap: 6px; margin-top: 6px; }
+.cmp-head img, .cmp-head .noimg { width: 64px; height: 64px; }
+.cmp-head img { object-fit: contain; background: #fff; border: 1px solid var(--rule); border-radius: 4px; }
+.cmp-name { font-weight: 700; font-size: 16px; line-height: 1.25; }
+.cmp-head .code { margin-top: 2px; }
+.cmp-allergy { margin: 10px 0 0; }
+.cmp-allergy .allergy-alert { font-size: 14px; padding: 8px; border-left-width: 4px; }
+.cmp-allergy .allergy-note { font-size: 13px; }
+.cmp-col .notfound { border-top: 0; padding-top: 0; }
+.cmp-col .notfound .big { font-size: 17px; margin-top: 6px; }
+.cmp-col .notfound p { font-size: 14px; }
+table.cmp-table { width: 100%; border-collapse: collapse; margin-top: 16px; table-layout: fixed; font-variant-numeric: tabular-nums; }
+table.cmp-table caption { text-align: left; font-weight: 700; padding: 0 0 6px; font-size: 15px; }
+table.cmp-table th, table.cmp-table td { padding: 7px 4px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: baseline; overflow-wrap: anywhere; }
+table.cmp-table thead th { border-bottom: 3px solid var(--rule-strong); font-size: 13px; color: var(--ink-2); }
+table.cmp-table tbody th { font-weight: 500; width: 34%; padding-left: 0; }
+table.cmp-table td { font-weight: 500; }
+table.cmp-table .empty { font-size: 13px; }

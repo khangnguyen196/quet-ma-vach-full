@@ -14,12 +14,15 @@
   <header>
     <div class="topbar">
       <h1 id="appName">Quét mã vạch đồ ăn</h1>
-      <button id="btnPantry" class="btn pantry-btn" type="button">Tủ đồ (<span id="pantryCount">0</span>)</button>
+      <nav class="topnav" aria-label="Màn hình">
+        <button id="btnPantry" class="btn pantry-btn" type="button">Tủ đồ (<span id="pantryCount">0</span>)</button>
+        <button id="btnCompare" class="btn pantry-btn" type="button">So sánh</button>
+      </nav>
     </div>
     <p>Quét mã trên gói mì, chai nước, hộp bánh… để xem thành phần và dinh dưỡng.</p>
   </header>
 
-  <!-- Màn Tra cứu và màn Tủ đồ: chỉ hiện 1 màn, màn kia có thuộc tính hidden -->
+  <!-- Màn Tra cứu, màn Tủ đồ và màn So sánh: chỉ hiện 1 màn, các màn kia có thuộc tính hidden -->
   <div id="screenLookup">
   <section aria-label="Quét mã">
     <div id="reader" class="viewfinder"></div>
@@ -65,6 +68,29 @@
     <p class="pantry-legend">Sắp theo hạn sử dụng. <span class="tag soon">Vàng</span> còn 7 ngày trở xuống, <span class="tag expired">Đỏ</span> đã hết hạn.</p>
     <p id="pantryMsg" class="msg" role="status" aria-live="polite"></p>
     <div id="pantryList"></div>
+  </section>
+
+  <section id="screenCompare" aria-labelledby="compareTitle" hidden>
+    <div class="pantry-head">
+      <h2 id="compareTitle" tabindex="-1">So sánh</h2>
+      <button id="btnCompareBack" class="btn" type="button"><span aria-hidden="true">←</span> Tra cứu</button>
+    </div>
+    <p class="pantry-legend">Chọn 2 sản phẩm: nhập mã hoặc chọn từ đã quét gần đây.</p>
+    <form id="compareForm" class="compare-form" autocomplete="off">
+      <fieldset class="cmp-pick">
+        <legend>Sản phẩm A</legend>
+        <input id="compareCodeA" inputmode="numeric" pattern="[0-9 ]*" placeholder="Số mã vạch A" aria-label="Số mã vạch sản phẩm A">
+        <select id="compareHistA" aria-label="Chọn sản phẩm A từ đã quét gần đây"></select>
+      </fieldset>
+      <fieldset class="cmp-pick">
+        <legend>Sản phẩm B</legend>
+        <input id="compareCodeB" inputmode="numeric" pattern="[0-9 ]*" placeholder="Số mã vạch B" aria-label="Số mã vạch sản phẩm B">
+        <select id="compareHistB" aria-label="Chọn sản phẩm B từ đã quét gần đây"></select>
+      </fieldset>
+      <button class="btn primary" type="submit">So sánh</button>
+    </form>
+    <p id="compareMsg" class="msg" role="status" aria-live="polite"></p>
+    <div id="compareResult"></div>
   </section>
 
   <footer>
