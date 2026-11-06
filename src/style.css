@@ -326,4 +326,6 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 }
 .allergy-alert.danger { background: var(--expired-bg); color: var(--expired-ink); border-color: var(--expired-line); }
 .allergy-alert.traces { background: var(--soon-bg); color: var(--soon-ink); border-color: var(--soon-line); }
+/* Thiếu dữ liệu dị ứng: khung xám trung tính (không đỏ / vàng để không lẫn với cảnh báo có chất), nổi hơn dòng trung tính. */
+.allergy-alert.nodata { background: var(--well); color: var(--ink); border-color: var(--ink-2); }
 .allergy-note { font-size: 14px; color: var(--ink-2); }

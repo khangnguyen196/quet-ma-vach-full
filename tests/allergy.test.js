@@ -136,12 +136,23 @@ describe("renderAllergyAlert / renderProduct", () => {
 
   test("thiếu dữ liệu: không có allergens_tags", () => {
     const html = alertFor(normalize(raw(), "123"), ["milk"]);
-    assert.equal(html, `<p class="allergy-note">${ALLERGY_NO_DATA}</p>`);
+    // Vòng 3: câu thiếu dữ liệu nằm trong khung riêng "allergy-alert nodata" (không role="alert").
+    assert.equal(html, `<p class="allergy-alert nodata">${ALLERGY_NO_DATA}</p>`);
+  });
+
+  test("thiếu dữ liệu ra class 'nodata', không phải dòng chữ nhỏ 'allergy-note', không role=alert", () => {
+    const html = alertFor(prod([], ["en:peanuts"]), ["peanuts", "milk"]);
+    assert.ok(html.includes(`<p class="allergy-alert nodata">${ALLERGY_NO_DATA}</p>`));
+    assert.ok(!html.includes("allergy-note"));
+    const nodata = html.match(/<p class="allergy-alert nodata"[^>]*>/)[0];
+    assert.ok(!nodata.includes("role="));
   });
 
   test("trung tính: có dữ liệu, không trùng hồ sơ", () => {
     const html = alertFor(prod(["en:gluten"], []), ["milk"]);
     assert.equal(html, `<p class="allergy-note">${ALLERGY_NEUTRAL}</p>`);
+    assert.ok(!html.includes("allergy-alert"));
+    assert.ok(!html.includes("nodata"));
   });
 
   test("câu đúng nguyên văn", () => {

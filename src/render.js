@@ -57,7 +57,7 @@ export function renderAllergyOptions(selected = []) {
  * profileLength = số nhóm trong hồ sơ; 0 nhóm thì trả "" (không hiện gì).
  * - danger có → khung đỏ (role="alert");
  * - traces có → khung vàng "Có thể lẫn vết";
- * - noData → câu thiếu dữ liệu (có thể đi cùng khung vàng);
+ * - noData → câu thiếu dữ liệu trong khung xám riêng (có thể đi cùng khung vàng);
  * - có dữ liệu, không đỏ, không vàng → dòng trung tính.
  */
 export function renderAllergyAlert(match, profileLength) {
@@ -71,7 +71,8 @@ export function renderAllergyAlert(match, profileLength) {
     html += `<p class="allergy-alert traces"><strong>Có thể lẫn vết:</strong> ${allergenNames(traces)} (nhóm trong hồ sơ của bạn)</p>`;
   }
   if (noData) {
-    html += `<p class="allergy-note">${esc(ALLERGY_NO_DATA)}</p>`;
+    // Khung riêng (nền + viền, không đỏ / vàng): hàng Việt Nam hay thiếu dữ liệu dị ứng, câu này cần nổi hơn dòng trung tính.
+    html += `<p class="allergy-alert nodata">${esc(ALLERGY_NO_DATA)}</p>`;
   } else if (!danger.length && !traces.length) {
     html += `<p class="allergy-note">${esc(ALLERGY_NEUTRAL)}</p>`;
   }
