@@ -199,10 +199,14 @@ export function getProduct(code) {
 }
 
 /**
- * Tên dị ứng tiếng Việt. Dùng Object.hasOwn để mã lạ như "constructor", "toString"
- * không trúng thuộc tính có sẵn của object (sẽ ra một hàm thay vì chữ).
+ * Tên dị ứng tiếng Việt. Tra bằng chữ thường để tag viết hoa ("EN:Milk" → "Milk") ra cùng tên với khung
+ * cảnh báo ("Sữa"); tag lạ giữ chữ gốc ("EN:Abc" → "Abc"). Dùng Object.hasOwn để mã lạ như "constructor",
+ * "toString" không trúng thuộc tính có sẵn của object (sẽ ra một hàm thay vì chữ).
  */
-const allergenVi = (a) => (Object.hasOwn(ALLERGEN_VI, a) ? ALLERGEN_VI[a] : a);
+const allergenVi = (a) => {
+  const k = String(a).toLowerCase();
+  return Object.hasOwn(ALLERGEN_VI, k) ? ALLERGEN_VI[k] : a;
+};
 
 /**
  * Khóa nhóm dị ứng (vd "milk") từ danh sách tag, nhận giống chip: bỏ tiền tố ngôn ngữ 2–3 chữ (hoa / thường,
