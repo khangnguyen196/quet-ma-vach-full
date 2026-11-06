@@ -66,6 +66,11 @@
       <button id="btnBack" class="btn" type="button"><span aria-hidden="true">←</span> Tra cứu</button>
     </div>
     <p class="pantry-legend">Sắp theo hạn sử dụng. <span class="tag soon">Vàng</span> còn 7 ngày trở xuống, <span class="tag expired">Đỏ</span> đã hết hạn.</p>
+    <div class="actions pantry-io">
+      <button id="btnExport" class="btn" type="button">Xuất tủ đồ</button>
+      <label class="btn">Nhập tủ đồ<input id="importFile" type="file" accept=".json,application/json"></label>
+    </div>
+    <div id="importBox" class="import-box" hidden></div>
     <p id="pantryMsg" class="msg" role="status" aria-live="polite"></p>
     <div id="pantryList"></div>
   </section>

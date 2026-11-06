@@ -86,3 +86,30 @@ export function toQty(v) {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= QTY_MAX ? n : null;
 }
+
+// ---- Kiểm 1 món trong tủ (dùng chung khi đọc localStorage ở storage.js và khi nhập file ở backup.js) ----
+// Món trong tủ: { id, code, name, brand, expiresOn: "YYYY-MM-DD", qty, addedAt }.
+
+/** Tên món dài nhất (ký tự). */
+export const NAME_MAX = 120;
+
+/** Món hợp lệ: có id (chuỗi) và expiresOn là ngày có thật dạng "YYYY-MM-DD". */
+export function isValidItem(x) {
+  return x != null && typeof x === "object"
+    && typeof x.id === "string" && x.id !== ""
+    && parseDate(x.expiresOn) != null;
+}
+
+/** Chỉ giữ các trường app dùng, đúng kiểu (dữ liệu cũ / sửa tay có thể sai kiểu). */
+export function cleanItem(x) {
+  const text = (v) => (typeof v === "string" ? v : "");
+  return {
+    id: x.id,
+    code: text(x.code),
+    name: text(x.name),
+    brand: text(x.brand),
+    expiresOn: x.expiresOn,
+    qty: toQty(x.qty) ?? 1,
+    addedAt: typeof x.addedAt === "number" ? x.addedAt : null
+  };
+}

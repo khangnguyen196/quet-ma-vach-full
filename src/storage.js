@@ -1,6 +1,7 @@
 // Lịch sử quét, tủ đồ và hồ sơ dị ứng, lưu trong localStorage (chỉ trên máy này).
-import { parseDate, isEntryDate, toQty, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
+import { isEntryDate, toQty, isValidItem, cleanItem, NAME_MAX, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 import { cleanAllergyProfile } from "./off.js";
+import { mergePantry, mergeProfile } from "./backup.js";
 
 function read(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -48,7 +49,6 @@ export function setAllergyProfile(keys) {
 // Tính số ngày còn hạn, sắp xếp… nằm ở pantry.js; file này chỉ đọc / ghi.
 const PANTRY_KEY = "qmv-pantry";
 const PANTRY_BACKUP_KEY = "qmv-pantry-backup";
-const NAME_MAX = 120;
 
 // Chuỗi gốc khi đọc thấy dữ liệu tủ đồ hỏng (hoặc phải sửa lại). Trước lần ghi kế tiếp sẽ chép sang
 // khóa backup để không mất dữ liệu cũ (người dùng / người sửa app còn lấy lại được). Xem backupBroken().
@@ -61,26 +61,7 @@ function pantryError(message, cause) {
   return err;
 }
 
-/** Món hợp lệ: có id (chuỗi) và expiresOn là ngày có thật dạng "YYYY-MM-DD". */
-function isValidItem(x) {
-  return x != null && typeof x === "object"
-    && typeof x.id === "string" && x.id !== ""
-    && parseDate(x.expiresOn) != null;
-}
-
-/** Chỉ giữ các trường app dùng, đúng kiểu (dữ liệu cũ / sửa tay có thể sai kiểu). */
-function cleanItem(x) {
-  const text = (v) => (typeof v === "string" ? v : "");
-  return {
-    id: x.id,
-    code: text(x.code),
-    name: text(x.name),
-    brand: text(x.brand),
-    expiresOn: x.expiresOn,
-    qty: toQty(x.qty) ?? 1,
-    addedAt: typeof x.addedAt === "number" ? x.addedAt : null
-  };
-}
+// isValidItem / cleanItem (kiểm 1 món) nằm ở pantry.js, dùng chung với phần nhập file (backup.js).
 
 /**
  * cleanItem có làm đổi món này không: một khóa có trong món gốc bị bỏ, hoặc khóa có ở cả 2 bên mà giá trị khác.
@@ -137,11 +118,17 @@ function backupBroken(raw) {
   if (hasBackup(raw)) return;
   const first = localStorage.getItem(PANTRY_BACKUP_KEY);
   if (first == null) { localStorage.setItem(PANTRY_BACKUP_KEY, raw); return; }
-  const t = Date.now();
-  let key = `${PANTRY_BACKUP_KEY}-${t}`;
-  for (let i = 1; localStorage.getItem(key) != null; i++) key = `${PANTRY_BACKUP_KEY}-${t}-${i}`; // trùng mili giây
+  const key = newBackupKey();
   localStorage.setItem(key, raw);
   console.warn(`Tủ đồ: đã có bản backup cũ, bản hỏng lần này lưu ở khóa ${key}.`);
+}
+
+/** Khóa backup mới chưa dùng: "qmv-pantry-backup-<thời điểm>" (trùng mili giây thì thêm "-1", "-2"…). */
+function newBackupKey() {
+  const t = Date.now();
+  let key = `${PANTRY_BACKUP_KEY}-${t}`;
+  for (let i = 1; localStorage.getItem(key) != null; i++) key = `${PANTRY_BACKUP_KEY}-${t}-${i}`;
+  return key;
 }
 
 /** Ghi tủ đồ; không ghi được (bộ nhớ đầy, bị chặn) thì ném PantryError. */
@@ -212,4 +199,56 @@ export function removeFromPantry(id) {
   const list = getPantry().filter((x) => x.id !== id);
   savePantry(list);
   return list;
+}
+
+// ---- Nhập tủ đồ từ file (giai đoạn 4, chuyển giữa các máy) ----
+
+/**
+ * Trước khi "Thay toàn bộ": chép chuỗi tủ đồ hiện tại sang khóa mới "qmv-pantry-backup-<thời điểm>".
+ * Không có tủ (chưa có khóa, chuỗi rỗng, hoặc danh sách rỗng "[]") thì không cần chép.
+ * Đã có bản giống hệt ở bất kỳ khóa backup nào thì thôi; không bao giờ ghi đè backup cũ.
+ * Đọc / ghi lỗi thì ném ra (nơi gọi dừng, không ghi gì). Trả khóa đã ghi (hoặc null).
+ */
+function backupBeforeReplace() {
+  const raw = localStorage.getItem(PANTRY_KEY);
+  if (raw == null || raw.trim() === "" || raw.trim() === "[]") return null;
+  if (hasBackup(raw)) return null;
+  const key = newBackupKey();
+  localStorage.setItem(key, raw);
+  return key;
+}
+
+/**
+ * Ghi dữ liệu đã đọc từ file (kết quả parseImport của backup.js: { pantry, allergyProfile }).
+ * mode "merge" (Gộp): thêm món có id chưa có, id trùng giữ món trên máy; hồ sơ = hợp 2 bên.
+ * mode "replace" (Thay toàn bộ): chép tủ cũ sang khóa backup TRƯỚC, chép lỗi thì dừng, không ghi gì;
+ *   rồi thay tủ đồ và hồ sơ bằng dữ liệu trong file.
+ * localProfile: hồ sơ đang dùng trên máy (mặc định đọc từ localStorage).
+ * Ghi tủ đồ trước (lỗi → ném PantryError, hồ sơ chưa đụng tới), rồi hồ sơ.
+ * Trả { pantry, added, kept, allergyProfile, profileSaved, backupKey }; profileSaved false = tủ đồ đã ghi
+ * nhưng hồ sơ chưa lưu được.
+ */
+export function importPantryData(data, mode, localProfile = getAllergyProfile()) {
+  let list, added, kept = 0, profile, backupKey = null;
+  if (mode === "merge") {
+    const r = mergePantry(getPantry(), data.pantry.filter(isValidItem).map(cleanItem));
+    list = r.pantry;
+    added = r.added;
+    kept = r.kept;
+    profile = mergeProfile(localProfile, data.allergyProfile);
+  } else if (mode === "replace") {
+    try {
+      backupKey = backupBeforeReplace();
+    } catch (e) {
+      throw pantryError("Không lưu được bản dự phòng của tủ đồ hiện tại (bộ nhớ trình duyệt đầy hoặc bị chặn), chưa thay gì.", e);
+    }
+    list = data.pantry.filter(isValidItem).map(cleanItem);
+    added = list.length;
+    profile = cleanAllergyProfile(data.allergyProfile);
+  } else {
+    throw new Error(`Cách nhập không hợp lệ: ${mode}`);
+  }
+  savePantry(list);
+  const profileSaved = setAllergyProfile(profile);
+  return { pantry: list, added, kept, allergyProfile: profile, profileSaved, backupKey };
 }

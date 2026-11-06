@@ -4,12 +4,13 @@ import { getProduct, isProductCached, normalize, cleanAllergyProfile, matchAller
 import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
-  renderCompare, renderCompareButton, renderHistoryOptions
+  renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames
 } from "./render.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
-  getAllergyProfile, setAllergyProfile
+  getAllergyProfile, setAllergyProfile, importPantryData
 } from "./storage.js";
+import { buildExport, exportFileName, parseImport, IMPORT_MAX_BYTES } from "./backup.js";
 
 const $ = (s) => document.querySelector(s);
 const reader = $("#reader"), btnCam = $("#btnCam"), fileInput = $("#file");
@@ -24,6 +25,7 @@ const screenCompare = $("#screenCompare"), btnCompare = $("#btnCompare"), btnCom
 const compareTitle = $("#compareTitle"), compareForm = $("#compareForm"), compareMsg = $("#compareMsg");
 const compareResult = $("#compareResult");
 const compareCode = [$("#compareCodeA"), $("#compareCodeB")], compareHist = [$("#compareHistA"), $("#compareHistB")];
+const btnExport = $("#btnExport"), importFile = $("#importFile"), importBox = $("#importBox");
 
 if (import.meta.env.VITE_APP_NAME) {
   $("#appName").textContent = import.meta.env.VITE_APP_NAME;
@@ -135,8 +137,12 @@ function redrawAllergyAlert() {
   box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length);
 }
 
-allergyOptions.innerHTML = renderAllergyOptions(allergyProfile);
-allergyCount.textContent = String(allergyProfile.length);
+/** Vẽ ô tick + số nhóm của khung "Hồ sơ dị ứng" theo biến allergyProfile. */
+function showAllergyProfile() {
+  allergyOptions.innerHTML = renderAllergyOptions(allergyProfile);
+  allergyCount.textContent = String(allergyProfile.length);
+}
+showAllergyProfile();
 
 // Ủy quyền sự kiện: 1 listener "change" trên cả khung bắt mọi ô tick. Tick là lưu ngay.
 allergyProfileEl.addEventListener("change", (ev) => {
@@ -261,7 +267,7 @@ const itemEl = (id) => pantryList.querySelector(`li[data-id="${CSS.escape(id)}"]
 // name: tên màn trong câu báo; title: chỗ đặt focus; onShow: vẽ lại màn ngay trước khi hiện.
 const SCREENS = {
   lookup: { el: screenLookup, name: "Tra cứu" },
-  pantry: { el: screenPantry, name: "Tủ đồ", title: pantryTitle, onShow: () => { say(pantryMsg); showPantryList(); } },
+  pantry: { el: screenPantry, name: "Tủ đồ", title: pantryTitle, onShow: () => { say(pantryMsg); hideImport(); showPantryList(); } },
   compare: { el: screenCompare, name: "So sánh", title: compareTitle, onShow: () => showCompareScreen() }
 };
 
@@ -361,6 +367,94 @@ pantryList.addEventListener("submit", (ev) => {
 });
 
 updatePantryCount();
+
+// ---- Xuất / nhập tủ đồ (file JSON, chuyển giữa các máy; không gửi dữ liệu đi đâu) ----
+btnExport.addEventListener("click", () => {
+  const now = new Date();
+  const data = buildExport(getPantry(), allergyProfile, now);
+  const name = exportFileName(now);
+  // Blob + thẻ <a download>: trình duyệt tải file về máy (iPhone mở bảng để lưu vào Tệp).
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Thu hồi địa chỉ tạm sau khi bấm; chờ một lúc để trình duyệt (nhất là Safari) kịp đọc file.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  say(pantryMsg, `Đã tạo file ${name}: ${data.pantry.length} món, ${data.allergyProfile.length} nhóm dị ứng.`);
+});
+
+let pendingImport = null; // dữ liệu file vừa đọc, chờ chọn Gộp / Thay toàn bộ / Hủy
+
+function hideImport() {
+  pendingImport = null;
+  importBox.hidden = true;
+  importBox.innerHTML = "";
+}
+
+importFile.addEventListener("change", async (ev) => {
+  const file = ev.target.files?.[0];
+  ev.target.value = ""; // chọn lại đúng file đó lần sau vẫn có sự kiện change
+  if (!file) return;
+  hideImport();
+  if (file.size > IMPORT_MAX_BYTES) { say(pantryMsg, "File quá lớn (tối đa 1 MB).", true); return; }
+  let text;
+  try {
+    text = await file.text();
+  } catch (e) {
+    console.error(e);
+    say(pantryMsg, `Không đọc được file (${errorText(e)}).`, true);
+    return;
+  }
+  try {
+    pendingImport = parseImport(text);
+  } catch (e) {
+    if (e?.name !== "ImportError") console.error(e);
+    say(pantryMsg, e?.name === "ImportError" ? e.message : `Không đọc được file (${errorText(e)}).`, true);
+    return;
+  }
+  importBox.innerHTML = renderImportSummary(pendingImport);
+  importBox.hidden = false;
+  say(pantryMsg, "Chọn cách nhập: gộp vào tủ hiện tại hoặc thay toàn bộ.");
+  importBox.querySelector("button")?.focus();
+});
+
+importBox.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-import]");
+  if (!btn || !pendingImport) return;
+  const mode = btn.dataset.import;
+  if (mode === "cancel") { hideImport(); say(pantryMsg, "Đã hủy nhập."); btnExport.focus(); return; }
+  const data = pendingImport;
+  if (mode === "replace") {
+    const count = getPantry().length;
+    const ok = confirm(`Thay toàn bộ tủ đồ? Tủ hiện có ${count} món sẽ bị thay bằng ${data.pantry.length} món trong file `
+      + `(tủ cũ được chép bản dự phòng trên máy này trước khi thay). `
+      + `Hồ sơ dị ứng sẽ thành: ${profileNames(data.allergyProfile)}.`);
+    if (!ok) return;
+  }
+  let r;
+  try {
+    r = importPantryData(data, mode, allergyProfile);
+  } catch (e) {
+    say(pantryMsg, pantryErrorText(e), true); // không ghi được: không báo thành công
+    return;
+  }
+  hideImport();
+  // Vẽ lại mọi chỗ dùng tủ đồ / hồ sơ: danh sách, số ở nút Tủ đồ, ô tick + số nhóm, khung cảnh báo màn tra cứu.
+  allergyProfile = r.allergyProfile; // lưu hồ sơ lỗi vẫn dùng trong phiên này (như khi tick)
+  showAllergyProfile();
+  redrawAllergyAlert();
+  editingId = null;
+  showPantryList(r.pantry);
+  let text = mode === "merge"
+    ? `Đã gộp: thêm ${r.added} món, ${r.kept} món đã có nên giữ nguyên. Hồ sơ dị ứng: ${r.allergyProfile.length} nhóm.`
+    : `Đã thay tủ đồ: ${r.pantry.length} món${r.backupKey ? " (tủ cũ đã chép bản dự phòng)" : ""}. Hồ sơ dị ứng: ${r.allergyProfile.length} nhóm.`;
+  if (!r.profileSaved) text = "Đã nhập tủ đồ nhưng chưa lưu được hồ sơ dị ứng (bộ nhớ trình duyệt đầy hoặc bị chặn). " + text;
+  say(pantryMsg, text, !r.profileSaved);
+  pantryTitle.focus();
+});
 
 // ---- So sánh 2 sản phẩm ----
 // Kết quả lần so sánh gần nhất: [bên A, bên B] (sản phẩm đã normalize, hoặc "không tìm thấy" / lỗi).

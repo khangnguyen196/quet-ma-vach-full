@@ -304,6 +304,24 @@ export function renderAddForm({ code, name = "", brand = "" }) {
 </form>`;
 }
 
+/**
+ * Tóm tắt file vừa chọn để nhập (kết quả parseImport) + 3 nút Gộp / Thay toàn bộ / Hủy.
+ * Các nút có data-import để main.js bắt sự kiện.
+ */
+export function renderImportSummary({ pantry, allergyProfile, skipped }) {
+  return `<p class="import-summary">File có ${pantry.length} món, ${allergyProfile.length} nhóm dị ứng, bỏ ${skipped} món hỏng.</p>
+<div class="actions import-actions">
+  <button class="btn primary" type="button" data-import="merge">Gộp vào tủ hiện tại</button>
+  <button class="btn" type="button" data-import="replace">Thay toàn bộ</button>
+  <button class="btn" type="button" data-import="cancel">Hủy</button>
+</div>`;
+}
+
+/** Tên tiếng Việt của các nhóm trong hồ sơ, nối ", "; 0 nhóm thì "không nhóm nào" (chữ thường, chưa escape). */
+export function profileNames(keys) {
+  return keys.length ? keys.map((k) => ALLERGEN_VI[k]).join(", ") : "không nhóm nào";
+}
+
 /** Form sửa tại chỗ 1 món: hạn + số lượng, nút Lưu / Hủy. */
 function renderEditForm(x) {
   const n = esc(x.name || "món này");

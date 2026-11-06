@@ -332,6 +332,14 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 .allergy-alert.nodata { background: var(--well); color: var(--ink); border-color: var(--ink-2); }
 .allergy-note { font-size: 14px; color: var(--ink-2); }
 
+/* Xuất / nhập tủ đồ (giai đoạn 4) */
+.pantry-io { margin-top: 12px; }
+.import-box { margin-top: 12px; padding: 12px 14px; border: 2px solid var(--rule-strong); border-radius: 6px; display: grid; gap: 10px; }
+.import-box[hidden] { display: none; }
+.import-summary { font-weight: 500; }
+.import-actions { margin-top: 0; flex-wrap: wrap; }
+.import-actions .btn { min-width: 0; padding: 0 10px; }
+
 /* Nút "Góp sản phẩm này lên Open Food Facts" (khi không tìm thấy mã) */
 .notfound .contribute { margin-top: 12px; }
 .notfound .contribute .btn { text-decoration: none; padding: 8px 14px; }
