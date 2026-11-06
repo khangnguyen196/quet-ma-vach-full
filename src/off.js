@@ -209,6 +209,12 @@ const allergenVi = (a) => {
 };
 
 /**
+ * Bỏ chip trùng tên trong một danh sách, giữ thứ tự lần xuất hiện đầu. So đúng từng chữ (sau khi đã đổi
+ * sang tiếng Việt): "en:milk" + "fr:milk" đều ra "Sữa" → còn 1 chip; "Abc" và "abc" khác chữ → giữ cả 2.
+ */
+const uniqueNames = (names) => [...new Set(names)];
+
+/**
  * Khóa nhóm dị ứng (vd "milk") từ danh sách tag, nhận giống chip: bỏ tiền tố ngôn ngữ 2–3 chữ (hoa / thường,
  * "en:milk", "EN:milk" đều ra "milk"), đổi chữ thường, chỉ giữ khóa có trong ALLERGEN_VI
  * ("fr:lait", "en:constructor", "en:abc" không tính). Tag tiếng khác trùng tên khóa tiếng Anh (vd "de:milk")
@@ -265,8 +271,8 @@ export function normalize(p, code) {
     nova: num(p.nova_group),
     ecoscore: grade(p.ecoscore_grade),
     ingredients: str(p.ingredients_text_vi) || str(p.ingredients_text) || str(p.ingredients_text_en),
-    allergens: tags(p.allergens_tags).map(tag).map(allergenVi),
-    traces: tags(p.traces_tags).map(tag).map(allergenVi),
+    allergens: uniqueNames(tags(p.allergens_tags).map(tag).map(allergenVi)),
+    traces: uniqueNames(tags(p.traces_tags).map(tag).map(allergenVi)),
     // Hồ sơ dị ứng (giai đoạn 3): khóa nhóm để so với hồ sơ; hasAllergenData = allergens_tags có ít nhất 1 tag
     allergenKeys: allergenKeysOf(p.allergens_tags),
     traceKeys: allergenKeysOf(p.traces_tags),
