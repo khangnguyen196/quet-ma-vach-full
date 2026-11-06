@@ -9,6 +9,7 @@ import {
   ALLERGY_NO_DATA, ALLERGY_NEUTRAL, ALLERGY_ALERT_ID
 } from "../src/render.js";
 import { getAllergyProfile, setAllergyProfile } from "../src/storage.js";
+import * as storageMod from "../src/storage.js"; // isAllergyProfileKey (thêm ở sua-cuoi): gọi qua storageMod để file vẫn chạy khi hàm chưa có
 
 // Chữ không bao giờ được xuất hiện (thiếu dữ liệu không có nghĩa là an toàn).
 const FORBIDDEN = ["an toàn", "không có chất gây dị ứng", "Không ghi nhận chất gây dị ứng"];
@@ -326,5 +327,17 @@ describe("storage: get/setAllergyProfile với localStorage giả", () => {
     throwOnSet = true;
     assert.equal(setAllergyProfile(["milk"]), false);
     assert.equal(store[KEY], '["gluten"]');
+  });
+});
+
+describe("isAllergyProfileKey: sự kiện storage của tab khác có đụng hồ sơ dị ứng không (sua-cuoi, gd3-a (5))", () => {
+  const isKey = (k) => {
+    assert.equal(typeof storageMod.isAllergyProfileKey, "function", "src/storage.js phải export isAllergyProfileKey");
+    return storageMod.isAllergyProfileKey(k);
+  };
+  test("đúng khóa hồ sơ → true", () => assert.equal(isKey("qmv-allergy-profile"), true));
+  test("null (tab kia xóa sạch localStorage) → true", () => assert.equal(isKey(null), true));
+  test("khóa khác (tủ đồ, lịch sử, backup, gần giống) → false", () => {
+    for (const k of ["qmv-pantry", "qmv-history", "qmv-pantry-backup", "qmv-allergy-profile-x", "", undefined]) assert.equal(isKey(k), false, String(k));
   });
 });
