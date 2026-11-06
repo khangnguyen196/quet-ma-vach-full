@@ -79,12 +79,12 @@ function withKind(e, kind, status) {
 }
 
 /**
- * Tra 1 sản phẩm theo mã vạch.
+ * Gọi mạng tra 1 sản phẩm theo mã vạch (không qua cache; bên ngoài dùng getProduct).
  * Trả về dữ liệu thô `product` của Open Food Facts (chưa normalize),
  * hoặc null nếu Open Food Facts không có mã này (HTTP 404, hoặc status khác 1).
  * Ném lỗi có `kind` = "network" | "timeout" | "server" (và `status` = mã HTTP khi máy chủ trả mã lỗi như 503, 429).
  */
-export async function getProduct(code) {
+async function fetchProduct(code) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -126,6 +126,64 @@ export async function getProduct(code) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---- Cache tra cứu trong bộ nhớ của trang ----
+// Tra lại mã vừa tra (bấm lịch sử, màn So sánh) thì không gọi Open Food Facts lần nữa: đỡ gọi dồn dập.
+// Chỉ giữ trong bộ nhớ (Map), tải lại trang là mất: không giữ dữ liệu Open Food Facts lâu trên máy.
+// Giữ cả "không tìm thấy" (null); lỗi mạng / hết giờ / máy chủ thì KHÔNG giữ (lần sau gọi lại).
+export const CACHE_MAX = 30; // tối đa 30 mã, quá thì bỏ mã cũ nhất
+export const CACHE_TTL_MS = 10 * 60 * 1000; // 10 phút
+
+/** mã → { promise, done, at }; Map nhớ thứ tự thêm vào, mã đầu tiên là mã cũ nhất. */
+const cache = new Map();
+let clock = () => Date.now();
+
+/** CHỈ dùng trong test: thay đồng hồ (fn trả số mili giây); gọi không tham số thì về Date.now. */
+export function setCacheClock(fn) { clock = typeof fn === "function" ? fn : () => Date.now(); }
+
+/** Xóa hết cache (dùng trong test). */
+export function clearProductCache() { cache.clear(); }
+
+/** Mục cache còn dùng được của mã này (đang tra, hoặc đã tra xong chưa quá 10 phút); hết hạn thì xóa. */
+function freshEntry(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.done && clock() - entry.at > CACHE_TTL_MS) { cache.delete(key); return null; }
+  return entry;
+}
+
+/** Mã này tra lại có cần gọi mạng không (false = đã có trong cache hoặc đang tra). Màn So sánh dùng để biết có cần nghỉ giữa 2 lần gọi. */
+export function isProductCached(code) {
+  return freshEntry(String(code)) != null;
+}
+
+/**
+ * Tra 1 sản phẩm theo mã vạch, có cache trong bộ nhớ. Kết quả và lỗi giống hệt fetchProduct ở trên:
+ * dữ liệu thô `product`, null (không tìm thấy), hoặc ném lỗi có `kind`.
+ * 2 lượt cùng mã đang chạy thì dùng chung 1 lần gọi mạng.
+ */
+export function getProduct(code) {
+  const key = String(code);
+  const old = freshEntry(key);
+  if (old) return old.promise;
+
+  const entry = { promise: null, done: false, at: 0 };
+  entry.promise = fetchProduct(key).then(
+    (data) => {
+      entry.done = true;
+      entry.at = clock();
+      return data;
+    },
+    (e) => {
+      // Lỗi: gỡ khỏi cache ngay (nếu mục này còn đó) để lần sau gọi lại được.
+      if (cache.get(key) === entry) cache.delete(key);
+      throw e;
+    }
+  );
+  cache.set(key, entry);
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  return entry.promise;
 }
 
 /**
