@@ -4,6 +4,28 @@
 /** Định dạng app nhận, viết theo tên của zxing-wasm (EAN-13, EAN-8, UPC-A, UPC-E), giống formatsToSupport của "Bật camera". */
 export const ZXING_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE"];
 
+// Chờ tải file wasm của zxing-wasm tối đa 10 giây. File wasm nén khoảng 412 kB, mạng 3G chậm mất khoảng 7–8 giây.
+// Hết giờ thì "Chụp ảnh mã" đọc bằng html5-qrcode như trước khi có zxing-wasm (nút không bị khóa mãi khi sóng yếu);
+// lần tải wasm dở vẫn chạy tiếp, lần chụp sau dùng lại được.
+export const ZXING_LOAD_TIMEOUT_MS = 10000;
+
+/** Câu lỗi khi hết giờ tải wasm (hiện trong dòng nhỏ: "zxing-wasm: không tải được (…)"). */
+export const ZXING_TIMEOUT_MESSAGE = `hết giờ chờ tải bộ đọc ảnh sau ${ZXING_LOAD_TIMEOUT_MS / 1000} giây, mạng chậm`;
+
+/**
+ * Chạy đua promise với đồng hồ ms mili giây: promise xong trước thì trả kết quả / ném đúng lỗi của nó;
+ * hết giờ trước thì ném makeError(). Xong kiểu nào cũng dọn đồng hồ (không để timer treo).
+ * Không đụng tới promise gốc: hết giờ thì promise gốc vẫn chạy tiếp.
+ * Ví dụ: await raceTimeout(fetch(url), 10000, () => new Error("Hết giờ")).
+ */
+export function raceTimeout(promise, ms, makeError) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(makeError()), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Nén mã UPC-A 12 số về UPC-E 8 số theo luật chuẩn (số 0 bị lược), trả null nếu mã không nén được.
  * UPC-A = hệ số (0/1) + 5 số nhà sản xuất (m) + 5 số sản phẩm (p) + số kiểm. Ví dụ "012345000065" → "01234565".
