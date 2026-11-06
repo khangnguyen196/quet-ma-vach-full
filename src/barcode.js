@@ -6,14 +6,19 @@ export const ZXING_FORMATS = ["EAN13", "EAN8", "UPCA", "UPCE"];
 
 /**
  * Chọn mã từ mảng kết quả của zxing-wasm (readBarcodes): lấy kết quả đầu tiên hợp lệ (isValid),
- * đúng định dạng app nhận và là 8–14 chữ số. Không có thì trả null (không ném lỗi).
+ * đúng định dạng app nhận và là 8–14 chữ số. Mã UPC-A trả 12 số (bỏ số 0 đầu zxing-wasm thêm vào).
+ * Không có thì trả null (không ném lỗi).
  */
 export function pickCode(results) {
   if (!Array.isArray(results)) return null;
   for (const r of results) {
     if (!r || r.isValid !== true || !ZXING_FORMATS.includes(r.format) || typeof r.text !== "string") continue;
     const text = r.text.trim();
-    if (/^\d{8,14}$/.test(text)) return text;
+    if (!/^\d{8,14}$/.test(text)) continue;
+    // Mã UPC-A (12 số): zxing-wasm trả dạng EAN-13 có số 0 đầu ("0036000291452"); html5-qrcode (camera,
+    // cách đọc ảnh cũ) trả 12 số. Bỏ số 0 đầu để cùng 1 sản phẩm luôn ra cùng 1 mã (lịch sử, tủ đồ không bị trùng).
+    if ((r.format === "EAN13" || r.format === "UPCA") && text.length === 13 && text[0] === "0") return text.slice(1);
+    return text;
   }
   return null;
 }
