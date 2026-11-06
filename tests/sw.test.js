@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 
 import { routeFor, buildServiceWorker, versionOf } from "../tools/sw-build.mjs";
+import * as swBuild from "../tools/sw-build.mjs"; // precacheList (thêm ở sua-cuoi): gọi qua swBuild để file vẫn chạy khi hàm chưa có
 
 const SCOPE = "https://khangnguyen196.github.io/quet-ma-vach-full/";
 const OFF_API = "https://world.openfoodfacts.org/api/v2/product/8934563163150.json?fields=product_name&app_name=quet-ma-vach-full&app_version=0.1.0";
@@ -188,5 +189,36 @@ describe("buildServiceWorker", () => {
     offline.stores.get("qmv-shell-v1abc").set("./index.html", "giao diện đã lưu");
     assert.equal(await dispatchFetch(offline.listeners, { method: "GET", url: SCOPE + "?a=1", mode: "navigate" }), "giao diện đã lưu");
     assert.deepEqual(offline.log.matched, [{ key: "./index.html", opts: { cacheName: "qmv-shell-v1abc", ignoreSearch: true } }]);
+  });
+});
+
+describe("precacheList: danh sách lưu sẵn không có file .wasm (sua-cuoi)", () => {
+  // Tên file như plugin trong vite.config.js thấy: file của bản build (có wasm của zxing-wasm) + file trong public/.
+  const NAMES = [
+    "index.html", "assets/index-abc.js", "assets/index-abc.css", "assets/zxing-reader-xyz.js",
+    "assets/zxing_reader-BCjuyud6.wasm", "assets/khac.WASM", "icons/icon-192.png", "manifest.webmanifest"
+  ];
+
+  test("bỏ mọi file .wasm (kể cả chữ hoa), giữ chunk JS của zxing; './' đứng đầu, còn lại sắp theo tên", () => {
+    assert.equal(typeof swBuild.precacheList, "function", "tools/sw-build.mjs phải export precacheList");
+    assert.deepEqual(swBuild.precacheList(NAMES), [
+      "./", "./assets/index-abc.css", "./assets/index-abc.js", "./assets/zxing-reader-xyz.js",
+      "./icons/icon-192.png", "./index.html", "./manifest.webmanifest"
+    ]);
+  });
+
+  test("PRECACHE của sw.js sinh ra không có '.wasm'; install không tải wasm", async () => {
+    assert.equal(typeof swBuild.precacheList, "function", "tools/sw-build.mjs phải export precacheList");
+    const code = buildServiceWorker({ version: "v2wasm", files: swBuild.precacheList(NAMES) });
+    const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(code)[1]);
+    assert.ok(precache.length > 0);
+    assert.ok(precache.every((f) => !f.toLowerCase().endsWith(".wasm")), precache.join(", "));
+    assert.ok(!code.toLowerCase().includes(".wasm"), "sw.js không được nhắc tới file .wasm");
+    const { listeners, log } = loadSw(code);
+    let done;
+    listeners.install({ waitUntil: (p) => { done = p; } });
+    await done;
+    assert.ok(log.fetched.length === precache.length, `đã tải ${log.fetched.length} file`);
+    assert.ok(log.fetched.every((f) => !String(f.url).toLowerCase().includes(".wasm")), log.fetched.map((f) => f.url).join(", "));
   });
 });
