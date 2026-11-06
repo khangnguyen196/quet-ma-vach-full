@@ -121,6 +121,11 @@ describe("pageAssetUrls", () => {
     assert.deepEqual(pageAssetUrls(JS, doc), [JS]);
   });
 
+  test("CSS khác tên miền dù có /assets/ trong đường dẫn → bị bỏ (chỉ giữ cùng origin với file JS của app)", () => {
+    const doc = fakeDoc(["https://cdn.example.com/quet-ma-vach-full/assets/index-7_e-qWk0.css", CSS, "http://khangnguyen196.github.io/quet-ma-vach-full/assets/x.css"]);
+    assert.deepEqual(pageAssetUrls(JS, doc), [JS, CSS]);
+  });
+
   test("nhiều CSS trong assets/ → giữ đúng thứ tự", () => {
     const css2 = BASE + "assets/other-abc.css";
     assert.deepEqual(pageAssetUrls(JS, fakeDoc([CSS, css2])), [JS, CSS, css2]);
