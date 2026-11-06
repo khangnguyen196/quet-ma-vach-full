@@ -3,7 +3,8 @@
 
 /**
  * Danh sách địa chỉ đầy đủ các file của trang đang mở: file JS của app (scriptUrl, thường là import.meta.url)
- * và mọi <link rel="stylesheet"> nằm trong assets/ (bỏ link ngoài như Google Fonts).
+ * và mọi <link rel="stylesheet"> nằm trong assets/ CÙNG tên miền (origin) với file JS đó
+ * (bỏ link ngoài như Google Fonts, kể cả link tên miền khác có "/assets/" trong đường dẫn).
  * Hàm thuần: chỉ đọc doc được truyền vào (test bằng node với doc giả).
  * @param {string} scriptUrl
  * @param {{ querySelectorAll(selector: string): Iterable<{ href: string }> }} doc
@@ -11,9 +12,12 @@
  */
 export function pageAssetUrls(scriptUrl, doc) {
   const css = [];
+  let origin = "";
+  try { origin = new URL(scriptUrl).origin; } catch { /* scriptUrl hỏng: không giữ CSS nào */ }
   for (const link of doc.querySelectorAll('link[rel="stylesheet"]')) {
     try {
-      if (new URL(link.href).pathname.includes("/assets/")) css.push(link.href);
+      const url = new URL(link.href);
+      if (origin && url.origin === origin && url.pathname.includes("/assets/")) css.push(link.href);
     } catch { /* href hỏng thì bỏ qua */ }
   }
   return [scriptUrl, ...css];
