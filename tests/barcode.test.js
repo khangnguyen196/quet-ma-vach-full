@@ -66,6 +66,11 @@ describe("scanFailureText", () => {
       "zxing-wasm: không thấy mã; html5-qrcode: NotFoundException (đã thử 4 lần)");
   });
 
+  test("đã thử thêm lượt xoay ±15° bằng zxing-wasm thì câu ghi rõ", () => {
+    assert.equal(scanFailureText({ zxing: { status: "notfound", rotated: true }, html5 }),
+      "zxing-wasm: không thấy mã (kể cả khi xoay ±15°); html5-qrcode: NotFoundException (đã thử 4 lần)");
+  });
+
   test("zxing-wasm không tải được: kèm lý do", () => {
     assert.equal(scanFailureText({ zxing: { status: "load", detail: "TypeError: Failed to fetch" }, html5 }),
       "zxing-wasm: không tải được (TypeError: Failed to fetch); html5-qrcode: NotFoundException (đã thử 4 lần)");
