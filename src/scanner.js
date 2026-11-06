@@ -8,6 +8,9 @@ import { pickCode, scanFailureText } from "./barcode.js";
 // thử tiếp html5-qrcode theo SCAN_TRIES dưới đây, y như trước khi có zxing-wasm.
 // Cạnh dài ảnh đưa vào zxing-wasm (thư viện tự thử thêm bản thu nhỏ và xoay 90°/180°/270°).
 const ZXING_MAX_SIDE = 1600;
+// Lượt cuối (chỉ khi zxing-wasm và html5-qrcode đều trượt): xoay ảnh ±15° rồi đọc lại bằng zxing-wasm.
+// Đo 06/11/2026 (sua-cuoi): đọc thêm được 2/55 ảnh tổng hợp nghiêng 15° + mờ + lóa mà các lượt khác trượt.
+const ZXING_EXTRA_ANGLES = [15, -15];
 
 // html5-qrcode đọc mã từ ảnh: thử lần lượt, đọc được thì dừng.
 // Vì sao thu nhỏ: thư viện vẽ ảnh gốc lên canvas cỡ ảnh + 200 px; ảnh 24–48 MP của điện thoại
@@ -68,19 +71,30 @@ async function drawToFile(img, { w, h }, rotate) {
 
 /**
  * Đọc bằng zxing-wasm. Trả mã (chuỗi) hoặc null nếu không thấy mã.
+ * angle: số độ xoay ảnh trước khi đọc (0 = không xoay; ±15 ở lượt cuối), vùng vẽ nới ra cho vừa ảnh đã xoay.
  * Ném lỗi (name "ZxingLoadError" nếu không tải được thư viện / file wasm) để scanImage chuyển sang html5-qrcode.
  */
-async function readWithZxing(img) {
+async function readWithZxing(img, angle = 0) {
   const { w, h } = fitSize(img, ZXING_MAX_SIDE); // ≤ 1600 × 1600 = 2,56 triệu điểm, dưới giới hạn canvas iPhone
+  const rad = angle * Math.PI / 180, cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+  const cw = Math.ceil(w * cos + h * sin), ch = Math.ceil(w * sin + h * cos); // xoay 15°: ≤ 1960 × 1960 ≈ 3,8 triệu điểm
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = cw;
+  canvas.height = ch;
   let imageData;
   try {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) throw namedError("CanvasError", `Không tạo được vùng vẽ ${w}×${h} để đọc ảnh.`);
-    ctx.drawImage(img, 0, 0, w, h);
-    imageData = ctx.getImageData(0, 0, w, h);
+    if (!ctx) throw namedError("CanvasError", `Không tạo được vùng vẽ ${cw}×${ch} để đọc ảnh.`);
+    if (angle) {
+      ctx.fillStyle = "#fff"; // góc trống sau khi xoay tô trắng
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.translate(cw / 2, ch / 2);
+      ctx.rotate(rad);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    } else {
+      ctx.drawImage(img, 0, 0, w, h);
+    }
+    imageData = ctx.getImageData(0, 0, cw, ch);
   } finally {
     canvas.width = canvas.height = 0; // trả bộ nhớ canvas ngay
   }
@@ -158,6 +172,18 @@ export function createScanner(elementId) {
           return await scanner.scanFile(await drawToFile(img, size, rotate), false);
         } catch (e) {
           lastError = e;
+        }
+      }
+      // Lượt cuối: zxing-wasm đã chạy được mà không thấy mã → xoay ảnh ±15° rồi đọc lại.
+      if (zxing.status === "notfound") {
+        zxing.rotated = true;
+        for (const angle of ZXING_EXTRA_ANGLES) {
+          try {
+            const code = await readWithZxing(img, angle);
+            if (code) return code;
+          } catch (e) {
+            console.warn(`zxing-wasm lỗi ở lượt xoay ${angle}°:`, e);
+          }
         }
       }
       // Gói lỗi lần cuối thành Error mới có name + message (thư viện có khi ném chuỗi thay vì Error).

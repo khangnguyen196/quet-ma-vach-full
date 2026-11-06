@@ -26,14 +26,15 @@ export function pickCode(results) {
 /**
  * Dòng lỗi nhỏ khi cả 2 cách đều không đọc được mã, ví dụ
  * "zxing-wasm: không thấy mã; html5-qrcode: NotFoundException (đã thử 4 lần)".
- * zxing: { status: "notfound" } | { status: "load", detail } (không tải được) | { status: "error", detail } (ném lỗi khi đọc);
+ * zxing: { status: "notfound", rotated } | { status: "load", detail } (không tải được) | { status: "error", detail } (ném lỗi khi đọc);
+ * rotated: true nếu đã thử thêm lượt xoay ±15°;
  * html5: { name, message, tries } của lần thử cuối của html5-qrcode.
  */
 export function scanFailureText({ zxing = {}, html5 = {} } = {}) {
   const why = (label) => (zxing.detail ? `${label} (${zxing.detail})` : label);
   const z = zxing.status === "load" ? why("không tải được")
     : zxing.status === "error" ? why("lỗi khi đọc")
-    : "không thấy mã";
+    : zxing.rotated ? "không thấy mã (kể cả khi xoay ±15°)" : "không thấy mã";
   const name = html5.name || "ScanError";
   const h = html5.message ? `${name}: ${html5.message}` : name;
   return `zxing-wasm: ${z}; html5-qrcode: ${h} (đã thử ${Number(html5.tries) || 0} lần)`;
