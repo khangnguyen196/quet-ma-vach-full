@@ -35,12 +35,25 @@ describe("routeFor", () => {
     assert.equal(routeFor(SCOPE + "index.html?x=1", SCOPE, "navigate"), "navigate");
   });
 
-  test("file trong assets/ → asset; manifest, icon, sw.js, index.html (không phải mở trang) → skip", () => {
+  test("file trong assets/ → asset; sw.js, index.html (không phải mở trang) → skip", () => {
     assert.equal(routeFor(SCOPE + "assets/index-abc.js", SCOPE, "cors"), "asset");
     assert.equal(routeFor(SCOPE + "assets/index-abc.css", SCOPE, "no-cors"), "asset");
-    for (const p of ["manifest.webmanifest", "sw.js", "icons/icon-192.png", "index.html", "assetsx/a.js"]) {
+    for (const p of ["sw.js", "index.html", "assetsx/a.js"]) {
       assert.equal(routeFor(SCOPE + p, SCOPE, "cors"), "skip", p);
     }
+  });
+
+  test("manifest.webmanifest + icons/ → asset (lấy từ cache trước, không có thì mạng) (sua-cuoi, hoan-thien (d))", () => {
+    for (const p of ["manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon-180.png"]) {
+      for (const mode of ["cors", "no-cors"]) assert.equal(routeFor(SCOPE + p, SCOPE, mode), "asset", p + " " + mode);
+    }
+    // giống tên nhưng không phải: vẫn skip
+    for (const p of ["manifest.webmanifest.bak", "iconsx/a.png", "icons", "x/manifest.webmanifest"]) {
+      assert.equal(routeFor(SCOPE + p, SCOPE, "cors"), "skip", p);
+    }
+    // tên miền khác / ngoài phạm vi: vẫn skip
+    assert.equal(routeFor("https://example.com/quet-ma-vach-full/manifest.webmanifest", SCOPE, "cors"), "skip");
+    assert.equal(routeFor("https://khangnguyen196.github.io/repo-khac/icons/icon-192.png", SCOPE, "cors"), "skip");
   });
 
   test("địa chỉ hỏng → skip", () => {
