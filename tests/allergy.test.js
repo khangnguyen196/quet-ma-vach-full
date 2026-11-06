@@ -53,6 +53,22 @@ describe("normalize: allergenKeys / traceKeys / hasAllergenData", () => {
     assert.deepEqual(normalize(raw({ allergens_tags: [] }), "123").hasAllergenData, false);
   });
 
+  test("tag rỗng / chỉ khoảng trắng không tính là có dữ liệu", () => {
+    for (const bad of [[""], ["  "], ["", " "]]) {
+      const p = normalize(raw({ allergens_tags: bad, traces_tags: bad, additives_tags: bad }), "123");
+      assert.equal(p.hasAllergenData, false, JSON.stringify(bad));
+      assert.deepEqual(p.allergens, []);
+      assert.deepEqual(p.allergenKeys, []);
+      assert.deepEqual(p.traces, []);
+      assert.deepEqual(p.additives, []);
+    }
+    const mixed = normalize(raw({ allergens_tags: ["", "en:milk"] }), "123");
+    assert.equal(mixed.hasAllergenData, true);
+    assert.deepEqual(mixed.allergenKeys, ["milk"]);
+    assert.deepEqual(mixed.allergens, ["Sữa"]);
+    assert.deepEqual(normalize(raw({ additives_tags: [""] }), "123").additives, []);
+  });
+
   test("giữ nguyên allergens / traces cũ", () => {
     const p = normalize(raw({ allergens_tags: ["en:milk", "fr:lait"], traces_tags: ["en:peanuts"] }), "123");
     assert.deepEqual(p.allergens, ["Sữa", "lait"]);
@@ -146,6 +162,18 @@ describe("renderAllergyAlert / renderProduct", () => {
     assert.ok(!html.includes("allergy-note"));
     const nodata = html.match(/<p class="allergy-alert nodata"[^>]*>/)[0];
     assert.ok(!nodata.includes("role="));
+  });
+
+  test("allergens_tags chỉ có tag rỗng + hồ sơ Sữa → câu thiếu dữ liệu, không dòng trung tính", () => {
+    const p = prod([""], []);
+    assert.deepEqual(matchAllergies(p, ["milk"]), { danger: [], traces: [], noData: true });
+    const html = alertFor(p, ["milk"]);
+    assert.equal(html, `<p class="allergy-alert nodata">${ALLERGY_NO_DATA}</p>`);
+    assert.ok(!html.includes(ALLERGY_NEUTRAL));
+    // Mục "Chất gây dị ứng" cũng ra câu thiếu dữ liệu, không chip trống.
+    const card = renderProduct(p);
+    assert.ok(card.includes(`<p class="empty">${ALLERGY_NO_DATA}</p>`));
+    assert.ok(!card.includes('<span class="chip "></span>'));
   });
 
   test("trung tính: có dữ liệu, không trùng hồ sơ", () => {

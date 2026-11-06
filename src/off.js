@@ -61,8 +61,8 @@ const str = (v) => {
   return "";
 };
 
-/** Danh sách *_tags: chỉ nhận mảng, lấy phần tử là chuỗi. */
-const tags = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : []);
+/** Danh sách *_tags: chỉ nhận mảng, lấy phần tử là chuỗi khác rỗng ("" hay "  " không tính là có dữ liệu). */
+const tags = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim() !== "") : []);
 
 // Chờ tối đa 9 giây. Đo trên máy tính (11/2026): mỗi lần gọi khoảng 0,7–0,9 giây.
 const TIMEOUT_MS = 9000;
