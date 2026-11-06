@@ -85,7 +85,16 @@ export function renderAllergyBox(match, profileLength) {
   return `<div id="${ALLERGY_ALERT_ID}" class="allergy-box">${renderAllergyAlert(match, profileLength)}</div>`;
 }
 
-const fmt = (v) => Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 });
+/**
+ * Số dinh dưỡng theo kiểu Việt Nam (dấu phẩy thập phân). Số từ 1 trở lên: tối đa 1 chữ số thập phân (2,46 → "2,5").
+ * Số khác 0 nhỏ hơn 1: giữ 2 chữ số có nghĩa để không thành "0" (muối 0,04 → "0,04"; 0,333 → "0,33").
+ */
+const fmt = (v) => {
+  const n = Number(v);
+  return n !== 0 && Math.abs(n) < 1
+    ? n.toLocaleString("vi-VN", { maximumSignificantDigits: 2 })
+    : n.toLocaleString("vi-VN", { maximumFractionDigits: 1 });
+};
 
 /** Dòng "Nhãn: giá trị" dưới tên sản phẩm; trống thì ghi "chưa có dữ liệu". */
 const metaRow = (label, value) =>

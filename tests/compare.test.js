@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { normalize } from "../src/off.js";
 import { compareRows, COMPARE_ROWS } from "../src/compare.js";
 import {
-  renderCompare, renderNotFound, renderCompareButton, renderHistoryOptions,
+  renderCompare, renderNotFound, renderCompareButton, renderHistoryOptions, renderProduct,
   OFF_ADD_URL, ALLERGY_NO_DATA, ALLERGY_NEUTRAL, ALLERGY_ALERT_ID
 } from "../src/render.js";
 
@@ -208,5 +208,39 @@ describe("nút / ô chọn ở màn So sánh", () => {
     assert.ok(html.startsWith('<option value="">Chọn từ đã quét gần đây</option>'));
     assert.ok(html.includes('<option value="8934563163150">&lt;b&gt;Mì&lt;/b&gt; (8934563163150)</option>'));
     assert.ok(html.includes('value="1&quot;2"'));
+  });
+});
+
+describe("định dạng số dinh dưỡng (fmt): số nhỏ hơn 1 không bị làm tròn về 0", () => {
+  const NUT = { salt_100g: 0.04, sugars_100g: 0.333, fat_100g: 2.46, proteins_100g: 0, "energy-kcal_100g": 1520 };
+  /** Chữ trong ô giá trị của dòng có nhãn label (bảng So sánh: cột A). */
+  const cmpCell = (html, label) => {
+    const row = html.match(new RegExp(`<tr><th scope="row">${label}</th><td>(.*?)</td>`));
+    assert.ok(row, label);
+    return row[1];
+  };
+  /** Chữ trong ô giá trị của dòng có nhãn label (bảng dinh dưỡng màn tra cứu). */
+  const productCell = (html, label) => {
+    const row = html.match(new RegExp(`<td>${label}</td><td>(.*?)</td>`));
+    assert.ok(row, label);
+    return row[1];
+  };
+
+  test("màn So sánh: 0,04 g; 0,33 g; 2,5 g; 0 g; 1.520 kcal", () => {
+    const html = renderCompare([ok(prod("11111111", { nutriments: NUT })), ok(prod("22222222"))]);
+    assert.equal(cmpCell(html, "Muối"), "0,04 g");
+    assert.equal(cmpCell(html, "Đường"), "0,33 g");
+    assert.equal(cmpCell(html, "Chất béo"), "2,5 g");
+    assert.equal(cmpCell(html, "Chất đạm"), "0 g");
+    assert.equal(cmpCell(html, "Năng lượng"), "1.520 kcal");
+  });
+
+  test("màn tra cứu (renderProduct): cùng cách hiện số", () => {
+    const html = renderProduct(prod("11111111", { nutriments: NUT }));
+    assert.equal(productCell(html, "Muối"), "0,04 g");
+    assert.equal(productCell(html, "trong đó đường"), "0,33 g");
+    assert.equal(productCell(html, "Chất béo"), "2,5 g");
+    assert.equal(productCell(html, "Chất đạm"), "0 g");
+    assert.equal(productCell(html, "Năng lượng"), "1.520 kcal");
   });
 });
