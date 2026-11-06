@@ -1,10 +1,12 @@
 // Test src/barcode.js: chọn mã từ kết quả zxing-wasm và ghép dòng lỗi "đã thử những gì" khi "Chụp ảnh mã" trượt.
 // Không cần trình duyệt, không cần zxing-wasm: kết quả là object giả có dạng giống ReadResult của thư viện.
 // Chạy: npm test
-import { test, describe } from "node:test";
+import { test, describe, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { pickCode, scanFailureText, ZXING_FORMATS } from "../src/barcode.js";
+import {
+  pickCode, scanFailureText, raceTimeout, ZXING_FORMATS, ZXING_LOAD_TIMEOUT_MS, ZXING_TIMEOUT_MESSAGE
+} from "../src/barcode.js";
 
 /** 1 kết quả giả của zxing-wasm (chỉ các trường app đọc). */
 const res = (text, format = "EAN13", isValid = true) => ({ text, format, isValid });
@@ -129,5 +131,67 @@ describe("scanFailureText", () => {
     assert.ok(t.includes("html5-qrcode: "), t);
     const t2 = scanFailureText({ zxing: { status: "load" }, html5: { tries: 0 } });
     assert.ok(!t2.includes("undefined") && !t2.includes("()"), t2);
+  });
+});
+
+describe("raceTimeout (giới hạn thời gian tải wasm, sua-cuoi vòng 3)", () => {
+  const timeoutError = () => new Error("hết giờ");
+
+  test("promise xong trước hạn → trả giá trị của promise", async () => {
+    assert.equal(await raceTimeout(Promise.resolve(42), 1000, timeoutError), 42);
+    const slow = new Promise((resolve) => setTimeout(() => resolve("xong"), 5));
+    assert.equal(await raceTimeout(slow, 1000, timeoutError), "xong");
+  });
+
+  test("promise lỗi trước hạn → ném đúng lỗi gốc (không phải lỗi hết giờ)", async () => {
+    const original = new TypeError("Failed to fetch");
+    await assert.rejects(raceTimeout(Promise.reject(original), 1000, timeoutError), (e) => e === original);
+  });
+
+  test("quá hạn → ném lỗi do makeError tạo, promise gốc vẫn chạy tiếp", async () => {
+    let resolveLater;
+    const never = new Promise((resolve) => { resolveLater = resolve; });
+    const err = new Error("Hết giờ");
+    await assert.rejects(raceTimeout(never, 10, () => err), (e) => e === err);
+    // promise gốc không bị đụng tới: vẫn xong được về sau, cho lần chụp sau dùng lại
+    resolveLater("wasm đã tải");
+    assert.equal(await never, "wasm đã tải");
+  });
+
+  test("xong trước hạn thì không còn timer treo: hết hạn sau đó không gọi makeError, clearTimeout đã gọi", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const clear = t.mock.method(globalThis, "clearTimeout");
+    let made = 0;
+    const make = () => { made++; return new Error("hết giờ"); };
+    assert.equal(await raceTimeout(Promise.resolve("ok"), 10000, make), "ok");
+    await assert.rejects(raceTimeout(Promise.reject(new Error("lỗi thật")), 10000, make), /lỗi thật/);
+    t.mock.timers.tick(20000); // nếu timer còn treo thì lúc này makeError bị gọi
+    assert.equal(made, 0);
+    assert.equal(clear.mock.callCount(), 2);
+  });
+
+  test("hết hạn: makeError gọi đúng 1 lần, timer đã dọn", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let made = 0;
+    const p = raceTimeout(new Promise(() => {}), 10000, () => { made++; return new Error("hết giờ"); });
+    t.mock.timers.tick(9999);
+    assert.equal(made, 0);
+    t.mock.timers.tick(1);
+    await assert.rejects(p, /hết giờ/);
+    t.mock.timers.tick(20000);
+    assert.equal(made, 1);
+  });
+
+  test("hằng ZXING_LOAD_TIMEOUT_MS = 10 giây", () => {
+    assert.equal(ZXING_LOAD_TIMEOUT_MS, 10000);
+  });
+
+  test("dòng nhỏ khi zxing-wasm hết giờ tải và html5-qrcode cũng trượt: tiếng Việt, dễ hiểu, không ngoặc lồng", () => {
+    const t = scanFailureText({
+      zxing: { status: "load", detail: ZXING_TIMEOUT_MESSAGE },
+      html5: { name: "NotFoundException", message: "", tries: 4 }
+    });
+    assert.equal(t, "zxing-wasm: không tải được (hết giờ chờ tải bộ đọc ảnh sau 10 giây, mạng chậm); html5-qrcode: NotFoundException (đã thử 4 lần)");
+    assert.ok(!/\(.*\(/.test(t.split(";")[0]), t);
   });
 });
