@@ -132,6 +132,13 @@ describe("scanFailureText", () => {
     const t2 = scanFailureText({ zxing: { status: "load" }, html5: { tries: 0 } });
     assert.ok(!t2.includes("undefined") && !t2.includes("()"), t2);
   });
+
+  test("hết giờ tải wasm (status 'timeout'): 'chưa tải xong sau N giây (mạng chậm)', N lấy từ ZXING_LOAD_TIMEOUT_MS, bỏ qua detail", () => {
+    const t = scanFailureText({ zxing: { status: "timeout", detail: ZXING_TIMEOUT_MESSAGE }, html5 });
+    assert.equal(t, `zxing-wasm: chưa tải xong sau ${ZXING_LOAD_TIMEOUT_MS / 1000} giây (mạng chậm); html5-qrcode: NotFoundException (đã thử 4 lần)`);
+    assert.ok(!t.includes("không tải được") && !t.includes("hết giờ"), t);
+    assert.ok(!/\(.*\(/.test(t.split(";")[0]), t);
+  });
 });
 
 describe("raceTimeout (giới hạn thời gian tải wasm, sua-cuoi vòng 3)", () => {
@@ -188,10 +195,10 @@ describe("raceTimeout (giới hạn thời gian tải wasm, sua-cuoi vòng 3)", 
 
   test("dòng nhỏ khi zxing-wasm hết giờ tải và html5-qrcode cũng trượt: tiếng Việt, dễ hiểu, không ngoặc lồng", () => {
     const t = scanFailureText({
-      zxing: { status: "load", detail: ZXING_TIMEOUT_MESSAGE },
+      zxing: { status: "timeout" },
       html5: { name: "NotFoundException", message: "", tries: 4 }
     });
-    assert.equal(t, "zxing-wasm: không tải được (hết giờ chờ tải bộ đọc ảnh sau 10 giây, mạng chậm); html5-qrcode: NotFoundException (đã thử 4 lần)");
+    assert.equal(t, "zxing-wasm: chưa tải xong sau 10 giây (mạng chậm); html5-qrcode: NotFoundException (đã thử 4 lần)");
     assert.ok(!/\(.*\(/.test(t.split(";")[0]), t);
   });
 });
