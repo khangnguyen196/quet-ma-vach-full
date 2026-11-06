@@ -11,6 +11,9 @@ import {
   getAllergyProfile, setAllergyProfile, importPantryData
 } from "./storage.js";
 import { buildExport, exportFileName, parseImport, IMPORT_MAX_BYTES } from "./backup.js";
+import { initPwa } from "./pwa.js";
+
+initPwa(); // service worker + thanh "Đã có bản mới" (chỉ ở bản build)
 
 const $ = (s) => document.querySelector(s);
 const reader = $("#reader"), btnCam = $("#btnCam"), fileInput = $("#file");

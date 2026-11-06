@@ -378,3 +378,13 @@ table.cmp-table thead th { border-bottom: 3px solid var(--rule-strong); font-siz
 table.cmp-table tbody th { font-weight: 500; width: 34%; padding-left: 0; }
 table.cmp-table td { font-weight: 500; }
 table.cmp-table .empty { font-size: 13px; }
+
+/* Thanh "Đã có bản mới" (PWA, src/pwa.js): đầu trang, trong luồng trang (không che nút), vừa 320 px */
+.update-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  margin-bottom: 16px; padding: 8px 8px 8px 14px;
+  border: 2px solid var(--accent); border-radius: 6px;
+  background: var(--well); color: var(--ink); font-weight: 700;
+}
+.update-bar[hidden] { display: none; }
+.update-bar .btn { flex: 0 0 auto; min-height: 44px; }
