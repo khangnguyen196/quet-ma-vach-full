@@ -340,9 +340,18 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 .import-actions { margin-top: 0; flex-wrap: wrap; }
 .import-actions .btn { min-width: 0; padding: 0 10px; }
 
-/* Nút "Góp sản phẩm này lên Open Food Facts" (khi không tìm thấy mã) */
-.notfound .contribute { margin-top: 12px; }
-.notfound .contribute .btn { text-decoration: none; padding: 8px 14px; }
+/* Nút "Góp sản phẩm này lên Open Food Facts" + "Chép mã" (khi không tìm thấy mã) */
+.notfound .contribute { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.notfound .contribute .btn { flex: 1 1 12em; text-decoration: none; padding: 8px 14px; min-height: 46px; }
+.notfound .contribute .copy-code { flex: 0 0 auto; min-width: 104px; }
+.cmp-col .notfound .contribute .btn { flex: 1 1 100%; } /* cột So sánh hẹp: mỗi nút một dòng, rộng hết cột */
+.notfound .copy-msg { margin-top: 6px; min-height: 1.4em; font-size: 15px; font-weight: 700; color: var(--accent); display: grid; gap: 6px; }
+.notfound .copy-msg.warn { color: var(--warn); }
+.copy-box {
+  width: 100%; max-width: 20ch; min-height: 44px; padding: 0 10px;
+  border: 2px solid var(--rule-strong); border-radius: 6px; background: var(--paper);
+  font-variant-numeric: tabular-nums; font-size: 17px; letter-spacing: .04em;
+}
 
 /* Màn So sánh (giai đoạn 3): chỉ hiện số, không tô màu bên nào hơn. Vừa màn 320 px, không cuộn ngang. */
 .cmp-open { margin-top: 20px; display: flex; }

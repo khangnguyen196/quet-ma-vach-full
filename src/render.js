@@ -178,7 +178,9 @@ export function renderNotFound(code) {
   const c = esc(code);
   return `<div class="notfound"><p class="big">Chưa có mã ${c} trong Open Food Facts</p>
 <p>Sản phẩm này chưa được ai thêm vào. Bạn có thể tự thêm (cần tài khoản Open Food Facts và chụp bao bì; trên trang thêm sản phẩm, nhập mã ${c}), hoặc thử mã khác.</p>
-<p class="contribute"><a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">Góp sản phẩm này lên Open Food Facts</a></p></div>`;
+<p class="contribute"><a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">Góp sản phẩm này lên Open Food Facts</a>
+<button type="button" class="btn copy-code" data-code="${c}">Chép mã</button></p>
+<p class="copy-msg" role="status" aria-live="polite"></p></div>`;
 }
 
 /**

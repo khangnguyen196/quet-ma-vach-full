@@ -121,6 +121,46 @@ fileInput.addEventListener("change", async (ev) => {
   }
 });
 
+// ---- Chép mã (nút cạnh "Góp sản phẩm này lên Open Food Facts", màn tra cứu và cột So sánh) ----
+// Trang thêm sản phẩm của Open Food Facts không điền sẵn mã, nên cho chép mã để dán vào đó.
+/** Chép bằng cách cũ: chọn chữ trong ô rồi execCommand("copy"). Trả true nếu trình duyệt báo đã chép. */
+function copyBySelection(input) {
+  input.focus();
+  input.select();
+  input.setSelectionRange(0, input.value.length); // iPhone cần chọn bằng setSelectionRange
+  try { return document.execCommand("copy"); } catch { return false; }
+}
+
+// Ủy quyền sự kiện: 1 listener trên <main> bắt nút Chép mã ở cả #result và #compareResult (nút được vẽ lại mỗi lần tra).
+document.querySelector("main").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button.copy-code[data-code]");
+  if (!btn) return;
+  const code = btn.dataset.code;
+  const out = btn.closest(".notfound")?.querySelector(".copy-msg");
+  if (!out) return;
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Trình duyệt không có navigator.clipboard");
+    await navigator.clipboard.writeText(code);
+    say(out, "Đã chép");
+    return;
+  } catch (e) {
+    console.warn("Không chép được bằng navigator.clipboard:", e);
+  }
+  // Dự phòng: hiện mã trong ô chỉ đọc, chọn sẵn để người dùng tự chép (và thử execCommand("copy")).
+  out.textContent = "";
+  const input = document.createElement("input");
+  input.className = "copy-box";
+  input.readOnly = true;
+  input.value = code; // gán value: mã không bao giờ thành HTML
+  input.setAttribute("aria-label", "Mã vạch để chép");
+  out.append(input);
+  if (copyBySelection(input)) { out.textContent = ""; say(out, "Đã chép"); btn.focus(); return; }
+  const note = document.createElement("span");
+  note.textContent = `Không chép được, hãy tự chép mã ${code}`;
+  out.prepend(note);
+  out.classList.add("warn");
+});
+
 // ---- Nhập tay ----
 form.addEventListener("submit", (ev) => { ev.preventDefault(); lookup(codeInput.value); });
 document.querySelectorAll(".try button[data-code]").forEach((b) =>
