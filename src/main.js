@@ -490,6 +490,10 @@ result.addEventListener("click", async (ev) => {
   const code = btn.dataset.compareCode;
   if (await showScreen("compare", compareCode[1])) {
     compareCode[0].value = code;
+    // Ô A đã là mã mới: bỏ kết quả so sánh cũ (và lượt so sánh đang chạy dở) để người dùng không tưởng là của mã mới.
+    ++compareTurn;
+    lastCompare = null;
+    compareResult.innerHTML = "";
     say(compareMsg);
   }
 });
