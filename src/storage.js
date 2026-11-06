@@ -1,5 +1,6 @@
-// Lịch sử quét và tủ đồ, lưu trong localStorage (chỉ trên máy này).
+// Lịch sử quét, tủ đồ và hồ sơ dị ứng, lưu trong localStorage (chỉ trên máy này).
 import { parseDate, isEntryDate, toQty, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
+import { cleanAllergyProfile } from "./off.js";
 
 function read(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -19,6 +20,27 @@ export function addHistory(code, name) {
   const recent = list.slice(0, 10);
   write(HISTORY_KEY, recent);
   return recent;
+}
+
+// ---- Hồ sơ dị ứng (giai đoạn 3): danh sách khóa nhóm, vd ["milk", "peanuts"] ----
+const ALLERGY_KEY = "qmv-allergy-profile";
+
+/** Đọc hồ sơ dị ứng; dữ liệu hỏng (không phải JSON, không phải mảng, khóa lạ) → chỉ giữ phần hợp lệ hoặc []. */
+export function getAllergyProfile() {
+  return cleanAllergyProfile(read(ALLERGY_KEY, []));
+}
+
+/**
+ * Lưu hồ sơ dị ứng (bản đã làm sạch). Trả true khi ghi được, false khi localStorage ném lỗi
+ * (bộ nhớ đầy, bị chặn). Không dùng write() vì write() nuốt lỗi, giao diện cần biết để báo "chưa lưu được".
+ */
+export function setAllergyProfile(keys) {
+  try {
+    localStorage.setItem(ALLERGY_KEY, JSON.stringify(cleanAllergyProfile(keys)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---- Tủ đồ (giai đoạn 2): mỗi món có hạn sử dụng ----

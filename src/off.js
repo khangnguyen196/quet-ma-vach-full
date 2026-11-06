@@ -1,6 +1,7 @@
 // Gọi Open Food Facts và đổi dữ liệu thô sang object tiếng Việt sạch.
 
-const BASE = import.meta.env.VITE_OFF_API || "https://world.openfoodfacts.org/api/v2";
+// import.meta.env?. (có dấu ?.): chạy test bằng node (không qua Vite) thì import.meta.env không có, không bị lỗi.
+const BASE = import.meta.env?.VITE_OFF_API || "https://world.openfoodfacts.org/api/v2";
 
 // Tên và phiên bản app gửi kèm mỗi lần tra, để Open Food Facts biết lượt gọi đến từ app nào.
 // APP_VERSION khớp "version" trong package.json: đổi phiên bản thì đổi cả 2 chỗ cùng lúc.
@@ -22,6 +23,9 @@ export const ALLERGEN_VI = {
   celery: "Cần tây", mustard: "Mù tạt", "sesame-seeds": "Mè", lupin: "Đậu lupin",
   "sulphur-dioxide-and-sulphites": "Sulfite"
 };
+
+/** 14 nhóm dị ứng theo thứ tự hiển thị (ô tick trong hồ sơ, tên trong khung cảnh báo). */
+export const ALLERGEN_KEYS = Object.keys(ALLERGEN_VI);
 
 export const NOVA_VI = {
   1: "Chưa hoặc ít chế biến",
@@ -130,6 +134,41 @@ export async function getProduct(code) {
  */
 const allergenVi = (a) => (Object.hasOwn(ALLERGEN_VI, a) ? ALLERGEN_VI[a] : a);
 
+/**
+ * Khóa nhóm dị ứng (vd "milk") từ danh sách tag: chỉ nhận tag "en:<khóa>" có trong ALLERGEN_VI
+ * ("fr:lait", "en:constructor", "en:abc" không tính). Bỏ trùng, xếp theo thứ tự ALLERGEN_KEYS.
+ */
+const allergenKeysOf = (v) => {
+  const found = new Set(tags(v)
+    .filter((t) => t.startsWith("en:"))
+    .map((t) => t.slice(3))
+    .filter((k) => Object.hasOwn(ALLERGEN_VI, k)));
+  return ALLERGEN_KEYS.filter((k) => found.has(k));
+};
+
+/**
+ * Làm sạch hồ sơ dị ứng (đọc từ localStorage hoặc từ ô tick): không phải mảng → [];
+ * chỉ giữ chuỗi là khóa của ALLERGEN_VI; bỏ trùng; xếp theo thứ tự ALLERGEN_KEYS.
+ */
+export function cleanAllergyProfile(v) {
+  if (!Array.isArray(v)) return [];
+  const keep = new Set(v.filter((k) => typeof k === "string" && Object.hasOwn(ALLERGEN_VI, k)));
+  return ALLERGEN_KEYS.filter((k) => keep.has(k));
+}
+
+/**
+ * So sản phẩm (đã normalize) với hồ sơ dị ứng.
+ * danger: nhóm trong hồ sơ mà sản phẩm có (allergens_tags) → khung đỏ.
+ * traces: nhóm trong hồ sơ mà sản phẩm "có thể lẫn vết" (traces_tags), trừ nhóm đã ở danger → khung vàng.
+ * noData: Open Food Facts chưa có dữ liệu dị ứng (allergens_tags rỗng / thiếu), dù traces có hay không.
+ */
+export function matchAllergies(product, profile) {
+  const mine = new Set(cleanAllergyProfile(profile));
+  const danger = (product.allergenKeys || []).filter((k) => mine.has(k));
+  const traces = (product.traceKeys || []).filter((k) => mine.has(k) && !danger.includes(k));
+  return { danger, traces, noData: !product.hasAllergenData };
+}
+
 /** Tên đặt cho sản phẩm khi API không có tên (render.js dùng để biết không điền sẵn vào form tủ đồ). */
 export const NO_NAME = "Sản phẩm chưa có tên";
 
@@ -153,6 +192,10 @@ export function normalize(p, code) {
     ingredients: str(p.ingredients_text_vi) || str(p.ingredients_text) || str(p.ingredients_text_en),
     allergens: tags(p.allergens_tags).map(tag).map(allergenVi),
     traces: tags(p.traces_tags).map(tag).map(allergenVi),
+    // Hồ sơ dị ứng (giai đoạn 3): khóa nhóm để so với hồ sơ; hasAllergenData = allergens_tags có ít nhất 1 tag
+    allergenKeys: allergenKeysOf(p.allergens_tags),
+    traceKeys: allergenKeysOf(p.traces_tags),
+    hasAllergenData: tags(p.allergens_tags).length > 0,
     additives: tags(p.additives_tags).map((t) => tag(t).toUpperCase()),
     nutriments,
     hasNutriments: Object.values(nutriments).some((v) => v != null),
