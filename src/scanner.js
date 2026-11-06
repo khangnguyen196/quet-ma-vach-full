@@ -1,8 +1,15 @@
-// Bọc html5-qrcode: bật/tắt camera, đọc mã từ ảnh.
+// Bật/tắt camera (html5-qrcode) và đọc mã từ ảnh ("Chụp ảnh mã": zxing-wasm trước, html5-qrcode dự phòng).
 import { Html5Qrcode, Html5QrcodeSupportedFormats as F } from "html5-qrcode";
 import { errorText } from "./render.js";
+import { pickCode, scanFailureText } from "./barcode.js";
 
-// Đọc mã từ ảnh: thử lần lượt, đọc được thì dừng.
+// "Chụp ảnh mã" đọc bằng zxing-wasm trước (đọc được bao bì thật nhăn / xoay dọc mà html5-qrcode trượt).
+// zxing-wasm chỉ được tải khi chọn ảnh (import động); tải không được, ném lỗi hoặc không thấy mã thì
+// thử tiếp html5-qrcode theo SCAN_TRIES dưới đây, y như trước khi có zxing-wasm.
+// Cạnh dài ảnh đưa vào zxing-wasm (thư viện tự thử thêm bản thu nhỏ và xoay 90°/180°/270°).
+const ZXING_MAX_SIDE = 1600;
+
+// html5-qrcode đọc mã từ ảnh: thử lần lượt, đọc được thì dừng.
 // Vì sao thu nhỏ: thư viện vẽ ảnh gốc lên canvas cỡ ảnh + 200 px; ảnh 24–48 MP của điện thoại
 // vượt giới hạn canvas của iPhone (khoảng 16,7 triệu điểm) nên không đọc được. Mã vạch cần
 // vài trăm px là đủ, nên thu cạnh dài về 1600 px rồi 1000 px.
@@ -59,6 +66,33 @@ async function drawToFile(img, { w, h }, rotate) {
   }
 }
 
+/**
+ * Đọc bằng zxing-wasm. Trả mã (chuỗi) hoặc null nếu không thấy mã.
+ * Ném lỗi (name "ZxingLoadError" nếu không tải được thư viện / file wasm) để scanImage chuyển sang html5-qrcode.
+ */
+async function readWithZxing(img) {
+  const { w, h } = fitSize(img, ZXING_MAX_SIDE); // ≤ 1600 × 1600 = 2,56 triệu điểm, dưới giới hạn canvas iPhone
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  let imageData;
+  try {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw namedError("CanvasError", `Không tạo được vùng vẽ ${w}×${h} để đọc ảnh.`);
+    ctx.drawImage(img, 0, 0, w, h);
+    imageData = ctx.getImageData(0, 0, w, h);
+  } finally {
+    canvas.width = canvas.height = 0; // trả bộ nhớ canvas ngay
+  }
+  let mod;
+  try {
+    mod = await import("./zxing-reader.js");
+  } catch (e) {
+    throw namedError("ZxingLoadError", errorText(e)); // mất mạng: không tải được file JS của zxing-wasm
+  }
+  return pickCode(await mod.readCodes(imageData));
+}
+
 export function createScanner(elementId) {
   const scanner = new Html5Qrcode(elementId, {
     formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E],
@@ -94,11 +128,24 @@ export function createScanner(elementId) {
 
     /**
      * Đọc mã vạch từ 1 file ảnh (File từ input type=file).
-     * Thử theo SCAN_TRIES; hết lượt vẫn không đọc được thì ném lỗi của lần cuối, kèm số lần đã thử.
+     * zxing-wasm trước; không được thì html5-qrcode theo SCAN_TRIES. Cả 2 trượt thì ném lỗi có dòng
+     * "đã thử những gì" (scanFailureText), lỗi gốc của html5-qrcode ở e.cause.
      */
     async scanImage(file) {
       await this.stop();
       const img = await loadImage(file);
+
+      let zxing;
+      try {
+        const code = await readWithZxing(img);
+        if (code) return code;
+        zxing = { status: "notfound" };
+      } catch (e) {
+        console.warn("zxing-wasm không đọc được, chuyển sang html5-qrcode:", e);
+        const load = e?.name === "ZxingLoadError";
+        zxing = { status: load ? "load" : "error", detail: load ? e.message : errorText(e) };
+      }
+
       const seen = new Set();
       let lastError = null, count = 0;
       for (const { maxSide, rotate } of SCAN_TRIES) {
@@ -115,12 +162,11 @@ export function createScanner(elementId) {
       }
       // Gói lỗi lần cuối thành Error mới có name + message (thư viện có khi ném chuỗi thay vì Error).
       // Tên lớp lỗi của ZXing bị rút gọn khi build (ví dụ "O"); getKind() trả tên thật, ví dụ "NotFoundException".
-      const note = `đã thử ${count} lần`;
       const isError = lastError instanceof Error;
       const name = (typeof lastError?.getKind === "function" && lastError.getKind())
         || (isError && lastError.name) || "ScanError";
       const text = isError ? lastError.message : errorText(lastError);
-      const e = namedError(name, text ? `${text} (${note})` : note);
+      const e = namedError("ScanError", scanFailureText({ zxing, html5: { name, message: text, tries: count } }));
       e.cause = lastError;
       throw e;
     }

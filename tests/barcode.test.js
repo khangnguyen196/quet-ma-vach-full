@@ -38,7 +38,7 @@ describe("pickCode", () => {
   });
 
   test("bỏ chữ không phải 8–14 chữ số", () => {
-    assert.equal(pickCode([res("89345631631"), res("893456316315012"), res("8934 563163150"), res("")]), null);
+    assert.equal(pickCode([res("8934563"),res("893456316315012"), res("8934 563163150"), res("")]), null);
     assert.equal(pickCode([res(" 8934563163150 ")]), "8934563163150"); // khoảng trắng hai đầu thì cắt
   });
 

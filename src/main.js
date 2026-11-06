@@ -115,7 +115,7 @@ fileInput.addEventListener("change", async (ev) => {
   } catch (e) {
     console.error(e);
     placeholder();
-    setMsg("Không đọc được mã vạch trong ảnh. Chụp gần hơn, đủ sáng, mã nằm ngang, hoặc nhập số.", true, errorText(e));
+    setMsg("Không đọc được mã vạch trong ảnh. Giữ máy cách mã 15–20 cm (gần quá iPhone không lấy nét), để mã nằm ngang và chiếm khoảng nửa khung, tránh lóa đèn. Hoặc bấm “Bật camera”, hoặc nhập số bên dưới.", true, errorText(e));
   } finally {
     setBusy(false); // mở lại nút dù đọc được hay lỗi
   }

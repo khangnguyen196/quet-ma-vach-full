@@ -10,7 +10,8 @@
     "test": "node --test \"tests/*.test.js\""
   },
   "dependencies": {
-    "html5-qrcode": "^2.3.8"
+    "html5-qrcode": "^2.3.8",
+    "zxing-wasm": "^3.1.6"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^2.0.0",
