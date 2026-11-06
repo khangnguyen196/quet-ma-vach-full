@@ -27,6 +27,15 @@ describe("pickCode", () => {
     assert.equal(pickCode([res("04252614", "UPCE")]), "04252614");
   });
 
+  test("mã UPC-A: zxing-wasm trả 13 số có số 0 đầu → đổi về 12 số như html5-qrcode (camera, cách đọc ảnh cũ)", () => {
+    // zxing-wasm 3.1.6 đọc mã UPC-A 036000291452 ra "0036000291452" (định dạng EAN13, hoặc UPCA nếu chỉ bật UPCA).
+    assert.equal(pickCode([res("0036000291452", "EAN13")]), "036000291452");
+    assert.equal(pickCode([res("0036000291452", "UPCA")]), "036000291452");
+    // EAN-13 không bắt đầu bằng 0 giữ nguyên; EAN-8 bắt đầu bằng 0 giữ nguyên
+    assert.equal(pickCode([res("8934563163150", "EAN13")]), "8934563163150");
+    assert.equal(pickCode([res("04210009", "EAN8")]), "04210009");
+  });
+
   test("bỏ kết quả không hợp lệ (isValid false), lấy kết quả hợp lệ sau nó", () => {
     assert.equal(pickCode([res("8936079121823", "EAN13", false), res("8936079121822")]), "8936079121822");
     assert.equal(pickCode([res("8936079121823", "EAN13", false)]), null);
