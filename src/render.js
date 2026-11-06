@@ -1,5 +1,5 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
-import { NOVA_VI, NUTRIENT_ROWS, NO_NAME } from "./off.js";
+import { NOVA_VI, NUTRIENT_ROWS, NO_NAME, ALLERGEN_VI, ALLERGEN_KEYS } from "./off.js";
 import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 
 // Giới hạn năm của ô chọn ngày, khớp với kiểm tra ở storage.js (checkDateQty vẫn kiểm lại khi lưu).
@@ -23,6 +23,64 @@ export function errorText(e) {
   // Object thường chỉ có message (không có name), ví dụ { message: "x" }: lấy message, tránh "[object Object]".
   if (typeof e === "object" && typeof e.message === "string" && e.message) return e.message;
   return String(e);
+}
+
+// ---- Hồ sơ dị ứng (giai đoạn 3) ----
+// Không bao giờ ghi sản phẩm là "an toàn": dữ liệu Open Food Facts do cộng đồng nhập, có thể thiếu.
+
+/** Câu khi allergens_tags rỗng / thiếu (hiện cả ở khung đầu kết quả và ở mục "Chất gây dị ứng"). */
+export const ALLERGY_NO_DATA = "Open Food Facts chưa có dữ liệu dị ứng cho sản phẩm này, hãy đọc nhãn trên bao bì.";
+
+/** Câu khi có dữ liệu dị ứng mà không trùng nhóm nào trong hồ sơ (không khung đỏ, không khung vàng). */
+export const ALLERGY_NEUTRAL = "Dữ liệu Open Food Facts không ghi nhóm nào trong hồ sơ của bạn. "
+  + "Dữ liệu có thể thiếu hoặc ghi khác tên, hãy đọc nhãn trên bao bì.";
+
+/** id của khung cảnh báo đầu kết quả: main.js tìm khung này để vẽ lại khi đổi hồ sơ. */
+export const ALLERGY_ALERT_ID = "allergyAlert";
+
+/** Tên tiếng Việt của danh sách khóa nhóm, nối bằng ", " (đã escape). */
+const allergenNames = (keys) => keys.map((k) => esc(ALLERGEN_VI[k])).join(", ");
+
+/**
+ * 14 ô tick của khung "Hồ sơ dị ứng" (thứ tự ALLERGEN_KEYS). selected: các khóa đang chọn.
+ * Mỗi ô nằm trong <label> để bấm vào chữ cũng tick được.
+ */
+export function renderAllergyOptions(selected = []) {
+  const on = new Set(selected);
+  return ALLERGEN_KEYS.map((k) =>
+    `<label class="allergy-option"><input type="checkbox" name="allergy" value="${esc(k)}"${on.has(k) ? " checked" : ""}> ${esc(ALLERGEN_VI[k])}</label>`
+  ).join("");
+}
+
+/**
+ * Phần bên trong khung cảnh báo đầu kết quả, từ kết quả matchAllergies() của off.js.
+ * profileLength = số nhóm trong hồ sơ; 0 nhóm thì trả "" (không hiện gì).
+ * - danger có → khung đỏ (role="alert");
+ * - traces có → khung vàng "Có thể lẫn vết";
+ * - noData → câu thiếu dữ liệu (có thể đi cùng khung vàng);
+ * - có dữ liệu, không đỏ, không vàng → dòng trung tính.
+ */
+export function renderAllergyAlert(match, profileLength) {
+  if (!profileLength) return "";
+  const { danger = [], traces = [], noData = false } = match || {};
+  let html = "";
+  if (danger.length) {
+    html += `<p class="allergy-alert danger" role="alert"><strong>Cảnh báo dị ứng:</strong> có ${allergenNames(danger)} (nhóm trong hồ sơ của bạn)</p>`;
+  }
+  if (traces.length) {
+    html += `<p class="allergy-alert traces"><strong>Có thể lẫn vết:</strong> ${allergenNames(traces)} (nhóm trong hồ sơ của bạn)</p>`;
+  }
+  if (noData) {
+    html += `<p class="allergy-note">${esc(ALLERGY_NO_DATA)}</p>`;
+  } else if (!danger.length && !traces.length) {
+    html += `<p class="allergy-note">${esc(ALLERGY_NEUTRAL)}</p>`;
+  }
+  return html;
+}
+
+/** Khung có id riêng chứa renderAllergyAlert(), đặt ngay đầu kết quả (trước <article>). */
+export function renderAllergyBox(match, profileLength) {
+  return `<div id="${ALLERGY_ALERT_ID}" class="allergy-box">${renderAllergyAlert(match, profileLength)}</div>`;
 }
 
 const fmt = (v) => Number(v).toLocaleString("vi-VN", { maximumFractionDigits: 1 });
@@ -85,7 +143,7 @@ export function renderProduct(p) {
   ${!p.hasNutriments ? '<p class="src">Sản phẩm này chưa được ai nhập bảng dinh dưỡng.</p>' : ""}
   <section class="block"><h3>Thành phần</h3>${p.ingredients ? `<p>${esc(p.ingredients)}</p>` : '<p class="empty">Chưa có dữ liệu thành phần.</p>'}</section>
   <section class="block"><h3>Chất gây dị ứng</h3>
-    ${p.allergens.length ? `<div class="chips">${chips(p.allergens)}</div>` : '<p class="empty">Không ghi nhận chất gây dị ứng (hoặc chưa có dữ liệu).</p>'}
+    ${p.hasAllergenData ? `<div class="chips">${chips(p.allergens)}</div>` : `<p class="empty">${esc(ALLERGY_NO_DATA)}</p>`}
     ${p.traces.length ? `<p class="src">Có thể lẫn vết: ${esc(p.traces.join(", "))}</p>` : ""}
   </section>
   <section class="block"><h3>Phụ gia${p.additives.length ? ` (${p.additives.length})` : ""}</h3>

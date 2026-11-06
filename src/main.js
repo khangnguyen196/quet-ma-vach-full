@@ -1,8 +1,14 @@
 // Nối các phần lại: sự kiện nút bấm → scanner / API → render.
 import { createScanner } from "./scanner.js";
-import { getProduct, normalize } from "./off.js";
-import { renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc } from "./render.js";
-import { getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry } from "./storage.js";
+import { getProduct, normalize, cleanAllergyProfile, matchAllergies } from "./off.js";
+import {
+  renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
+  renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID
+} from "./render.js";
+import {
+  getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
+  getAllergyProfile, setAllergyProfile
+} from "./storage.js";
 
 const $ = (s) => document.querySelector(s);
 const reader = $("#reader"), btnCam = $("#btnCam"), fileInput = $("#file");
@@ -11,6 +17,8 @@ const result = $("#result"), historyList = $("#historyList");
 const screenLookup = $("#screenLookup"), screenPantry = $("#screenPantry");
 const btnPantry = $("#btnPantry"), btnBack = $("#btnBack"), pantryCount = $("#pantryCount");
 const pantryTitle = $("#pantryTitle"), pantryList = $("#pantryList"), pantryMsg = $("#pantryMsg");
+const allergyProfileEl = $("#allergyProfile"), allergyOptions = $("#allergyOptions");
+const allergyCount = $("#allergyCount"), allergyMsg = $("#allergyMsg");
 
 if (import.meta.env.VITE_APP_NAME) {
   $("#appName").textContent = import.meta.env.VITE_APP_NAME;
@@ -109,6 +117,38 @@ document.querySelectorAll(".try button[data-code]").forEach((b) =>
   b.addEventListener("click", () => lookup(b.dataset.code))
 );
 
+// ---- Hồ sơ dị ứng ----
+// Lựa chọn đang dùng để cảnh báo. Lưu lỗi thì vẫn giữ ở đây (cảnh báo vẫn chạy tới khi tải lại trang).
+let allergyProfile = getAllergyProfile();
+// Sản phẩm (đã normalize) đang hiện trong #result; null khi đang tra, không tìm thấy hoặc lỗi.
+let shownProduct = null;
+
+/** Vẽ lại CHỈ khung cảnh báo đầu kết quả (không vẽ lại cả kết quả: giữ chữ đang gõ trong form tủ đồ). */
+function redrawAllergyAlert() {
+  const box = document.getElementById(ALLERGY_ALERT_ID);
+  if (!shownProduct || !box) return;
+  box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length);
+}
+
+allergyOptions.innerHTML = renderAllergyOptions(allergyProfile);
+allergyCount.textContent = String(allergyProfile.length);
+
+// Ủy quyền sự kiện: 1 listener "change" trên cả khung bắt mọi ô tick. Tick là lưu ngay.
+allergyProfileEl.addEventListener("change", (ev) => {
+  if (!ev.target.matches('input[name="allergy"]')) return;
+  const picked = [...allergyOptions.querySelectorAll('input[name="allergy"]:checked')].map((i) => i.value);
+  allergyProfile = cleanAllergyProfile(picked);
+  const n = allergyProfile.length;
+  allergyCount.textContent = String(n);
+  if (setAllergyProfile(allergyProfile)) {
+    say(allergyMsg, `Đã lưu hồ sơ (${n} nhóm)`);
+  } else {
+    say(allergyMsg, "Chưa lưu được hồ sơ (bộ nhớ trình duyệt đầy hoặc bị chặn). "
+      + "Cảnh báo vẫn theo lựa chọn này cho tới khi tải lại trang; tải lại trang sẽ mất lựa chọn.", true);
+  }
+  redrawAllergyAlert();
+});
+
 // ---- Tra cứu ----
 let current = 0;
 async function lookup(raw) {
@@ -117,6 +157,7 @@ async function lookup(raw) {
   const id = ++current;
   codeInput.value = code;
   setMsg(`Đang tra cứu mã ${code}…`);
+  shownProduct = null; // kết quả cũ bị xóa ngay dưới đây: đổi hồ sơ lúc này không vẽ gì
   result.innerHTML = "";
   result.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
@@ -141,10 +182,14 @@ async function lookup(raw) {
     // Không tìm thấy vẫn cho thêm vào tủ đồ, tên để trống bắt buộc nhập (lỗi mạng / máy chủ thì không có form)
     if (!data) { result.innerHTML = renderNotFound(code) + renderAddForm({ code }); return; }
     product = normalize(data, code);
-    result.innerHTML = renderProduct(product) + renderAddForm(product);
+    // Khung cảnh báo dị ứng ngay đầu kết quả (trước <article>); hồ sơ 0 nhóm thì khung rỗng.
+    result.innerHTML = renderAllergyBox(matchAllergies(product, allergyProfile), allergyProfile.length)
+      + renderProduct(product) + renderAddForm(product);
+    shownProduct = product;
   } catch (e) {
     console.error(e);
     if (id !== current) return;
+    shownProduct = null;
     result.innerHTML = renderError(code, "display", e);
     return;
   }

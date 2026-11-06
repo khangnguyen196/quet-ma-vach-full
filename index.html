@@ -38,6 +38,17 @@
     <p id="msg" class="msg" role="status" aria-live="polite"></p>
   </section>
 
+  <!-- Hồ sơ dị ứng (giai đoạn 3): đóng sẵn, 14 ô tick do main.js vẽ từ ALLERGEN_KEYS -->
+  <details id="allergyProfile" class="allergy-profile">
+    <summary>Hồ sơ dị ứng (<span id="allergyCount">0</span> nhóm)</summary>
+    <p class="allergy-help">Chọn nhóm bạn bị dị ứng. App chỉ cảnh báo theo dữ liệu Open Food Facts (có thể thiếu hoặc sai), luôn đọc nhãn trên bao bì.</p>
+    <fieldset class="allergy-options">
+      <legend class="visually-hidden">Nhóm dị ứng của bạn</legend>
+      <div id="allergyOptions" class="allergy-grid"></div>
+    </fieldset>
+    <p id="allergyMsg" class="msg" role="status" aria-live="polite"></p>
+  </details>
+
   <section id="result" aria-live="polite"></section>
 
   <section id="history" aria-label="Đã quét gần đây">

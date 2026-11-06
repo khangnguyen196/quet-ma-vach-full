@@ -300,3 +300,32 @@ form.pantry-edit { display: grid; gap: 10px; margin-top: 10px; }
 .pantry-item .actions { margin-top: 8px; }
 .pantry-item .btn { min-height: 44px; background: transparent; }
 .pantry-item .btn.primary { background: var(--ink); }
+
+/* Hồ sơ dị ứng (giai đoạn 3): khung chọn nhóm ở màn Tra cứu */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.allergy-profile { margin-top: 20px; border: 1px solid var(--rule); border-radius: 6px; padding: 0 14px; }
+.allergy-profile summary {
+  min-height: 46px; display: flex; align-items: center; cursor: pointer;
+  font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.allergy-profile[open] { padding-bottom: 12px; }
+.allergy-help { font-size: 14px; color: var(--ink-2); }
+.allergy-options { border: 0; margin: 10px 0 0; padding: 0; min-width: 0; }
+.allergy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 12px; }
+.allergy-option { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 15px; cursor: pointer; }
+.allergy-option input { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; accent-color: var(--ink); }
+
+/* Khung cảnh báo dị ứng ngay đầu kết quả: đỏ = có nhóm trong hồ sơ, vàng = có thể lẫn vết.
+   Dùng lại màu đỏ / vàng của tủ đồ (đã có bản tối ở :root). Luôn có chữ, không chỉ dựa vào màu. */
+.allergy-box:empty { display: none; }
+.allergy-box { display: grid; gap: 8px; margin-bottom: 16px; }
+.allergy-alert {
+  padding: 10px 12px; border: 1px solid; border-left-width: 6px; border-radius: 6px;
+  font-size: 16px; font-weight: 500; overflow-wrap: anywhere;
+}
+.allergy-alert.danger { background: var(--expired-bg); color: var(--expired-ink); border-color: var(--expired-line); }
+.allergy-alert.traces { background: var(--soon-bg); color: var(--soon-ink); border-color: var(--soon-line); }
+.allergy-note { font-size: 14px; color: var(--ink-2); }
