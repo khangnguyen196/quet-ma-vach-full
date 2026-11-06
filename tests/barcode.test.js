@@ -36,6 +36,42 @@ describe("pickCode", () => {
     assert.equal(pickCode([res("04210009", "EAN8")]), "04210009");
   });
 
+  test("mã UPC-E: zxing-wasm trả 13 số (dạng UPC-A mở rộng) → lấy 8 số in trên bao bì như html5-qrcode (sua-cuoi vòng 2)", () => {
+    // Đo thật bằng zxing-wasm 3.1.6 trên ảnh UPC-E tổng hợp: text "0012345000065", format "UPCE",
+    // extra '{"UPCE":"01234565"}'; html5-qrcode đọc cùng ảnh ra "01234565".
+    const upce = (text, extra) => ({ ...res(text, "UPCE"), extra });
+    assert.equal(pickCode([upce("0012345000065", '{"UPCE":"01234565"}')]), "01234565");
+    assert.equal(pickCode([upce("0042100005264", '{"UPCE":"04252614"}')]), "04252614");
+    assert.equal(pickCode([upce("0123456000070", '{"UPCE":"12345670"}')]), "12345670");
+    // extra là object (không phải chuỗi JSON) cũng nhận
+    assert.equal(pickCode([upce("0012345000065", { UPCE: "01234565" })]), "01234565");
+    // mã in trên bao bì không theo dạng chuẩn: tin extra (mã in thật), không tự nén lại
+    assert.equal(pickCode([upce("0012000000003", '{"UPCE":"01200033"}')]), "01200033");
+  });
+
+  test("mã UPC-E không có / hỏng extra → tự nén 13 số về 8 số theo luật UPC-E chuẩn", () => {
+    const upce = (text, extra) => ({ ...res(text, "UPCE"), extra });
+    for (const [text, want] of [
+      ["0012345000065", "01234565"], // số thứ 6 = 5–9
+      ["0042100005264", "04252614"], // 0–2
+      ["0012000003455", "01234505"], // 0–2
+      ["0001000002346", "00123406"], // 0–2, hệ số 0
+      ["0012300000451", "01234531"], // 3
+      ["0012340000053", "01234543"], // 4
+      ["0198760000054", "19876544"], // 4, hệ số 1
+      ["0123456000070", "12345670"], // 5–9, hệ số 1
+      ["0000400000099", "00040939"] // 3 (dạng chuẩn của mã này)
+    ]) {
+      for (const extra of [undefined, "", "không phải JSON", '{"UPCE":"123"}', "{}", null]) {
+        assert.equal(pickCode([upce(text, extra)]), want, `${text} extra=${JSON.stringify(extra)}`);
+      }
+    }
+  });
+
+  test("mã UPC-E 13 số không nén được (không phải dạng mở rộng của UPC-E) → 12 số UPC-A như mã UPC-A", () => {
+    assert.equal(pickCode([{ ...res("0036000291452", "UPCE") }]), "036000291452");
+  });
+
   test("bỏ kết quả không hợp lệ (isValid false), lấy kết quả hợp lệ sau nó", () => {
     assert.equal(pickCode([res("8936079121823", "EAN13", false), res("8936079121822")]), "8936079121822");
     assert.equal(pickCode([res("8936079121823", "EAN13", false)]), null);
