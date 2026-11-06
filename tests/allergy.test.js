@@ -22,13 +22,13 @@ function assertNoForbidden(html, where) {
 const raw = (extra = {}) => ({ code: "123", product_name: "Thử", ...extra });
 
 describe("normalize: allergenKeys / traceKeys / hasAllergenData", () => {
-  test("chỉ nhận tag 'en:' có trong 14 nhóm", () => {
+  test("nhận khóa giống chip: bỏ tiền tố 2–3 chữ, hoa/thường, chỉ khóa có trong 14 nhóm", () => {
     const p = normalize(raw({
-      // "fr:gluten": khóa có thật nhưng không phải "en:" → không tính
+      // "fr:gluten": bỏ tiền tố ra "gluten" là khóa có thật → tính (giống chip; sua-cuoi vòng 4)
       allergens_tags: ["en:milk", "fr:lait", "fr:gluten", "en:constructor", "en:abc", "en:soybeans"],
       traces_tags: ["en:peanuts", "fr:arachides", "en:toString"]
     }), "123");
-    assert.deepEqual(p.allergenKeys, ["milk", "soybeans"]);
+    assert.deepEqual(p.allergenKeys, ["gluten", "milk", "soybeans"]);
     assert.deepEqual(p.traceKeys, ["peanuts"]);
     assert.equal(p.hasAllergenData, true);
   });
@@ -358,5 +358,42 @@ describe("tag(): bỏ tiền tố ngôn ngữ giống tags() (2–3 chữ, khôn
     const p = normalize(raw({ allergens_tags: ["fil:milk"], additives_tags: ["EN:e330"] }), "123");
     assert.deepEqual(p.allergens, [ALLERGEN_VI.milk]);
     assert.deepEqual(p.additives, ["E330"]);
+  });
+});
+
+describe("khung dị ứng nhận cùng khóa với chip (sua-cuoi vòng 4)", () => {
+  const alertFor = (p, profile) => renderAllergyAlert(matchAllergies(p, profile), cleanAllergyProfile(profile).length);
+
+  test("tag viết hoa 'EN:milk', 'En:Gluten' → allergenKeys / traceKeys như chữ thường", () => {
+    const p = normalize(raw({ allergens_tags: ["EN:milk", "En:Gluten"], traces_tags: ["EN:peanuts"] }), "123");
+    assert.deepEqual(p.allergenKeys, ["gluten", "milk"]);
+    assert.deepEqual(p.traceKeys, ["peanuts"]);
+  });
+
+  test("hồ sơ Sữa + 'EN:milk' → khung đỏ, không câu trung tính cạnh chip 'Sữa'", () => {
+    const p = normalize(raw({ allergens_tags: ["EN:milk"] }), "123");
+    const m = matchAllergies(p, ["milk"]);
+    assert.deepEqual(m.danger, ["milk"]);
+    const html = alertFor(p, ["milk"]);
+    assert.match(html, /class="allergy-alert danger" role="alert"/);
+    assert.ok(html.includes(ALLERGEN_VI.milk), html);
+    assert.ok(!html.includes(ALLERGY_NEUTRAL), html);
+  });
+
+  test("tag lạ vẫn không tính: 'en:constructor', 'EN:toString', 'fr:lait', 'en:abc', 'fr:arachides'", () => {
+    const bad = ["en:constructor", "EN:toString", "fr:lait", "en:abc", "fr:arachides"];
+    const p = normalize(raw({ allergens_tags: bad, traces_tags: bad }), "123");
+    assert.deepEqual(p.allergenKeys, []);
+    assert.deepEqual(p.traceKeys, []);
+  });
+
+  test("hồ sơ Đậu phộng + traces 'EN:peanuts' → khung vàng", () => {
+    const p = normalize(raw({ allergens_tags: ["en:milk"], traces_tags: ["EN:peanuts"] }), "123");
+    const m = matchAllergies(p, ["peanuts"]);
+    assert.deepEqual(m.traces, ["peanuts"]);
+    assert.deepEqual(m.danger, []);
+    const html = alertFor(p, ["peanuts"]);
+    assert.ok(html.includes("<strong>Có thể lẫn vết:</strong> Đậu phộng (nhóm trong hồ sơ của bạn)"), html);
+    assert.ok(!html.includes(ALLERGY_NEUTRAL), html);
   });
 });
