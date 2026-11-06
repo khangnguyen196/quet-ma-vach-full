@@ -18,8 +18,13 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `src/off.js` – gọi API và hàm `normalize()` đổi dữ liệu thô sang object tiếng Việt sạch. Mọi mapping (tên dị ứng, NOVA…) nằm ở đây.
 - `src/render.js` – hàm trả về chuỗi HTML từ object đã normalize. Luôn escape dữ liệu từ API bằng `esc()`.
 - `src/storage.js` – đọc/ghi localStorage, bọc try/catch.
-- `src/pantry.js` – tính số ngày còn hạn, trạng thái, sắp xếp, định dạng ngày (không DOM, không localStorage).
+- `src/pantry.js` – tính số ngày còn hạn, trạng thái, sắp xếp, định dạng ngày (không DOM, không localStorage); `isValidItem` / `cleanItem` / `NAME_MAX` cũng ở đây.
+- `src/compare.js` – so sánh 2 sản phẩm: 6 chỉ số trên 100 g / 100 ml (không DOM, không tự tính).
+- `src/backup.js` – xuất / nhập tủ đồ bằng file JSON: tạo file, kiểm định dạng, gộp (không DOM).
+- `src/pwa.js` – đăng ký service worker (chỉ ở bản build) + thanh "Đã có bản mới".
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
+- `public/` – `manifest.webmanifest` + `icons/` (PNG), Vite chép nguyên vào `dist/`.
+- `tools/` – `make-icons.mjs` (vẽ icon, chạy một lần: `node tools/make-icons.mjs`), `sw-build.mjs` (ghép mã sw.js). `sw.js` sinh lúc build bằng plugin trong `vite.config.js`; không sửa tay trong `dist/`.
 
 ## Quy ước
 - Giao diện, thông báo lỗi, comment: **tiếng Việt**. Tên biến, hàm, file: tiếng Anh.
@@ -29,6 +34,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - Không commit `.env`. Chỉ sửa `.env.example` khi thêm biến mới.
 - Không đổi thư viện quét hay cách gọi API nếu chưa hỏi.
 - Giữ số dependency tối thiểu; cài thêm gói thì nói lý do.
+- Service worker không bao giờ cache request khác tên miền (Open Food Facts, Google Fonts): chỉ giữ giao diện của app.
 
 ## Test nhanh
 - Mã có đủ dữ liệu: `8934563163150`. Mã thiếu dữ liệu: `8934563651138`. Mã không tồn tại: `0000000000000`. Mã có dữ liệu dị ứng: `8993175532457` (allergens_tags `en:gluten, en:milk, en:soybeans`; traces_tags `en:eggs, en:milk, en:nuts, en:peanuts`, kiểm 06/11/2026).
