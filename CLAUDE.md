@@ -7,14 +7,17 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 
 ## Stack
 - HTML + CSS + JavaScript thuần (ES modules), bundler Vite. **Không** đưa React/Vue/TypeScript vào trừ khi được yêu cầu.
-- `html5-qrcode` để quét; `tesseract.js` chỉ cài khi tới giai đoạn 3.
+- `html5-qrcode` để quét bằng camera ("Bật camera"); `tesseract.js` chỉ cài khi tới giai đoạn 3.
+- `zxing-wasm` chỉ cho nút "Chụp ảnh mã" (chủ dự án đồng ý 06/11/2026: bao bì thật nhăn / xoay dọc thì html5-qrcode đọc ảnh trượt). File wasm tự host trong `dist/assets` (không tải từ CDN), chỉ tải khi người dùng chọn ảnh, không vào danh sách lưu sẵn (precache) của service worker; không tải được thì quay về html5-qrcode.
 - Dữ liệu: Open Food Facts API v2 (không cần key). Lưu trữ: localStorage.
 - Lệnh: `npm run dev` (dev có HTTPS), `npm run build`, `npm run preview`, `npm test` (test node của app ở `tests/`).
 - Đưa lên web: lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions (workflow "Deploy GitHub Pages", `.github/workflows/deploy.yml`) tự chạy `npm ci` + `npm run build` rồi deploy `dist/` lên GitHub Pages. Không cần build hay upload tay.
 
 ## Cấu trúc
 - `src/main.js` – nối sự kiện, điều phối. Không chứa logic gọi API hay HTML dài.
-- `src/scanner.js` – mọi thứ về camera / đọc ảnh.
+- `src/scanner.js` – mọi thứ về camera / đọc ảnh (camera: html5-qrcode; ảnh: zxing-wasm trước, html5-qrcode dự phòng).
+- `src/zxing-reader.js` – bọc zxing-wasm (chỉ import động khi chọn ảnh); wasm lấy từ file của app, không từ CDN.
+- `src/barcode.js` – chọn mã từ kết quả zxing-wasm, ghép dòng lỗi "đã thử những gì" (thuần, không DOM, không import thư viện).
 - `src/off.js` – gọi API và hàm `normalize()` đổi dữ liệu thô sang object tiếng Việt sạch. Mọi mapping (tên dị ứng, NOVA…) nằm ở đây.
 - `src/render.js` – hàm trả về chuỗi HTML từ object đã normalize. Luôn escape dữ liệu từ API bằng `esc()`.
 - `src/storage.js` – đọc/ghi localStorage, bọc try/catch.
