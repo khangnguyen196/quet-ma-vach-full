@@ -341,3 +341,22 @@ describe("isAllergyProfileKey: sự kiện storage của tab khác có đụng h
     for (const k of ["qmv-pantry", "qmv-history", "qmv-pantry-backup", "qmv-allergy-profile-x", "", undefined]) assert.equal(isKey(k), false, String(k));
   });
 });
+
+describe("tag(): bỏ tiền tố ngôn ngữ giống tags() (2–3 chữ, không phân biệt hoa thường; sua-cuoi vòng 3)", () => {
+  test("allergens_tags / traces_tags 'EN:milk' → chip giống 'en:milk' (Sữa), không hiện 'EN:milk'", () => {
+    const upper = normalize(raw({ allergens_tags: ["EN:milk"], traces_tags: ["EN:peanuts"] }), "123");
+    const lower = normalize(raw({ allergens_tags: ["en:milk"], traces_tags: ["en:peanuts"] }), "123");
+    assert.deepEqual(upper.allergens, lower.allergens);
+    assert.deepEqual(upper.traces, lower.traces);
+    assert.deepEqual(upper.allergens, [ALLERGEN_VI.milk]);
+    const html = renderProduct(upper);
+    assert.ok(html.includes(ALLERGEN_VI.milk), "chip phải hiện tên tiếng Việt");
+    assert.ok(!html.includes("EN:milk") && !html.includes("EN:peanuts"), "không hiện tiền tố EN:");
+  });
+
+  test("tiền tố 3 chữ và phụ gia viết hoa cũng bỏ tiền tố", () => {
+    const p = normalize(raw({ allergens_tags: ["fil:milk"], additives_tags: ["EN:e330"] }), "123");
+    assert.deepEqual(p.allergens, [ALLERGEN_VI.milk]);
+    assert.deepEqual(p.additives, ["E330"]);
+  });
+});
