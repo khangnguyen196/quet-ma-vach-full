@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import fs from "node:fs";
 import path from "node:path";
-import { buildServiceWorker, versionOf } from "./tools/sw-build.mjs";
+import { buildServiceWorker, precacheList, versionOf } from "./tools/sw-build.mjs";
 
 /** Mọi file trong thư mục public/ (đường dẫn dạng "icons/icon-192.png"), đọc thẳng từ đĩa. */
 function listPublicFiles(dir, prefix = "") {
@@ -16,8 +16,9 @@ function listPublicFiles(dir, prefix = "") {
 
 /**
  * Plugin nhỏ (chỉ chạy khi build): sinh dist/sw.js giữ giao diện app để mở nhanh và mở được khi mất mạng.
- * Danh sách file = file của bản build (index.html, assets/…) + file trong public/ (manifest, icons).
- * Mã phiên bản tính theo nội dung các file đó: deploy bản mới là sw.js đổi, trình duyệt cài bản mới.
+ * Danh sách file = file của bản build (index.html, assets/…) + file trong public/ (manifest, icons), trừ file .wasm
+ * (wasm của zxing-wasm chỉ tải khi chọn ảnh, xem precacheList trong tools/sw-build.mjs).
+ * Mã phiên bản tính theo nội dung mọi file (kể cả .wasm): deploy bản mới là sw.js đổi, trình duyệt cài bản mới.
  */
 function serviceWorkerPlugin() {
   let publicDir = "";
@@ -32,7 +33,7 @@ function serviceWorkerPlugin() {
         .map((f) => ({ name: f.fileName, content: f.type === "chunk" ? f.code : f.source }));
       const pub = listPublicFiles(publicDir).filter((f) => f.name !== "sw.js");
       const all = [...built, ...pub];
-      const files = ["./", ...all.map((f) => "./" + f.name).sort()];
+      const files = precacheList(all.map((f) => f.name));
       const source = buildServiceWorker({ version: versionOf(all), files });
       this.emitFile({ type: "asset", fileName: "sw.js", source });
     }

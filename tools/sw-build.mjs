@@ -42,6 +42,16 @@ export function versionOf(files) {
 }
 
 /**
+ * Danh sách file lưu sẵn (PRECACHE) của sw.js từ tên file của bản build + public/ (vd "assets/index-abc.js").
+ * Trả "./" đầu tiên rồi "./<tên>" sắp theo tên. Bỏ mọi file .wasm: wasm của zxing-wasm (~0,9 MB) chỉ tải khi
+ * người dùng chọn ảnh ("Chụp ảnh mã"), không tải sẵn lúc cài; mất mạng thì app đọc ảnh bằng html5-qrcode.
+ */
+export function precacheList(names) {
+  const kept = names.filter((name) => !name.toLowerCase().endsWith(".wasm"));
+  return ["./", ...kept.map((name) => "./" + name).sort()];
+}
+
+/**
  * Trả chuỗi mã sw.js.
  * version: mã phiên bản (versionOf); files: đường dẫn tương đối theo phạm vi ("./", "./index.html", "./assets/…").
  */
