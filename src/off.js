@@ -205,13 +205,14 @@ export function getProduct(code) {
 const allergenVi = (a) => (Object.hasOwn(ALLERGEN_VI, a) ? ALLERGEN_VI[a] : a);
 
 /**
- * Khóa nhóm dị ứng (vd "milk") từ danh sách tag: chỉ nhận tag "en:<khóa>" có trong ALLERGEN_VI
- * ("fr:lait", "en:constructor", "en:abc" không tính). Bỏ trùng, xếp theo thứ tự ALLERGEN_KEYS.
+ * Khóa nhóm dị ứng (vd "milk") từ danh sách tag, nhận giống chip: bỏ tiền tố ngôn ngữ 2–3 chữ (hoa / thường,
+ * "en:milk", "EN:milk" đều ra "milk"), đổi chữ thường, chỉ giữ khóa có trong ALLERGEN_VI
+ * ("fr:lait", "en:constructor", "en:abc" không tính). Tag tiếng khác trùng tên khóa tiếng Anh (vd "de:milk")
+ * cũng tính: có thể báo thừa, nhưng là chiều an toàn. Bỏ trùng, xếp theo thứ tự ALLERGEN_KEYS.
  */
 const allergenKeysOf = (v) => {
   const found = new Set(tags(v)
-    .filter((t) => t.startsWith("en:"))
-    .map((t) => t.slice(3))
+    .map((t) => tag(t).toLowerCase())
     .filter((k) => Object.hasOwn(ALLERGEN_VI, k)));
   return ALLERGEN_KEYS.filter((k) => found.has(k));
 };
