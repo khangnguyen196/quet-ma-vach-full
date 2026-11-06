@@ -206,7 +206,8 @@ describe("renderAllergyAlert / renderProduct", () => {
   });
 
   test("không bao giờ có 'an toàn' / 'không có chất gây dị ứng' (mọi tổ hợp)", () => {
-    const tagSets = [undefined, [], ["en:milk"], ["en:gluten"], ["fr:lait"], ["en:milk", "en:peanuts"]];
+    // [""], ["  "], ["", "en:milk"]: tag rỗng (sua-cuoi, gd3-a (1)) cũng không bao giờ ra chữ "an toàn"
+    const tagSets = [undefined, [], ["en:milk"], ["en:gluten"], ["fr:lait"], ["en:milk", "en:peanuts"], [""], ["  "], ["", "en:milk"]];
     const profiles = [[], ["milk"], ["peanuts"], ["gluten", "milk", "peanuts"], [...ALLERGEN_KEYS]];
     let n = 0;
     for (const a of tagSets) for (const t of tagSets) {
