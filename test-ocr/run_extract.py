@@ -127,25 +127,48 @@ def gram_max(v):
 #       chỉ nhận khi sau "sat" có >= 3 chữ ("saturatec 496  fat"); "unsaturated" vẫn bỏ;
 #     - "chất béo không bão hòa" bỏ trọn (cả "chat beo khong");
 #     - số và đơn vị không vượt qua dòng mới.
+#     Vòng 3 (review vòng 2): - bảng đọc theo cột có nhãn béo tổng (total fat, tổng chất béo, chất béo, fat, lipid)
+#       đứng liền nhãn bão hòa / chuyển hóa, không có số giữa ("Total Fat Saturated Fat 10g 3g", "Chất béo Chất béo
+#       bão hòa 10g 3g", kể cả có "(g)" sau nhãn): GIỮ nhãn béo tổng, chỉ bỏ các nhãn bão hòa / chuyển hóa, không bỏ
+#       số nào. Nhãn VI đứng sau phải có phần đầu "chat b.." của riêng nó (nếu không thì "Chất béo bão hòa 2 g" bị
+#       hiểu là "chat beo" + "bao hoa" và ra 2). Chỉ coi là cột khi ngay sau các nhãn có >= 2 số liền nhau (số thứ
+#       hai không kèm %): "Chất béo/ Fat Chất béo bão hòa/ Saturated fat 2 g" là bảng theo dòng mất số béo tổng,
+#       vẫn bỏ "2 g" như cũ;
+#     - giữa 2 nhãn liền nhau (NEAR) cho thêm "(g)" / "(mg)";
+#     - "Chất béo trans" (không có chữ fat) chưa là nhãn; ca cột VI có "trans" ("Chất béo Chất béo bão hòa Chất béo
+#       trans 10g 3g 0g") qua được nhờ SAT_GAP dừng ở "chat b", không nhờ luật cột.
 LB_VI_HEAD = r"(?:chat ?[bh][a-z]{0,2} ?(?:khong ?)?)?"       # "chat beo ", "chatheo", "chat beo khong "
+LB_VI_HEAD_STRICT = r"chat ?[bh][a-z]{0,2} ?(?:khong ?)?"      # như trên nhưng bắt buộc có "chat b.."
 LB_VI_TAIL = r" ?h[a-z]{1,2}(?:l|(?![a-z]))"                  # "hoa", "hda", "hoal"
-LB_SAT_VI = LB_VI_HEAD + r"bao" + LB_VI_TAIL + r"(?:\W{0,3}s[a-z]{2,12}\W{0,3}fats?(?![a-z]))?"  # + "/sauated fat"
-LB_TRANS_VI = LB_VI_HEAD + r"chuyen" + LB_VI_TAIL + r"(?:\W{0,3}trans\W{0,3}fats?(?![a-z]))?"
+LB_SAT_VI_END = r"bao" + LB_VI_TAIL + r"(?:\W{0,3}s[a-z]{2,12}\W{0,3}fats?(?![a-z]))?"      # + "/sauated fat"
+LB_TRANS_VI_END = r"chuyen" + LB_VI_TAIL + r"(?:\W{0,3}trans\W{0,3}fats?(?![a-z]))?"
+LB_SAT_VI = LB_VI_HEAD + LB_SAT_VI_END
+LB_TRANS_VI = LB_VI_HEAD + LB_TRANS_VI_END
 LB_SAT_EN = r"(?<![a-z])(?:un)?sat(?:[a-z]*|[a-z]{3,}\W{0,3}\d+)\W{0,3}fats?(?![a-z])"  # "saturated| fat", "saturatec 496  fat"
 LB_TRANS_EN = r"(?<![a-z])trans\W{0,3}(?:\d+\W{0,3})?fats?(?![a-z])"
 LB_SAT = r"(?:" + LB_SAT_VI + r"|" + LB_SAT_EN + r")"
 LB_TRANS = r"(?:" + LB_TRANS_VI + r"|" + LB_TRANS_EN + r")"
 LB_SAT_ANY = r"(?:" + LB_SAT + r"|" + LB_TRANS + r")"
-NEAR = r"[^\da-z\n]{0,5}"                                       # giữa 2 nhãn liền nhau: chỉ dấu cách / dấu câu
+LB_SAT_ANY_STRICT = (r"(?:" + LB_VI_HEAD_STRICT + r"(?:" + LB_SAT_VI_END + r"|" + LB_TRANS_VI_END + r")|"
+                     + LB_SAT_EN + r"|" + LB_TRANS_EN + r")")
+LB_TOTAL = r"(?<![a-z])(?:total ?fat(?![a-z])|tong ?chat ?beo|chat ?[bh][a-z]{0,2}|fat(?![a-z])|lipid(?![a-z]))"
+UNIT_PAREN = r"\([ \t]*m?g[ \t]*\)"                                # "(g)", "(mg)" sau nhãn
+NEAR = r"(?:[^\da-z\n]|" + UNIT_PAREN + r"){0,8}"                 # giữa 2 nhãn liền nhau: dấu cách / dấu câu / "(g)"
+# Ngay sau các nhãn của cột: >= 2 số liền nhau trên cùng dòng (số thứ hai không kèm %).
+COLUMN_NUMBERS = (r"(?=(?:[^\da-z\n]|" + UNIT_PAREN + r")*\d+(?:[.,]\d+)?[ \t]*(?:mg|g|9)?[ \t]+\d"
+                  r"(?![\d.,]*[ \t]*%))")
+TOTAL_COLUMN = (r"(?P<keep>" + LB_TOTAL + r")" + NEAR + LB_SAT_ANY_STRICT + r"(?:" + NEAR + LB_SAT_ANY + r")*"
+                + COLUMN_NUMBERS)
 SAT_COLUMN = r"(?:" + LB_SAT + NEAR + LB_TRANS + r"|" + LB_TRANS + NEAR + LB_SAT + r")(?:" + NEAR + LB_SAT_ANY + r")*"
 SAT_GAP = r"(?:(?!fat|beo|chat ?[bh]|trans|sat|total|lipid)[^\d\n]){0,25}"
-SAT_FAT = re.compile(SAT_COLUMN + r"|" + LB_SAT_ANY + r"(?:" + SAT_GAP + NUM + r"[ \t]*(?:mg|g|9)?)?")
+SAT_FAT = re.compile(TOTAL_COLUMN + r"|" + SAT_COLUMN + r"|" + LB_SAT_ANY + r"(?:" + SAT_GAP + NUM + r"[ \t]*(?:mg|g|9)?)?")
 # "calories from fat" (năng lượng từ chất béo) không phải gam béo; bỏ cả khi có nhiều dấu cách giữa "from" và "fat".
 FROM_FAT = re.compile(r"from\s+fat")
 
 def fat_text(t):
-    """Text dùng cho luật béo (regex và dict): đã bỏ cụm béo bão hòa / chuyển hóa (kèm số) và "from fat"."""
-    return FROM_FAT.sub(" ", SAT_FAT.sub(" ", t))
+    """Text dùng cho luật béo (regex và dict): đã bỏ cụm béo bão hòa / chuyển hóa (kèm số) và "from fat".
+    Bảng theo cột có nhãn béo tổng: giữ nhãn béo tổng (nhóm "keep"), chỉ bỏ nhãn bão hòa / chuyển hóa."""
+    return FROM_FAT.sub(" ", SAT_FAT.sub(lambda m: (m.group("keep") or "") + " ", t))
 
 # (c) Luật dự phòng (không có đơn vị g): số nguyên >= 2 chữ số bắt đầu bằng 0 ("09", "00") là "0 g" đọc sai nhưng
 #     không chắc là 0: để trống. Thấy ở: "Protein 09", "Fat 09" (8935001214274), "Fat 00" (8938501141477).

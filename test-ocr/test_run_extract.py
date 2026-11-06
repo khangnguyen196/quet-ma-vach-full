@@ -332,14 +332,56 @@ class GramRulesTest(unittest.TestCase):
 
     def test_s1f_fat_label_boundaries_iron_unsaturated_energy(self):
         # "Sắt" (iron) không phải saturated: số béo 5 vẫn lấy.
-        self.assertEqual(self.rx("Sắt 2 Fat 5 g")["beo_g"], "5")
+        with self.subTest(text="Sắt 2 Fat 5 g"):
+            self.assertEqual(self.rx("Sắt 2 Fat 5 g")["beo_g"], "5")
         # "chất béo không bão hòa" bỏ trọn, không ăn số của dòng Natri.
-        self.assertEqual(self.rx("Chất béo không bão hòa 3 g Natri 5 g")["beo_g"], "")
+        with self.subTest(text="Chất béo không bão hòa 3 g Natri 5 g"):
+            self.assertEqual(self.rx("Chất béo không bão hòa 3 g Natri 5 g")["beo_g"], "")
         # Béo bão hòa trước, béo tổng sau.
-        self.assertEqual(self.rx("Chất béo bão hòa 2 g Chất béo 7 g")["beo_g"], "7")
-        self.assertEqual(self.rx("unsaturated fat 2 g Total Fat 6 g")["beo_g"], "6")
+        with self.subTest(text="Chất béo bão hòa 2 g Chất béo 7 g"):
+            self.assertEqual(self.rx("Chất béo bão hòa 2 g Chất béo 7 g")["beo_g"], "7")
+        with self.subTest(text="unsaturated fat 2 g Total Fat 6 g"):
+            self.assertEqual(self.rx("unsaturated fat 2 g Total Fat 6 g")["beo_g"], "6")
         # "chuyển hóa năng lượng" trong câu quảng cáo không ăn số béo tổng.
-        self.assertEqual(self.rx("hỗ trợ chuyển hóa năng lượng Chất béo 4 g")["beo_g"], "4")
+        with self.subTest(text="hỗ trợ chuyển hóa năng lượng Chất béo 4 g"):
+            self.assertEqual(self.rx("hỗ trợ chuyển hóa năng lượng Chất béo 4 g")["beo_g"], "4")
+
+    # Review vòng 2: bảng đọc theo cột, nhãn béo tổng đứng liền nhãn bão hòa / chuyển hóa (không số giữa).
+    # Giá trị thật mà code mới ra (rx, dc); mong "10", chấp nhận "" (thà để trống), KHÔNG BAO GIỜ "3" / "0".
+    FAT_COLUMN_CASES = [
+        ("Total Fat Saturated Fat 10g 3g", "10", "10"),
+        ("Total Fat Trans Fat 10g 0g", "10", "10"),
+        ("Fat Saturated Fat 10g 3g", "10", "10"),
+        ("Total Fat (g) Saturated Fat (g) Trans Fat (g) 10 3 0", "10", ""),          # dc cần số + g trên dòng
+        ("Chất béo Chất béo bão hòa 10g 3g", "10", "10"),
+        ("Chất béo Chất béo chuyển hóa 10g 0g", "10", "10"),
+        ("Chất béo Chất béo bão hòa Chất béo chuyển hóa 10g 3g 0g", "10", "10"),
+        ("Chất béo (g) Chất béo bão hòa (g) Chất béo chuyển hóa (g) 10 3 0", "10", ""),   # dc cần số + g
+        ("Lipid Chất béo bão hòa 10g 3g", "10", ""),            # dc không có nhãn "lipid"
+        ("Chất béo / Fat Chất béo bão hòa / Saturated fat 10g 3g", "10", "10"),
+        ("Tổng chất béo/Total Fat Chất béo bão hòa/Saturated Fat 10 g 3 g", "10", "10"),
+    ]
+    # Bảng đọc theo dòng: phải ra đúng giá trị.
+    FAT_ROW_CASES = [
+        ("Chất béo bão hòa 2 g", ""),                                   # bẫy: không được ra "2"
+        ("Chất béo 10 g Chất béo bão hòa 3 g", "10"),
+        ("Total Fat 10g Saturated Fat 3g Trans Fat 0g", "10"),
+        ("Chất béo không bão hòa 3 g", ""),
+        ("Chất béo/ Fat Chất béo bão hòa/ Saturated fat 2 g", ""),      # nhãn béo tổng không có số: không ra 2
+    ]
+
+    def test_s1g_fat_column_with_total_label(self):
+        for text, want_rx, want_dc in self.FAT_COLUMN_CASES:
+            for name, f, want in (("rx", self.rx, want_rx), ("dc", self.dc, want_dc)):
+                with self.subTest(kind="cot", text=text, extractor=name):
+                    beo = f(text)["beo_g"]
+                    self.assertNotIn(beo, {"3", "0"})
+                    self.assertIn(beo, {"10", ""})
+                    self.assertEqual(beo, want)   # giá trị thật ra
+        for text, want in self.FAT_ROW_CASES:
+            for name, f in (("rx", self.rx), ("dc", self.dc)):
+                with self.subTest(kind="dong", text=text, extractor=name):
+                    self.assertEqual(f(text)["beo_g"], want)
 
 
 class OutputEncodingTest(TmpDirCase):
