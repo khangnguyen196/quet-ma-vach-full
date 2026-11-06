@@ -47,7 +47,8 @@ export const NUTRIENT_ROWS = [
 ];
 
 const num = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v);
-const tag = (t) => String(t).replace(/^[a-z]{2}:/, "");
+// Bỏ tiền tố ngôn ngữ ("en:", "EN:", "fil:") giống tags() bên dưới.
+const tag = (t) => String(t).replace(/^[a-z]{2,3}:/i, "");
 const grade = (g) => (/^[a-e]$/.test(String(g || "").toLowerCase()) ? String(g).toLowerCase() : null);
 
 /** Đổi giá trị API sang chuỗi: chuỗi → bỏ khoảng trắng 2 đầu; số → chuỗi; mảng → nối ", "; còn lại → "". */
