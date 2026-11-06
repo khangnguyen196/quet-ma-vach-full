@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import { normalize } from "../src/off.js";
 import { compareRows, COMPARE_ROWS } from "../src/compare.js";
+import * as compareMod from "../src/compare.js"; // compareWaitMs (thêm ở sua-cuoi): gọi qua compareMod để file vẫn chạy khi hàm chưa có
 import {
   renderCompare, renderNotFound, renderCompareButton, renderHistoryOptions, renderProduct,
   OFF_ADD_URL, ALLERGY_NO_DATA, ALLERGY_NEUTRAL, ALLERGY_ALERT_ID
@@ -242,5 +243,33 @@ describe("định dạng số dinh dưỡng (fmt): số nhỏ hơn 1 không bị
     assert.equal(productCell(html, "Chất béo"), "2,5 g");
     assert.equal(productCell(html, "Chất đạm"), "0 g");
     assert.equal(productCell(html, "Năng lượng"), "1.520 kcal");
+  });
+});
+
+describe("compareWaitMs: giãn >= 1 giây giữa 2 lần gọi Open Food Facts của màn So sánh (sua-cuoi, hoan-thien (b))", () => {
+  const wait = (...a) => {
+    assert.equal(typeof compareMod.compareWaitMs, "function", "src/compare.js phải export compareWaitMs");
+    return compareMod.compareWaitMs(...a);
+  };
+  test("chưa gọi lần nào → 0", () => {
+    assert.equal(wait(-Infinity, 5000), 0);
+    assert.equal(wait(null, 5000), 0);
+    assert.equal(wait(undefined, 5000), 0);
+  });
+  test("lần trước cách 300 ms → chờ 700 ms; cách đúng / hơn 1 giây → 0", () => {
+    assert.equal(wait(10000, 10300), 700);
+    assert.equal(wait(10000, 11000), 0);
+    assert.equal(wait(10000, 15000), 0);
+    assert.equal(wait(10000, 10000), 1000);
+  });
+  test("khoảng giãn đổi được (mặc định 1000 ms)", () => {
+    assert.equal(wait(10000, 10500, 2000), 1500);
+  });
+  test("đồng hồ máy bị lùi (now < lần trước) → chờ tối đa 1 khoảng giãn, không chờ mãi", () => {
+    assert.equal(wait(10000, 4000), 1000);
+  });
+  test("số hỏng (NaN) → chờ đủ 1 khoảng giãn cho chắc", () => {
+    assert.equal(wait(NaN, 5000), 1000);
+    assert.equal(wait(10000, NaN), 1000);
   });
 });
