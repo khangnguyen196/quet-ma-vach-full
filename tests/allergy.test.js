@@ -397,3 +397,30 @@ describe("khung dị ứng nhận cùng khóa với chip (sua-cuoi vòng 4)", ()
     assert.ok(!html.includes(ALLERGY_NEUTRAL), html);
   });
 });
+
+describe("chip dị ứng tra tên tiếng Việt bằng chữ thường (ket-thuc)", () => {
+  test("allergens_tags 'EN:Milk' → chip 'Sữa' (khớp khung đỏ), không hiện 'Milk'", () => {
+    const p = normalize(raw({ allergens_tags: ["EN:Milk"] }), "123");
+    assert.deepEqual(p.allergens, ["Sữa"]);
+    const html = renderProduct(p);
+    assert.ok(html.includes("Sữa"), "chip phải hiện tên tiếng Việt");
+    assert.ok(!html.includes("Milk"), "không hiện chữ gốc 'Milk'");
+  });
+
+  test("traces_tags 'FR:GLUTEN' → chip 'Gluten'", () => {
+    const p = normalize(raw({ traces_tags: ["FR:GLUTEN"] }), "123");
+    assert.deepEqual(p.traces, ["Gluten"]);
+  });
+
+  test("tag lạ 'EN:Abc' giữ chữ gốc 'Abc'", () => {
+    const p = normalize(raw({ allergens_tags: ["EN:Abc"] }), "123");
+    assert.deepEqual(p.allergens, ["Abc"]);
+  });
+
+  test("'en:constructor' ra chữ 'constructor', không ra hàm", () => {
+    const p = normalize(raw({ allergens_tags: ["en:constructor"], traces_tags: ["EN:Constructor"] }), "123");
+    assert.deepEqual(p.allergens, ["constructor"]);
+    assert.deepEqual(p.traces, ["Constructor"]);
+    for (const a of [...p.allergens, ...p.traces]) assert.equal(typeof a, "string");
+  });
+});
