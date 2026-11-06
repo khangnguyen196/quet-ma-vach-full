@@ -62,7 +62,7 @@ describe("versionOf", () => {
 });
 
 /** Chạy mã sw.js trong vm với môi trường service worker giả; trả các listener + sổ ghi lời gọi. */
-function loadSw(code, { cacheNames = [], fetchImpl } = {}) {
+function loadSw(code, { cacheNames = [], fetchImpl, timers = [] } = {}) {
   const listeners = {};
   const log = { opened: [], put: [], fetched: [], deleted: [], skipWaiting: 0, claim: 0, matched: [] };
   const stores = new Map(cacheNames.map((n) => [n, new Map()]));
@@ -97,6 +97,9 @@ function loadSw(code, { cacheNames = [], fetchImpl } = {}) {
     Request: FakeRequest,
     Response: { error: () => ({ type: "error" }) },
     caches,
+    // Đồng hồ giả: chỉ ghi lại, test tự gọi fn() khi muốn "hết giờ".
+    setTimeout: (fn, ms) => { timers.push({ fn, ms, cleared: false }); return timers.length; },
+    clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; },
     fetch: fetchImpl || (async (req, init) => {
       log.fetched.push({ url: keyOf(req), cache: init?.cache ?? req.cache });
       return { ok: true, status: 200, body: "mạng:" + keyOf(req) };
@@ -196,6 +199,106 @@ describe("buildServiceWorker", () => {
     offline.stores.get("qmv-shell-v1abc").set(SCOPE + "index.html", "giao diện đã lưu");
     assert.equal(await dispatchFetch(offline.listeners, { method: "GET", url: SCOPE + "?a=1", mode: "navigate" }), "giao diện đã lưu");
     assert.deepEqual(offline.log.matched, [{ key: "./index.html", opts: { cacheName: "qmv-shell-v1abc", ignoreSearch: true } }]);
+  });
+});
+
+/** Promise điều khiển được từ ngoài: d.resolve(v) / d.reject(e). */
+function deferred() {
+  const d = {};
+  d.promise = new Promise((res, rej) => { d.resolve = res; d.reject = rej; });
+  return d;
+}
+/** Promise đã xong chưa (sau vài vòng hàng đợi); trả { done, value }. */
+async function peek(p) {
+  const state = { done: false, value: undefined };
+  p.then((v) => { state.done = true; state.value = v; }, (e) => { state.done = true; state.value = e; });
+  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  return state;
+}
+
+describe("mở trang khi mạng chậm: chờ tối đa 3 giây rồi dùng bản đã lưu (sua-cuoi, hoan-thien (c))", () => {
+  const code = buildServiceWorker({ version: "v1abc", files: FILES });
+  const NAV = { method: "GET", url: SCOPE, mode: "navigate" };
+
+  function slowSw({ withCache }) {
+    const net = deferred();
+    const fetched = [];
+    const timers = [];
+    const sw = loadSw(code, {
+      cacheNames: ["qmv-shell-v1abc"], timers,
+      fetchImpl: (req, init) => { fetched.push({ url: req.url ?? req, init, signal: init?.signal }); return net.promise; }
+    });
+    if (withCache) sw.stores.get("qmv-shell-v1abc").set(SCOPE + "index.html", "giao diện đã lưu");
+    return { ...sw, net, fetched, timers };
+  }
+
+  test("sw.js có hằng NAV_TIMEOUT_MS = 3000 và hẹn giờ đúng 3000 ms khi mở trang", async () => {
+    assert.ok(code.includes("const NAV_TIMEOUT_MS = 3000;"));
+    const { listeners, timers } = slowSw({ withCache: true });
+    dispatchFetch(listeners, NAV);
+    await peek(Promise.resolve());
+    assert.deepEqual(timers.map((t) => t.ms), [3000]);
+  });
+
+  test("3 giây chưa có phản hồi + có bản lưu → trả bản lưu; request mạng không bị hủy, không ghi cache", async () => {
+    const { listeners, timers, net, fetched, log } = slowSw({ withCache: true });
+    const res = dispatchFetch(listeners, NAV);
+    assert.equal((await peek(res)).done, false, "chưa hết giờ thì còn chờ mạng");
+    timers[0].fn();
+    const got = await peek(res);
+    assert.equal(got.done, true);
+    assert.equal(got.value, "giao diện đã lưu");
+    assert.equal(fetched.length, 1);
+    assert.equal(fetched[0].signal, undefined, "không gắn AbortSignal: request mạng chạy tiếp");
+    net.resolve({ ok: true, status: 200, body: "mạng muộn" });
+    await peek(Promise.resolve());
+    assert.deepEqual(log.put, []);
+  });
+
+  test("3 giây chưa có phản hồi + KHÔNG có bản lưu → chờ mạng tiếp, ra bản mạng", async () => {
+    const { listeners, timers, net } = slowSw({ withCache: false });
+    const res = dispatchFetch(listeners, NAV);
+    timers[0].fn();
+    assert.equal((await peek(res)).done, false);
+    net.resolve({ ok: true, status: 200, body: "mạng chậm" });
+    const got = await peek(res);
+    assert.equal(got.value.body, "mạng chậm");
+  });
+
+  test("mạng trả trước 3 giây → bản mạng, hẹn giờ được hủy", async () => {
+    const { listeners, timers, net } = slowSw({ withCache: true });
+    const res = dispatchFetch(listeners, NAV);
+    net.resolve({ ok: true, status: 200, body: "mạng nhanh" });
+    const got = await peek(res);
+    assert.equal(got.value.body, "mạng nhanh");
+    assert.equal(timers[0].cleared, true);
+  });
+
+  test("hết giờ mà không có bản lưu, rồi mạng lỗi → Response.error() (không treo)", async () => {
+    const { listeners, timers, net } = slowSw({ withCache: false });
+    const res = dispatchFetch(listeners, NAV);
+    timers[0].fn();
+    net.reject(new TypeError("Failed to fetch"));
+    const got = await peek(res);
+    assert.deepEqual(got.value, { type: "error" });
+  });
+
+  test("đã trả bản lưu rồi mạng mới lỗi → không có lỗi lọt ra ngoài (unhandled rejection)", async () => {
+    const { listeners, timers, net } = slowSw({ withCache: true });
+    const unhandled = [];
+    const onUnhandled = (e) => unhandled.push(e);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const res = dispatchFetch(listeners, NAV);
+      timers[0].fn();
+      assert.equal((await peek(res)).value, "giao diện đã lưu");
+      net.reject(new TypeError("Failed to fetch"));
+      await peek(Promise.resolve());
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+    assert.deepEqual(unhandled, []);
   });
 });
 
