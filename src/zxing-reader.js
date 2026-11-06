@@ -36,7 +36,8 @@ const watched = new WeakSet();
 
 /**
  * Nạp wasm (lần đầu thì tải file, các lần sau dùng lại). Chờ tối đa ZXING_LOAD_TIMEOUT_MS (10 giây):
- * - hết giờ: ném ZxingLoadError "hết giờ…" để scanner.js đọc bằng html5-qrcode; KHÔNG xóa lời hứa đang tải,
+ * - hết giờ: ném ZxingLoadError "hết giờ…" (tạo bằng makeZxingTimeoutError, có cờ timeout; scanner.js nhận
+ *   bằng isZxingTimeout) để scanner.js đọc bằng html5-qrcode; KHÔNG xóa lời hứa đang tải,
  *   lần tải dở vẫn chạy tiếp và lần chụp sau dùng lại (không tải lại từ đầu);
  * - tải lỗi thật (mất mạng, file hỏng): ném ZxingLoadError (cause = lỗi gốc); lời hứa lỗi bị xóa (purge) để
  *   lần sau tải lại. Không xóa thì thư viện giữ lời hứa đã lỗi, có mạng lại vẫn hỏng tới khi tải lại trang.
