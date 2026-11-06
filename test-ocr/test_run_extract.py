@@ -313,6 +313,34 @@ class GramRulesTest(unittest.TestCase):
         self.assertEqual(self.rx("Carbohydrate 1199")["carb_g"], "")
         self.assertEqual(self.rx("Protein 1449")["dam_g"], "")   # 8936017368111: chèn dấu phẩy sẽ ra 14,4 (đáp án 7,0)
 
+    def test_s1e_fat_column_table_keeps_total_fat_number(self):
+        # Review vòng 1: bảng đọc theo cột (nhãn trước, số sau). Số đầu là của Total Fat, KHÔNG được ra "3" / "0".
+        for text in ["Total Fat Saturated Fat Trans Fat 10g 3g 0g",
+                     "Chất béo Chất béo bão hòa Chất béo trans 10g 3g 0g"]:
+            for name, f in (("rx", self.rx), ("dc", self.dc)):
+                with self.subTest(text=text, extractor=name):
+                    beo = f(text)["beo_g"]
+                    self.assertNotEqual(beo, "3")
+                    self.assertIn(beo, {"10", ""})
+                    self.assertEqual(beo, "10")   # giá trị thật ra
+        # Cột trans đứng trước bão hòa: không được ra "0".
+        for name, f in (("rx", self.rx), ("dc", self.dc)):
+            with self.subTest(extractor=name):
+                beo = f("Total Fat Trans Fat Saturated Fat 10g 0g 3g")["beo_g"]
+                self.assertNotEqual(beo, "0")
+                self.assertEqual(beo, "10")
+
+    def test_s1f_fat_label_boundaries_iron_unsaturated_energy(self):
+        # "Sắt" (iron) không phải saturated: số béo 5 vẫn lấy.
+        self.assertEqual(self.rx("Sắt 2 Fat 5 g")["beo_g"], "5")
+        # "chất béo không bão hòa" bỏ trọn, không ăn số của dòng Natri.
+        self.assertEqual(self.rx("Chất béo không bão hòa 3 g Natri 5 g")["beo_g"], "")
+        # Béo bão hòa trước, béo tổng sau.
+        self.assertEqual(self.rx("Chất béo bão hòa 2 g Chất béo 7 g")["beo_g"], "7")
+        self.assertEqual(self.rx("unsaturated fat 2 g Total Fat 6 g")["beo_g"], "6")
+        # "chuyển hóa năng lượng" trong câu quảng cáo không ăn số béo tổng.
+        self.assertEqual(self.rx("hỗ trợ chuyển hóa năng lượng Chất béo 4 g")["beo_g"], "4")
+
 
 class OutputEncodingTest(TmpDirCase):
     """Như `python run_extract.py > file` / `python score_combo.py > file` trên Windows: stdout, stderr là file cp1252."""

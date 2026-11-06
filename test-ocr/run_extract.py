@@ -118,9 +118,28 @@ def gram_max(v):
 #     "saturatec 496  fat 00" (8938501141477), "sat fat less than 209" (8938501141040).
 #     Chỉ bắt cụm có "bao hoa" / "chuyen hoa" hoặc "sat... fat" / "trans fat", nên "Total Fat" / "Chất béo" đứng trước
 #     vẫn giữ nguyên.
-LB_SAT_VI = r"(?:chat ?[bh][a-z]{0,2} ?)?(?:bao|chuyen) ?h[a-z]{1,2}(?:l|(?![a-z]))"  # "bao hoa", "baohda", "baohoal"...
-LB_SAT_EN = r"(?:sat[a-z]*|trans)\W{0,3}(?:\d+\W{0,3})?fats?(?![a-z])"            # "saturated| fat", "saturatec 496  fat"
-SAT_FAT = re.compile(r"(?:" + LB_SAT_VI + r"|" + LB_SAT_EN + r")(?:[^\d\n]{0,25}" + NUM + r"\s*(?:mg|g|9)?)?")
+#     Vòng 2 (review): - khoảng giữa nhãn và số không được vượt qua nhãn béo khác (fat, beo, chat b.., trans, sat,
+#     total, lipid), nếu không thì "Saturated Fat Total Fat 10g" sẽ ăn số 10 của Total Fat;
+#     - nhãn VI bão hòa nối liền nhãn EN bão hòa (kể cả đọc sai "sauated") là MỘT nhãn song ngữ, vẫn bỏ kèm số;
+#     - bảng đọc theo cột: nhãn bão hòa và nhãn chuyển hóa đứng liền nhau, không có số giữa ("Total Fat Saturated Fat
+#       Trans Fat 10g 3g 0g") thì chỉ bỏ các nhãn, KHÔNG bỏ số nào (số đầu là của Total Fat);
+#     - "sat" phải đứng đầu từ ("Sắt 2 Fat 5 g": sắt là iron, không phải saturated); số chen giữa "sat... <số> fat"
+#       chỉ nhận khi sau "sat" có >= 3 chữ ("saturatec 496  fat"); "unsaturated" vẫn bỏ;
+#     - "chất béo không bão hòa" bỏ trọn (cả "chat beo khong");
+#     - số và đơn vị không vượt qua dòng mới.
+LB_VI_HEAD = r"(?:chat ?[bh][a-z]{0,2} ?(?:khong ?)?)?"       # "chat beo ", "chatheo", "chat beo khong "
+LB_VI_TAIL = r" ?h[a-z]{1,2}(?:l|(?![a-z]))"                  # "hoa", "hda", "hoal"
+LB_SAT_VI = LB_VI_HEAD + r"bao" + LB_VI_TAIL + r"(?:\W{0,3}s[a-z]{2,12}\W{0,3}fats?(?![a-z]))?"  # + "/sauated fat"
+LB_TRANS_VI = LB_VI_HEAD + r"chuyen" + LB_VI_TAIL + r"(?:\W{0,3}trans\W{0,3}fats?(?![a-z]))?"
+LB_SAT_EN = r"(?<![a-z])(?:un)?sat(?:[a-z]*|[a-z]{3,}\W{0,3}\d+)\W{0,3}fats?(?![a-z])"  # "saturated| fat", "saturatec 496  fat"
+LB_TRANS_EN = r"(?<![a-z])trans\W{0,3}(?:\d+\W{0,3})?fats?(?![a-z])"
+LB_SAT = r"(?:" + LB_SAT_VI + r"|" + LB_SAT_EN + r")"
+LB_TRANS = r"(?:" + LB_TRANS_VI + r"|" + LB_TRANS_EN + r")"
+LB_SAT_ANY = r"(?:" + LB_SAT + r"|" + LB_TRANS + r")"
+NEAR = r"[^\da-z\n]{0,5}"                                       # giữa 2 nhãn liền nhau: chỉ dấu cách / dấu câu
+SAT_COLUMN = r"(?:" + LB_SAT + NEAR + LB_TRANS + r"|" + LB_TRANS + NEAR + LB_SAT + r")(?:" + NEAR + LB_SAT_ANY + r")*"
+SAT_GAP = r"(?:(?!fat|beo|chat ?[bh]|trans|sat|total|lipid)[^\d\n]){0,25}"
+SAT_FAT = re.compile(SAT_COLUMN + r"|" + LB_SAT_ANY + r"(?:" + SAT_GAP + NUM + r"[ \t]*(?:mg|g|9)?)?")
 # "calories from fat" (năng lượng từ chất béo) không phải gam béo; bỏ cả khi có nhiều dấu cách giữa "from" và "fat".
 FROM_FAT = re.compile(r"from\s+fat")
 
@@ -130,6 +149,8 @@ def fat_text(t):
 
 # (c) Luật dự phòng (không có đơn vị g): số nguyên >= 2 chữ số bắt đầu bằng 0 ("09", "00") là "0 g" đọc sai nhưng
 #     không chắc là 0: để trống. Thấy ở: "Protein 09", "Fat 09" (8935001214274), "Fat 00" (8938501141477).
+#     "00" của 8938501141477 cũng bị luật (b) bỏ, nên riêng (c) chỉ đổi ô của 8935001214274. Bằng chứng >= 2 sản phẩm
+#     vẫn đạt.
 LEADING_ZERO = re.compile(r"0\d+")
 
 def gram_after(strict_labels, loose_labels, t):
