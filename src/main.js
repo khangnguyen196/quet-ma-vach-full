@@ -568,23 +568,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Màn So sánh gọi Open Food Facts cách nhau ít nhất 1 giây, kể cả 2 lượt khác nhau (bấm So sánh liên tiếp).
 // Lần lấy từ cache trong bộ nhớ (isProductCached) không gọi mạng nên không tính.
 const COMPARE_GAP_MS = 1000;
-let lastCompareCallAt = null; // thời điểm (Date.now) lần gọi mạng gần nhất của màn So sánh
+let lastCompareCallAt = null; // thời điểm (performance.now) lần gọi mạng gần nhất của màn So sánh
 
 /**
  * Tra 1 bên cho lượt so sánh id: cần gọi mạng thì chờ đủ khoảng giãn trước; trong lúc chờ mà lượt đã đổi
  * (người dùng bấm So sánh lần nữa) thì thôi, KHÔNG gọi mạng, trả null.
  */
 async function fetchSideSpaced(code, id) {
-  if (!isProductCached(code)) {
-    for (let wait = compareWaitMs(lastCompareCallAt, Date.now(), COMPARE_GAP_MS); wait > 0;
-      wait = compareWaitMs(lastCompareCallAt, Date.now(), COMPARE_GAP_MS)) {
-      await sleep(wait);
-      if (id !== compareTurn) return null;
-    }
+  if (isProductCached(code)) return fetchSide(code);
+  for (let wait = compareWaitMs(lastCompareCallAt, performance.now(), COMPARE_GAP_MS); wait > 0;
+    wait = compareWaitMs(lastCompareCallAt, performance.now(), COMPARE_GAP_MS)) {
+    await sleep(wait);
     if (id !== compareTurn) return null;
-    if (!isProductCached(code)) lastCompareCallAt = Date.now();
   }
-  return fetchSide(code);
+  if (id !== compareTurn) return null;
+  const needsNetwork = !isProductCached(code);
+  const pending = fetchSide(code); // fetch() được gọi ngay (đồng bộ) bên trong fetchSide → getProduct
+  // Ghi thời điểm SAU khi request đã đi: lần gọi kế chắc chắn cách request này >= 1 giây (Playwright đo được 999 ms
+  // khi ghi trước lúc gọi).
+  if (needsNetwork) lastCompareCallAt = performance.now();
+  return pending;
 }
 
 /** Tra 1 bên để so sánh (KHÔNG thêm vào lịch sử). Không ném lỗi: lỗi trả về dạng { status: "error" }. */
