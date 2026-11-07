@@ -337,12 +337,12 @@ export function chooseIndexImage(fronts, testImgid, hashes, testHash, threshold 
   const rejected = [];
   const seen = new Set();
   for (const f of fronts || []) {
-    if (seen.has(f.imgid)) { rejected.push({ key: f.key, imgid: f.imgid, reason: "trùng imgid với ứng viên trước" }); continue; }
-    seen.add(f.imgid);
     if (testImgid != null && String(f.imgid) === String(testImgid)) {
       rejected.push({ key: f.key, imgid: f.imgid, reason: "cùng imgid với front.jpg" });
       continue;
     }
+    if (seen.has(f.imgid)) { rejected.push({ key: f.key, imgid: f.imgid, reason: "trùng imgid với ứng viên trước" }); continue; }
+    seen.add(f.imgid);
     const h = hashes?.[f.imgid];
     if (!h || !testHash) { rejected.push({ key: f.key, imgid: f.imgid, reason: "không có mã băm" }); continue; }
     const distance = hamming(h, testHash);

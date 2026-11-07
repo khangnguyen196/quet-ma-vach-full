@@ -177,3 +177,9 @@ test("parseCsv: nháy kép, dấu phẩy trong ô, CRLF, BOM", () => {
   ]);
   assert.deepEqual(parseCsv(""), []);
 });
+
+test("chooseIndexImage: front_xx khác ngôn ngữ cùng imgid với front.jpg đều ghi lý do 'cùng imgid'", () => {
+  const r = chooseIndexImage([{ key: "front_vi", imgid: "1" }, { key: "front_en", imgid: "1" }], "1", {}, "0000000000000000");
+  assert.equal(r.chosen, null);
+  assert.deepEqual(r.rejected.map((x) => x.reason), ["cùng imgid với front.jpg", "cùng imgid với front.jpg"]);
+});
