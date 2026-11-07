@@ -28,3 +28,28 @@ test("mode cdn: jsDelivr bản cố định, model HuggingFace theo mã commit; 
     if (typeof v === "string" && v.startsWith("http")) assert.match(v, /@\d|\/resolve\/[0-9a-f]{40}\//);
   }
 });
+
+/** URL dữ liệu ngôn ngữ mà tesseract.js THẬT SỰ tải khi trang đo dùng bộ đường dẫn `urls`:
+ *  - có urls.tessLangs ([{ code, url }]): trang tự tải đúng các URL đó rồi đưa byte cho tesseract.js;
+ *  - không thì tesseract.js tự ghép `<langPath>/<lang>.traineddata.gz`; langPath trống thì dùng đường mặc định
+ *    của tesseract.js 7 với OEM 1 (LSTM): https://cdn.jsdelivr.net/npm/@tesseract.js-data/<lang>/4.0.0_best_int
+ *    (node_modules/tesseract.js/src/worker-script/index.js, hàm loadAndGunzipFile). */
+function effectiveTessLangUrls(urls, langs) {
+  if (Array.isArray(urls.tessLangs)) return urls.tessLangs.map((l) => l.url);
+  return langs.split("+").map((lang) => {
+    const base = urls.tessLangPath || `https://cdn.jsdelivr.net/npm/@tesseract.js-data/${lang}/4.0.0_best_int`;
+    return `${base.replace(/\/$/, "")}/${lang}.traineddata.gz`;
+  });
+}
+
+test("mode cdn: dữ liệu ngôn ngữ tesseract.js mà trang tải đều ghim bản @1.0.0 (vie, eng)", () => {
+  // đường mặc định trong effectiveTessLangUrls đúng là đường của tesseract.js đang cài
+  const worker = fs.readFileSync(new URL("../node_modules/tesseract.js/src/worker-script/index.js", import.meta.url), "utf8");
+  assert.ok(worker.includes("https://cdn.jsdelivr.net/npm/@tesseract.js-data/${lang}/4.0.0_best_int"));
+  const got = effectiveTessLangUrls(assetUrls("cdn", {}), globalThis.OcrAssets.TESS_LANGS);
+  assert.deepEqual(got, [
+    "https://cdn.jsdelivr.net/npm/@tesseract.js-data/vie@1.0.0/4.0.0_best_int/vie.traineddata.gz",
+    "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/eng.traineddata.gz",
+  ]);
+  for (const u of got) assert.match(u, /@1\.0\.0\//, u);
+});
