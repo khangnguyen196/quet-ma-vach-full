@@ -60,10 +60,17 @@ test("isMemoryError: RangeError chỉ tính là thiếu bộ nhớ khi câu lỗ
   assert.equal(page.isMemoryError(new RangeError("Array buffer allocation failed")), true);
   assert.equal(page.isMemoryError(new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded")), true);
   assert.equal(page.isMemoryError(new RangeError("Out of memory: Cannot allocate Wasm memory for new instance")), true);
-  assert.equal(page.isMemoryError(new RangeError("Invalid typed array length: 99999999999 (buffer)")), true);
+  assert.equal(page.isMemoryError(new RangeError("Out of memory")), true); // Safari
+  assert.equal(page.isMemoryError(new RangeError("Invalid array buffer length")), true); // Chrome
   assert.equal(page.isMemoryError(new RangeError("Maximum call stack size exceeded")), false);
   assert.equal(page.isMemoryError(new RangeError("Invalid array length")), false);
   assert.equal(page.isMemoryError(new RangeError("toFixed() digits argument must be between 0 and 100")), false);
+});
+
+test("isMemoryError: RangeError lỗi vị trí (bounds / out of range) không phải thiếu bộ nhớ (nhánh WebGPU còn lùi về wasm)", () => {
+  assert.equal(page.isMemoryError(new RangeError("Start offset -1 is outside the bounds of the buffer")), false);
+  assert.equal(page.isMemoryError(new RangeError("Length out of range of buffer")), false);
+  assert.equal(page.isMemoryError(new RangeError("Offset is outside the bounds of the DataView")), false);
 });
 
 test("sumResourceBytes: byte qua mạng, file lấy từ bộ nhớ đệm, file không đo được (thiếu Timing-Allow-Origin)", () => {
@@ -149,6 +156,12 @@ test("trang: không dùng WebGPU thì giấu navigator.gpu trước khi nạp SD
   // dò WebGPU (và giấu) xong mới thêm import map / import SDK
   const main = html.slice(html.indexOf("async function main()"));
   assert.ok(main.indexOf("await detectGpu()") >= 0 && main.indexOf("await detectGpu()") < main.indexOf("addImportMap("));
+});
+
+test("trang: nút chọn ảnh (label.btn) trông mờ khi ô bên trong đang khóa (CSS :has, Safari 16.4+)", () => {
+  const html = read("ocr-thu.html");
+  const css = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
+  assert.match(css, /\.btn:has\(input:disabled\) \{ opacity: 0\.5; cursor: default; \}/);
 });
 
 test("trang: ô Thương hiệu ghi rõ luật regex không rút ô này", () => {
@@ -261,4 +274,28 @@ test("ocr-thu-check (h): Content-Type đúng loại, đọc thuộc tính disabl
   const html = read("ocr-thu.html");
   assert.equal(inputDisabledInHtml(html, "pickCamera"), true);
   assert.equal(inputDisabledInHtml(html, "pickLibrary"), true);
+});
+
+test("ocr-thu-check (h): lỗi mạng thì trả { ok: false, error } thay vì ném (để vẫn ghi kết quả (a)-(g))", async () => {
+  const { checkServedSafe } = await import("../ocr-thu-check.mjs");
+  const base = "https://example.test/quet-ma-vach-full/";
+  // fetch ném lỗi (mất mạng, DNS...)
+  const calls = [];
+  const throwing = async (url) => { calls.push(url); throw new TypeError("fetch failed"); };
+  assert.deepEqual(await checkServedSafe(base, throwing), { ok: false, error: "fetch failed" });
+  assert.deepEqual(calls, [base + "ocr-thu.html"]);
+  // fetch giả trả đủ 3 file đúng loại: qua, dùng đúng fetch được truyền vào
+  const html = read("ocr-thu.html");
+  const types = { "ocr-thu.html": "text/html; charset=utf-8", "ocr-thu/regex.mjs": "text/javascript", "ocr-thu/text.mjs": "application/javascript" };
+  const fake = async (url) => {
+    const f = url.slice(base.length);
+    return { ok: true, status: 200, headers: { get: () => types[f] }, text: async () => html, arrayBuffer: async () => new ArrayBuffer(0) };
+  };
+  const good = await checkServedSafe(base, fake);
+  assert.equal(good.ok, true);
+  assert.deepEqual(good.pickDisabledInHtml, { pickCamera: true, pickLibrary: true });
+  assert.equal(good.contentTypes["ocr-thu/text.mjs"], "200 application/javascript");
+  // máy chủ trả 404: không ném, ok = false
+  const notFound = async () => ({ ok: false, status: 404, headers: { get: () => "text/html" }, text: async () => "404", arrayBuffer: async () => new ArrayBuffer(0) });
+  assert.equal((await checkServedSafe(base, notFound)).ok, false);
 });
