@@ -1,0 +1,9 @@
+{
+  "name": "chup-mat-do",
+  "private": true,
+  "type": "module",
+  "description": "Đo cách chụp mặt trước sản phẩm -> nhận ra sản phẩm (Open Food Facts); chỉ để đo, không vào app",
+  "scripts": {
+    "test": "node --test"
+  }
+}
