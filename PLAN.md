@@ -4,7 +4,7 @@ Quét mã vạch trên gói mì, chai nước, hộp bánh… → hiện thành 
 
 ## Tổng kết
 
-Tóm tắt cả dự án (cập nhật 07/11/2026, đợt `ocr-c`); chi tiết và số đo ở mục 2, mục 8 và `test-ocr/README.md`.
+Tóm tắt cả dự án (cập nhật 07/11/2026, đợt `nhay-hon`); chi tiết và số đo ở mục 2, mục 8 và `test-ocr/README.md`.
 
 **Đã xong theo giai đoạn**
 - Giai đoạn 1 – Tra cứu: xong 05/11/2026 (code ở đợt `khoi-dong`, `sua-va-dua-len`; chủ dự án thử trên iPhone Safari đạt). "Chụp ảnh mã" đọc bằng `zxing-wasm` trước từ đợt `sua-cuoi` (06/11/2026).
@@ -12,6 +12,7 @@ Tóm tắt cả dự án (cập nhật 07/11/2026, đợt `ocr-c`); chi tiết v
 - Giai đoạn 3: hồ sơ dị ứng (06/11/2026, đợt `gd3-a`); so sánh 2 sản phẩm và PWA (06/11/2026, đợt `hoan-thien`). Đọc HSD từ ảnh tạm hoãn (bên dưới).
 - Giai đoạn 4: xuất / nhập tủ đồ bằng file JSON và nút góp sản phẩm lên Open Food Facts (06/11/2026, đợt `hoan-thien`).
 - Sửa lỗi sau lần thử iPhone toàn bộ app: đợt `sua-cuoi` (06/11/2026); thử iPhone sau `sua-cuoi` đạt 9/9 (mục 8). Đợt `ket-thuc` (06/11/2026): 2 việc để sau nhỏ (c), (d) của `sua-cuoi`, README "Dùng app", tổng kết này. Đợt `don-nho` (06/11/2026): chip dị ứng bỏ tên trùng, `.gitattributes` xuống dòng LF.
+- Đợt `nhay-hon` (07/11/2026): "Bật camera" giải mã khung hình bằng zxing-wasm (html5-qrcode dự phòng), đo bằng camera giả Chromium: ra mã trong 5 giây 20% → 81%, 0 đọc nhầm; nút đèn pin / phóng to khi máy hỗ trợ; sản phẩm thiếu thông tin thì hiện ảnh nhãn (khi chưa có chữ) và khối "Bổ sung trên Open Food Facts" (mục 8).
 
 **Tạm hoãn**
 - Đọc hạn sử dụng từ ảnh (`hsd-app`): đo ở `gd3-a` bằng `tesseract.js` trên ảnh cắt vùng HSD: đọc thẳng 2/9, xử lý ảnh 1/9, dưới ngưỡng 5/9; chữ in chấm kim và chữ in dọc không đọc được. Người dùng nhập hạn bằng tay.
@@ -29,9 +30,13 @@ Tóm tắt cả dự án (cập nhật 07/11/2026, đợt `ocr-c`); chi tiết v
 - OCR trong trình duyệt (`ocr-c`, 07/11/2026): PaddleOCR.js (PP-OCRv5 mobile det + latin rec, nối khung cùng hàng) 62% đầy đủ thông tin, 36–37% ô đúng với regex (hơn EasyOCR + regex 31%), 5,7 / 7,8 giây/ảnh (Chromium / WebKit trên máy tính), tải lần đầu 18,1 MB, bộ nhớ 1,1–1,4 GB working set (working set: phần bộ nhớ đang thật sự nằm trong RAM) tùy lần chạy; private gần như không đổi (~1.040–1.060 MB) (số của Chromium; WebKit private 5–7 GB vì giữ sẵn vùng nhớ ảo): đạt cả 3 ngưỡng (trên máy tính; tốc độ WebKit vẫn chờ thử iPhone theo quyết định vòng 1); thiếu chữ có dấu nên chỉ hợp điền nháp ô số. tesseract.js 10% (không dùng); VietOCR 74% nhưng cần máy chủ.
 - Trang thử `ocr-thu.html` (không link từ app) chờ chủ dự án thử trên iPhone Safari và Samsung Chrome; đạt thì mới làm "chụp bao bì điền nháp" (mục 8, dòng `ocr-c`).
 
+**Đang chờ thử trên điện thoại (`nhay-hon`)**
+- "Bật camera" mới (zxing-wasm), nút đèn pin / phóng to, ảnh nhãn + khối Bổ sung: danh sách thử ở mục 8, "Chủ dự án tự làm". Camera giả không đo được lấy nét, đèn, phóng to và tốc độ giải mã trên điện thoại.
+
 **Việc để sau còn mở** (chi tiết ở mục 8)
 - `hsd-app`: đọc HSD từ ảnh trong app (tạm hoãn, dòng `hsd-app`).
-- `ocr-c`: chủ dự án thử `ocr-thu.html` trên iPhone Safari / Samsung Chrome; ảnh 1280 px nếu chậm; model đủ chữ có dấu; đo WebGPU thật; bỏ `ocr-thu*` khỏi danh sách lưu sẵn của service worker; chưa có integrity (SRI) cho mọi file CDN: opencv.js / clipper.js qua thẻ script; các module trong import map (PaddleOCR.js, onnxruntime-web, js-yaml, tesseract.js) cần khóa integrity của import map; chưa kiểm sha256 2 file onnx (Việc để sau ocr-c (e)).
+- `ocr-c`: chủ dự án thử `ocr-thu.html` trên iPhone Safari / Samsung Chrome; ảnh 1280 px nếu chậm; model đủ chữ có dấu; đo WebGPU thật; bỏ `ocr-thu*` khỏi danh sách lưu sẵn của service worker; chưa có integrity (SRI) cho mọi file CDN: opencv.js / clipper.js qua thẻ script; các module trong import map (PaddleOCR.js, onnxruntime-web, js-yaml, tesseract.js) cần khóa integrity của import map; chưa kiểm sha256 2 file onnx (Việc để sau ocr-c (e)); (f) lỗi "caller is not a function" ở bước (d) WebKit khi bật "Chỉ dùng wasm" trên `ocr-thu.html` (chờ kết quả thử iPhone).
+- `nhay-hon`: lỗi giải mã lặp lại ở mọi khung (zxing-wasm tải được nhưng đọc lỗi) chưa tự chuyển sang html5-qrcode, chỉ ghi console 1 lần; đường dự phòng html5-qrcode vẫn có lỗi cũ 'play() request was interrupted' khi tắt ngay sau khi bật, và sau lỗi đó bật lại không được tới khi tải lại trang (có từ trước, mục 7); README "Dùng app" chưa nhắc nút đèn pin / phóng to và khối Bổ sung (ngoài phạm vi sửa của đợt).
 - VoiceOver có thể đọc cảnh báo đỏ 2 lần, cần iPhone thật (Việc để sau gd3-a (4), di-ung).
 - Test node chưa phủ phần điều khiển màn So sánh trong `main.js` (Việc để sau hoan-thien (f)).
 - Deploy chỉ đổi `index.html` thì tab đang mở không hiện thanh bản mới (Việc để sau hoan-thien (h)).
@@ -193,7 +198,7 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
 - Đã xử lý (05/11/2026): app gửi app_name / app_version cho Open Food Facts; muốn bỏ thì xóa 2 tham số trong src/off.js.
 - Lịch sử chỉ lưu mã tìm thấy; chốt: giữ như hiện tại (chủ dự án, 05/11/2026).
 - Quyết định tủ đồ (gd2, 05/11/2026): (1) mã không tìm thấy vẫn thêm vào tủ được, tên bắt buộc nhập tay (lỗi mạng / máy chủ thì không có form thêm); (2) logic hạn sử dụng (số ngày còn lại, trạng thái, sắp xếp, định dạng ngày) nằm ở `src/pantry.js`, không đụng giao diện và localStorage; (3) còn 0 ngày tính là vàng (sắp hết hạn), chữ "Hạn cuối là hôm nay".
-- Lỗi có từ trước: tắt camera trong khoảng 50 ms sau khi bật thì html5-qrcode ném 'play() request was interrupted' (scanner.js, chưa sửa).
+- Lỗi có từ trước: tắt camera trong khoảng 50 ms sau khi bật thì html5-qrcode ném 'play() request was interrupted' (scanner.js, chưa sửa). Từ đợt `nhay-hon` (07/11/2026) "Bật camera" tự mở camera và giải mã bằng zxing-wasm nên lỗi này không còn ở đường chính: bật rồi tắt trong 1–2 ms sau khi nút thành "Tắt camera", 10 lần liền trên camera giả Chromium: 0 lỗi console, 10/10 track ended, không còn thẻ video (bản cũ: lỗi ở lần 1 và 9 lần sau không bật lại được). Chỉ còn ở đường dự phòng html5-qrcode (khi không tải được zxing-wasm), y như trước.
 - Đã xử lý (sua-nho, 06/11/2026): render.js không còn chép tay chuỗi 'Sản phẩm chưa có tên': `src/off.js` export hằng `NO_NAME`, `normalize()` và `render.js` dùng chung.
 - Đã xử lý (sua-nho, 06/11/2026): bấm "Sửa" trong tủ đồ thì con trỏ vào ô số lượng (`input[name="qty"]`, chỉ focus, không chọn sẵn chữ) thay cho ô ngày, để iPhone không tự bật bảng chọn ngày (05/11/2026 tạm chấp nhận; cần thử lại trên iPhone).
 - Đã xử lý (sua-nho, 06/11/2026, gợi ý reviewer gd2): ô chọn ngày ở form thêm và form sửa có `min="2000-01-01"` `max="2100-12-31"` lấy từ `YEAR_MIN` / `YEAR_MAX` của `src/pantry.js`; `storage.js` vẫn kiểm lại khi lưu như cũ.
@@ -230,6 +235,14 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
 - [x] Cài Tesseract kèm tiếng Việt (05/11/2026: chủ dự án đã chép `vie.traineddata`, `--list-langs` ra `eng`, `osd`, `vie`; đợt `ocr-a` chạy Tesseract `vie+eng` đủ 96 ảnh): `winget install --id UB-Mannheim.TesseractOCR -e --interactive` (giữ lệnh để cài lại máy), ở bước chọn thành phần tick Vietnamese trong "Additional language data". Kiểm (gõ trong PowerShell): `& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs` (phải có `eng` và `vie`). Gõ `tesseract --list-langs` (không kèm đường dẫn) mà báo không tìm thấy thì bỏ dấu `#` ở dòng `TESSERACT_CMD` trong `test-ocr\.env`. (05/11/2026: Tesseract v5.4.0 đã cài, dòng `TESSERACT_CMD` đã bật, nhưng bộ cài **chưa có `vie`**: `--list-langs` chỉ ra `eng`, `osd`. Đợt `anh-mang` đã tải `vie.traineddata` từ https://github.com/tesseract-ocr/tessdata vào `C:\Users\LTC\tessdata` (kèm `eng`, `osd`), chạy thử `--tessdata-dir C:\Users\LTC\tessdata -l vie` ra chữ tiếng Việt; chép vào `C:\Program Files\Tesseract-OCR\tessdata` bị từ chối vì cần quyền quản trị. **Chủ dự án bổ sung (đã làm):** mở PowerShell bằng "Run as administrator", gõ `Copy-Item "C:\Users\LTC\tessdata\vie.traineddata" "C:\Program Files\Tesseract-OCR\tessdata\"`, rồi kiểm lại `--list-langs` phải có `vie`. Không đặt `TESSDATA_PREFIX`.)
 - [x] (Tùy chọn) Lấy key Azure gói F0 (hết lượt chỉ báo lỗi, không trừ tiền) hoặc Google Vision khi tài khoản chưa nâng cấp trả phí, tự điền `test-ocr/.env`. Không key vẫn chạy so sánh được với công cụ miễn phí. (05/11/2026, đợt `ocr-a`: `run_ocr.py` báo thiếu key cả Google lẫn Azure, nên 2 dịch vụ này chưa được so; có key thì chạy `python run_ocr.py --tools google,azure` rồi `python score.py`, ảnh Tesseract / EasyOCR đã có kết quả sẽ không chạy lại.) (05/11/2026: chủ dự án chốt không lấy key Google/Azure (app là trang tĩnh công khai, key để trong app sẽ lộ), bỏ việc này)
 - [x] Kiểm Claude Code đăng nhập bằng gói Claude (Pro/Max) hay API key (`/status`); API key nghĩa là đang tốn tiền. (05/11/2026: gói Team, không phải API key)
+- [ ] Thử đợt `nhay-hon` trên iPhone Safari rồi Samsung Chrome ở link app (theo thứ tự):
+  1. Bấm "Bật camera": camera mở, có khung trắng giữa hình; quét gói mì cầm cách 15–20 cm (vừa), xa 30–40 cm (mã nhỏ), gần 8–10 cm (mã to); ghi khoảng bao lâu ra mã và có phải căn chỉnh nhiều không (so với trước).
+  2. Quét chỗ có đèn trần chiếu lóa lên mã, và mã trên lon / chai cong; nghiêng máy khoảng 15–20°; ghi có ra mã đúng không (không được ra mã khác).
+  3. Nút "Bật đèn": có hiện không (Samsung Chrome hay có; iPhone có thể không), bấm thì đèn bật / tắt; nút "Phóng to 2×": có hiện không, bấm thì hình phóng to, bấm tiếp 3× rồi "Thu về 1×"; quét được mã xa khi phóng to không.
+  4. "Tắt camera": đèn xanh báo camera của máy tắt ngay; bật lại được; chuyển sang Tủ đồ / So sánh thì camera tắt.
+  5. "Chụp ảnh mã" vẫn chạy như cũ (chụp mã nằm ngang và mã dọc).
+  6. Tra 8934588013133 (Pepsi): thấy ảnh bảng dinh dưỡng và ảnh thành phần kèm câu "Chưa ai nhập chữ, xem ảnh nhãn", bấm ảnh mở tab mới phóng to được; khối "Bổ sung trên Open Food Facts": bấm "Chép mã" báo "Đã chép" (dán thử ra đúng mã), bấm nút Bổ sung mở trang sản phẩm trên Open Food Facts (không cần sửa gì).
+  7. Tra 8934563163150: không có khối Bổ sung; tra 0000000000000: nút "Chép mã" vẫn chạy.
 - [x] Thử toàn bộ app trên iPhone sau đợt hoan-thien (06/11/2026): 10 bước chỉ điện thoại làm được, đạt 9/10; trượt "Chụp ảnh mã" với bao bì thật (NotFoundException sau 4 lần thử). Sửa trong đợt `sua-cuoi`.
 
 ### Claude Code làm (mỗi việc một đợt `/dot`, theo thứ tự A → E, rồi các đợt mới: sua-nho → hsd-do + di-ung (gộp trong đợt gd3-a) → hoan-thien (so-sanh + pwa + gd4 phần không máy chủ) → chủ dự án thử iPhone toàn bộ app → sua-cuoi → ket-thuc; hsd-app tạm hoãn)
@@ -420,5 +433,119 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
   Vòng 3 (sửa theo code-reviewer vòng 2): "Chỉ dùng wasm" giấu `navigator.gpu` (hàm `hideGpu`, cả khi `requestAdapter()` quá 3 giây / không trả adapter / lỗi) vì SDK PaddleOCR lúc khởi tạo luôn gọi `requestAdapter()` không giới hạn giờ, kể cả backend wasm (kiểm thật bằng `ocr-thu-check.mjs` bước (d): trước sửa 1 lần gọi, sau sửa 0 lần ở cả Chromium và WebKit); `isMemoryError` hẹp lại (RangeError chỉ tính khi câu lỗi có alloc / memory / buffer); 2 ô chọn ảnh khóa sẵn đến khi trang sẵn sàng; nhãn "Thương hiệu (luật regex không rút ô này)"; test chặn nâng bản tesseract.js khỏi 7.0.0; `ocr-thu-check.mjs` thêm bước (h) kiểm Content-Type của trang thử và 2 ô chọn ảnh khóa sẵn (dùng lại được trên Pages sau deploy). Quyết định đợt (dieu-phoi, vòng 2): giữ getter lách lỗi tesseract.js 7.0.0; chấp nhận working set đỉnh ~1,4 GB (ghi ở Hạn chế); giữ hành vi service worker trả `index.html` khi mạng chậm quá 3 giây (quyết định vòng 0); không sửa `tools/sw-build.mjs` đợt này (Việc để sau (d)).
   Vòng 4 (gợi ý review vòng 3): isMemoryError không tính RangeError lỗi vị trí (bounds / out of range) là thiếu bộ nhớ, để nhánh WebGPU vẫn lùi về wasm; nút chọn ảnh mờ khi đang khóa (CSS :has); ocr-thu-check bước (h) lỗi mạng ghi { ok: false } và vẫn ghi kết quả (a)–(g); test chặn nâng tesseract.js báo rõ khi thiếu node_modules; sửa câu SRI (mọi file CDN) và ghi rõ số bộ nhớ private là của Chromium. Quyết định (dieu-phoi, vòng 3): làm 7 gợi ý trước khi lên main vì sau khi lên main không commit docs.
   Vòng 5 (gợi ý review vòng 4): isMemoryError không tính lỗi wasm "memory access out of bounds" (mọi câu có "out of bounds") là thiếu bộ nhớ, để nhánh WebGPU vẫn lùi về wasm; ocr-thu-check chụp a0 lỗi thì ghi lỗi và chạy tiếp, trang đã sẵn sàng trước lúc đo thì không ghi trạng thái nút; bước (h) ghi thêm lý do gốc của lỗi mạng (cause); câu SRI "mọi file CDN" ở Hạn chế; đường dẫn Playwright trong README không ghi tên tài khoản Windows. Quyết định (dieu-phoi, vòng 4): làm vòng 5 nhỏ trước khi lên main vì gợi ý 1 ảnh hưởng đúng lần thử trên iPhone (Safari 26 có WebGPU) và sau khi lên main không commit docs.
-  Việc để sau (ocr-c): (a) thu ảnh về 1280 px nếu iPhone đọc chậm (> ~10 giây/ảnh); (b) model nhận dạng có đủ chữ có dấu tiếng Việt chạy được trong trình duyệt (chưa có bản PaddleOCR chính thức); (c) đo tốc độ WebGPU thật (cần máy có adapter, vd iPhone Safari 26); (d) bỏ `ocr-thu*` khỏi danh sách lưu sẵn (precache) của service worker (sửa `tools/sw-build.mjs`, có test); (e) trang thử chưa có integrity (SRI) cho mọi file CDN: opencv.js / clipper.js qua thẻ script; các module trong import map (PaddleOCR.js, onnxruntime-web, js-yaml, tesseract.js) cần khóa integrity của import map; chưa kiểm sha256 2 file onnx.
+  Việc để sau (ocr-c): (a) thu ảnh về 1280 px nếu iPhone đọc chậm (> ~10 giây/ảnh); (b) model nhận dạng có đủ chữ có dấu tiếng Việt chạy được trong trình duyệt (chưa có bản PaddleOCR chính thức); (c) đo tốc độ WebGPU thật (cần máy có adapter, vd iPhone Safari 26); (d) bỏ `ocr-thu*` khỏi danh sách lưu sẵn (precache) của service worker (sửa `tools/sw-build.mjs`, có test); (e) trang thử chưa có integrity (SRI) cho mọi file CDN: opencv.js / clipper.js qua thẻ script; các module trong import map (PaddleOCR.js, onnxruntime-web, js-yaml, tesseract.js) cần khóa integrity của import map; chưa kiểm sha256 2 file onnx; (f) lỗi "caller is not a function" ở bước (d) WebKit khi bật "Chỉ dùng wasm" trên `ocr-thu.html` (`ocr-thu-check.mjs` trên Pages 07/11/2026, WebKit 2/2 lần: "caller is not a function. (In 'caller(handle,methodName,null,args)', 'caller' is undefined)", `requestAdapter` 0 lần; Chromium qua (a)–(h)); chờ kết quả thử iPhone rồi mới quyết sửa.
   Lên main + kiểm Pages: kết quả ở báo cáo cuối đợt (không commit docs sau khi lên main).
+
+- [x] **Đợt `nhay-hon`** (07/11/2026, vòng 1): chủ dự án thấy "Bật camera" quét chưa nhạy và sản phẩm hay thiếu thông tin.
+  - [x] P1 Đo nguồn Open Food Facts (chỉ đọc).
+  - [x] P2 Camera nhạy hơn: đo gốc, thử (a) chỉnh html5-qrcode, (b) giải mã khung hình bằng zxing-wasm (giữ), (c) nút đèn pin / phóng to.
+  - [x] P3 Khi Open Food Facts thiếu thông tin: ảnh nhãn khi chưa có chữ, khối "Bổ sung trên Open Food Facts" + "Chép mã".
+  - [x] 893: không có chỗ nào (đã kiểm toàn `src/` + `public/`: app không suy xuất xứ từ tiền tố mã vạch, không ghi "sản xuất tại Việt Nam"); không thêm gì.
+  Quyết định của dieu-phoi (07/11/2026, nhay-hon vòng 0): đo camera bằng video giả có chặn API Open Food Facts; độ phân giải đo bằng bộ video 640 vs 1280 cùng cảnh; focusMode không thêm (không đo được, Safari không hỗ trợ); (c) đèn pin / phóng to là tính năng, không áp tiêu chí tăng rõ; màn So sánh không thêm khối Bổ sung; 893: không có chỗ nào cần sửa.
+
+  **P1 – Nguồn thông tin** (đo 07/11/2026, 35 mã = 31 mã `test-ocr/truth.csv` + 8934563163150, 8934563651138, 0000000000000, 8934588013133; gọi API v2 giống app + 2 trường ảnh nhãn, tuần tự giãn ≥ 1,2 giây, 52 lượt gọi: 35 lượt đầu + 17 lượt thử lại sau HTTP 429; đếm bằng `normalize()` của app):
+
+  | Đếm (35 mã) | Số mã |
+  |---|---|
+  | Tìm thấy | 34 (không có: 0000000000000) |
+  | Có số dinh dưỡng | 23 / 34 |
+  | Có thành phần | 27 / 34 |
+  | KHÔNG có số mà CÓ ảnh bảng dinh dưỡng | 10 / 11 mã thiếu số |
+  | KHÔNG có thành phần mà CÓ ảnh thành phần | 6 / 7 mã thiếu thành phần |
+  | Thiếu tên | 2 (8934673818391, 8934588013133) |
+  | Cần khối "Bổ sung" (thiếu tên, số hoặc thành phần) | 13 / 34 |
+  | Có ảnh bảng dinh dưỡng / ảnh thành phần / ảnh mặt trước | 33 / 33 / 34 |
+
+  Kết luận: thiếu chữ chứ ít khi thiếu ảnh (chỉ 8934563651138 thiếu cả số, thành phần và ảnh nhãn), nên hiện ảnh nhãn giúp được 10 / 11 mã thiếu số và 6 / 7 mã thiếu thành phần. Bảng từng mã (JSON thô ở `D:\tmp\nhay-hon\nguon\`, không commit):
+
+  | Mã | Tìm thấy | Tên | Số dinh dưỡng | Thành phần | Ảnh bảng dinh dưỡng | Ảnh thành phần |
+  |---|---|---|---|---|---|---|
+  | 8936017368111 | có | có | có | có | có | có |
+  | 8936028641487 | có | có | có | có | có | có |
+  | 8936071070340 | có | có | có | có | có | có |
+  | 8936221043071 | có | có | **không** | **không** | có | có |
+  | 8936221044160 | có | có | có | có | có | có |
+  | 8934803043891 | có | có | có | có | có | có |
+  | 8936036020977 | có | có | có | có | có | có |
+  | 8936036027099 | có | có | có | có | có | có |
+  | 8936036029819 | có | có | có | có | có | có |
+  | 8936079120276 | có | có | có | có | có | có |
+  | 8934588022111 | có | có | có | có | có | có |
+  | 8934840000130 | có | có | **không** | có | có | có |
+  | 8935001214274 | có | có | **không** | có | có | có |
+  | 8935049501503 | có | có | có | có | có | có |
+  | 8935049511021 | có | có | **không** | **không** | có | có |
+  | 8934614031322 | có | có | có | **không** | có | có |
+  | 8934673300759 | có | có | **không** | **không** | có | có |
+  | 8934804025766 | có | có | có | có | có | có |
+  | 8936012061321 | có | có | có | có | có | có |
+  | 8936025773181 | có | có | có | có | có | có |
+  | 8934988020021 | có | có | **không** | có | có | có |
+  | 8935039511024 | có | có | có | có | có | có |
+  | 8936017367107 | có | có | có | có | có | có |
+  | 8936134361040 | có | có | **không** | có | có | có |
+  | 8936016140060 | có | có | có | có | có | có |
+  | 8936036023633 | có | có | có | có | có | có |
+  | 8936045081310 | có | có | có | có | có | có |
+  | 8934572260543 | có | có | có | có | có | có |
+  | 8938501141040 | có | có | **không** | có | có | có |
+  | 8938501141477 | có | có | **không** | **không** | có | có |
+  | 8934673818391 | có | **không** | có | có | có | có |
+  | 8934563163150 | có | có | có | có | có | có |
+  | 8934563651138 | có | có | **không** | **không** | **không** | **không** |
+  | 0000000000000 | **không** | | | | | |
+  | 8934588013133 | có | **không** | **không** | **không** | có | có |
+
+  **P2 – Đo "Bật camera"** (07/11/2026, `D:\tmp\nhay-hon\do-cam.mjs`, kết quả `D:\tmp\nhay-hon\ket-qua\cam-*.json`, bảng `bang-cam.md`): Playwright Chromium (chrome-headless-shell 156) với camera giả (`--use-file-for-fake-video-capture`, video .mjpeg 30 khung/giây tự lặp), bản build phục vụ dưới `/quet-ma-vach-full/`, khung nhìn 412×860; `page.route` chặn mọi request tới Open Food Facts (trả `{"status":0}`), lúc request tới = lúc ra mã, mã lấy từ địa chỉ gọi. Mỗi video 3 lần, trang mới mỗi lần, đo từ lúc bấm "Bật camera", giới hạn 5 giây. 35 video × 2 độ phân giải = 70 video (210 lần đo mỗi bản). Nguồn ảnh: 8936079121822 ảnh THẬT (gói Lay's, `ma-vach-that-1-12mp.jpg`); 8934563163150 và 8993175532457 không có ảnh thật nên mã EAN-13 VẼ bằng JS (bảng L/G/R) dán lên ảnh bao bì thật (`test-ocr/photos/8934803043891/nutrition.jpg`), mã vẽ sắc nét nên dễ đọc hơn ảnh thật; đối chứng ảnh THẬT mã khác: 8936036027099 (gói O'Star), 8934588022111 (lon 7Up cong). Biến thể: xa / vừa / gần = mã chiếm 25% / 50% / 80% bề ngang khung hình, mờ (Gaussian nửa độ rộng vạch mảnh), nghiêng 18°, lóa (vệt sáng tròn trên mã), rung (dịch 4–6 px mỗi khung); mỗi cảnh ở 640×480 và 1280×720.
+  Ghi chú: `'BarcodeDetector' in window` = false (Chromium trên Windows không có BarcodeDetector) nên html5-qrcode dùng bộ đọc JS của nó, giống iPhone Safari; trên Chrome Android có BarcodeDetector nên bản gốc có thể đã nhạy hơn số dưới đây. Độ phân giải đo bằng bộ video 640×480 vs 1280×720 cùng cảnh (camera giả phát đúng cỡ file, bỏ qua yêu cầu của app). Lấy nét liên tục (focusMode): không đo được, Safari không hỗ trợ → không thêm. "gần 1280×720" 0% ở mọi bản vì mã rộng 80% của khung 16:9 tràn ra ngoài phần nhìn thấy của khung 4:3 (người dùng sẽ lùi máy), không phải lỗi giải mã. Số đo trên máy tính (i7-6820HQ); điện thoại giải mã chậm hơn.
+  Ô = tỷ lệ ra mã đúng trong 5 giây · trung vị mili giây (của các lần ra mã) · số lần đọc nhầm (nếu có):
+
+  | Nhóm video (15 lần đo / ô) | gốc | (a1) khung 90%×55% | (a2) không khung | (a3) fps 15 | (a) tốt nhất | (b) zxing-wasm bản đầu | (b) zxing-wasm (giữ) |
+  |---|---|---|---|---|---|---|---|
+  | xa (25%) 640×480 | 0% | 0% | 0% | 0% | 0% | 100% · 146 | 100% · 143 |
+  | vừa (50%) 640×480 | 0% | 20% · 187 | 20% · 123 | 0% | 0% | 100% · 138 | 100% · 135 |
+  | gần (80%) 640×480 | 0% | 80% · 204 | 40% · 140 | 0% | 0% | 100% · 140 | 100% · 146 |
+  | mờ 640×480 | 0% | 0% | 0% | 0% | 0% | 80% · 136 | 80% · 142 |
+  | nghiêng 18° 640×480 | 0% | 0% | 0% | 0% | 0% | 80% · 131 | 80% · 148 |
+  | lóa 640×480 | 0% | 0% | 20% · 134 | 0% | 0% | 60% · 138 | 60% · 145 |
+  | rung 640×480 | 40% · 227 | 40% · 710 | 20% · 138 | 40% · 119 | 40% · 162 | 100% · 142 | 100% · 140 |
+  | **tất cả 640×480** (105) | 6% · 227 | 20% · 217 | 14% · 135 | 6% · 119 | 6% · 162 | 89% · 141 | 89% · 143 |
+  | xa (25%) 1280×720 | 0% | 0% | 0% | 0% | 0% | 100% · 156 | 100% · 168 |
+  | vừa (50%) 1280×720 | 80% · 219 | 20% · 210 | 20% · 151 | 80% · 136 | 80% · 159 | 100% · 152 | 100% · 169 |
+  | gần (80%) 1280×720 | 0% | 0% | 0% | 0% | 0% | 0% | 0% |
+  | mờ 1280×720 | 20% · 205 | 0% | 0% | 20% · 129 | 20% · 173 | 60% · 133 | 60% · 164 |
+  | nghiêng 18° 1280×720 | 60% · 228 | 40% · 247 | 20% · 117 | 60% · 133 | 60% · 167 | 60% · 161 · nhầm 3 | 80% · 157 |
+  | lóa 1280×720 | 0% | 0% | 0% | 0% | 0% | 80% · 140 | 80% · 172 |
+  | rung 1280×720 | 80% · 355 | 40% · 391 | 60% · 169 | 80% · 189 | 80% · 217 | 100% · 152 | 100% · 152 |
+  | **tất cả 1280×720** (105) | 34% · 223 | 14% · 239 | 14% · 151 | 34% · 148 | 34% · 166 | 71% · 152 · nhầm 3 | 74% · 166 |
+  | **tất cả** (210) | 20% · 226 | 17% · 232 | 14% · 146 | 20% · 140 | 20% · 166 | 80% · 146 · nhầm 3 | 81% · 153 |
+
+  Theo nguồn ảnh (42 lần đo / ô):
+
+  | Nguồn | gốc | (a1) | (a2) | (a3) | (a) tốt nhất | (b) bản đầu | (b) giữ |
+  |---|---|---|---|---|---|---|---|
+  | 8936079121822 | 0% | 0% | 7% · 277 | 0% | 0% | 50% · 155 | 50% · 159 |
+  | 8934563163150 | 21% · 279 | 14% · 208 | 0% | 21% · 173 | 21% · 164 | 93% · 145 | 93% · 154 |
+  | 8993175532457 | 21% · 239 | 14% · 236 | 0% | 21% · 176 | 21% · 176 | 86% · 147 | 86% · 154 |
+  | 8936036027099 | 21% · 220 | 36% · 215 | 43% · 141 | 21% · 137 | 21% · 164 | 86% · 142 | 86% · 154 |
+  | 8934588022111 | 36% · 218 | 21% · 493 | 21% · 135 | 36% · 129 | 36% · 151 | 86% · 141 · nhầm 3 | 93% · 152 |
+
+  | Thử | Giữ / bỏ | Lý do (tiêu chí: tỷ lệ +10 điểm % HOẶC trung vị −30%, không tăng đọc nhầm) |
+  |---|---|---|
+  | (a) chỉ nhận 4 loại mã hàng + `useBarCodeDetectorIfSupported` | có từ trước | chỉ ghi lại |
+  | (a) độ phân giải `videoConstraints` 1280×720 (có `facingMode` bên trong) | GIỮ | bộ 1280×720 ra mã 34,3% so với 5,7% của bộ 640×480 cùng cảnh (+28,6 điểm) |
+  | (a1) khung quét 90% × 55%, bỏ trần 340×170 | bỏ | 17,1% (gốc 20%) |
+  | (a2) không đặt khung quét (đọc cả khung hình) | bỏ | 14,3% |
+  | (a3) fps 15 | GIỮ (đường dự phòng) | tỷ lệ như gốc 20%, trung vị 226 → 140 ms (−38%), 0 đọc nhầm |
+  | (a) tốt nhất = fps 15 + 1280×720 (đo bằng bản mới khi chặn file wasm, tức đường dự phòng html5-qrcode) | GIỮ làm dự phòng | 20%, trung vị 166 ms (gồm lúc chờ tải wasm lỗi) |
+  | (a) lấy nét liên tục | không thêm | không đo được, Safari không hỗ trợ |
+  | (b) zxing-wasm bản đầu | sửa | 80% nhưng 3 lần đọc nhầm (lon 7Up nghiêng 1280×720: UPC-E giả "0193458000088" → "19345888", lineCount 2, đọc cùng khung với EAN-13 thật) |
+  | (b) zxing-wasm (mã dài trước, mã 8 số đọc 2 lần mới nhận) | GIỮ | 81,4% so với 20% của (a) tốt nhất (+61 điểm), trung vị 153 ms, 0 đọc nhầm |
+  | (c) đèn pin / phóng to | có | tính năng, không áp tiêu chí; camera giả không có torch / zoom nên nút ẩn (đã kiểm); cần thử trên máy thật |
+
+  Vì sao html5-qrcode kém: thư viện vẽ vùng khung quét lên canvas cỡ PIXEL CSS của khung (khoảng 312×128 trên điện thoại rộng ~390 px) rồi mới giải mã, nên camera nét bao nhiêu thì mã vẫn bị thu còn ~2 px / vạch; mã chiếm 80% (cầm gần) thì khung quét cắt mất lề trắng của mã. Cách mới cắt vùng giữa (92% × 60% phần nhìn thấy) ở độ phân giải thật của camera (tối đa 1280 px ngang) rồi giải mã bằng zxing-wasm (dò kỹ, thử xoay, thu nhỏ).
+  Cách làm (b) trong `src/scanner.js` + `src/camera.js` (thuần, có test): bấm "Bật camera" thì tải `zxing-reader.js` + wasm (chờ tối đa 10 giây, cùng lúc với mở camera) và tự mở getUserMedia (camera sau, 1280×720) + `<video playsinline muted autoplay>` trong `#reader`, khung trắng đúng vùng giải mã; mỗi ~120 ms (sau khi lượt trước xong) cắt vùng giữa → BarcodeDetector (nếu trình duyệt có ean_13) → zxing-wasm (`maxNumberOfSymbols` 4, chọn mã dài trước; mã 8 số phải đọc ra 2 lần). Biến đếm lượt `session`: tắt camera giữa lúc đang giải mã thì kết quả bị bỏ, không gọi onCode; tắt camera dừng mọi track, `video.srcObject = null`, gỡ video, dừng vòng lặp. Wasm tải lỗi / hết giờ → html5-qrcode (fps 15, 1280×720, khung quét như cũ). zxing-wasm không vào chunk chính, file .wasm không vào precache (`dist/sw.js` 0 chữ "wasm"). Chunk JS chính: 379,61 kB (gzip 116,51 kB) → 386,88 kB (gzip 119,06 kB), +7,3 kB gồm cả P3. "Chụp ảnh mã" không đổi (ảnh thật Lay's vẫn ra 8936079121822, Chromium + WebKit).
+  Kiểm giữ đúng: sau khi ra mã và sau "Tắt camera" mọi track `ended`, không còn thẻ video (`kiem-pages.mjs`); bật rồi tắt trong 1–2 ms sau khi nút thành "Tắt camera", 10 lần liền: bản mới 0 lỗi console, 10/10 track ended; bản gốc 1 lỗi 'play() request was interrupted' ở lần 1 rồi 9 lần sau không bật lại được (`tat-nhanh-*.json`); đường dự phòng (chặn wasm) y như bản gốc.
+
+  **P3 – Khi Open Food Facts thiếu thông tin**: `src/off.js` lấy thêm `image_ingredients_url`, `image_nutrition_url` (giữ app_name / app_version), `normalize()` thêm `imageIngredients`, `imageNutrition`. `src/render.js`: `labelImageUrl()` chỉ nhận địa chỉ `new URL()` đọc được, `https:`, tên miền đúng `images.openfoodfacts.org` / `static.openfoodfacts.org` (không tên đăng nhập, không cổng riêng); thiếu thành phần / số dinh dưỡng mà có ảnh hợp lệ thì hiện "Chưa ai nhập chữ, xem ảnh nhãn" + ảnh (bấm mở tab mới để phóng to, `loading="lazy"`, ảnh lỗi thì ẩn và hiện lại câu thiếu dữ liệu cũ); thiếu tên / số dinh dưỡng / thành phần thì khối "Bổ sung trên Open Food Facts" (nói rõ thiếu gì, link `https://world.openfoodfacts.org/product/<mã>`, nút "Chép mã"); đủ cả 3 thì không có khối. `src/main.js`: nút Chép mã tìm vùng báo trong `.copy-area` (khung không tìm thấy + khối Bổ sung). Màn So sánh không đổi. Service worker không cache ảnh khác tên miền (`routeFor` trả "skip", đã kiểm, không sửa).
+  Test: `tests/label-photo.test.js` (19 test) viết trước, đỏ trên code cũ (thiếu export; với hàm giả 14/19 trượt) rồi xanh; `tests/camera.test.js` (24 test) viết trước, đỏ (không có `src/camera.js`; với file giả 16/19 trượt; 5 test chọn mã thêm sau khi đo (b) thấy đọc nhầm, đỏ 5/24 với hàm giả) rồi xanh. `npm test` 186 → 229 (không đổi / xóa test cũ).
