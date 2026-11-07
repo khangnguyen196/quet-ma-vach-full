@@ -6,6 +6,7 @@
 // Chỉ đọc JSON kết quả (không gọi mạng). Phần cũ từ dòng "<!-- KẾT QUẢ -->" trở xuống được thay mới.
 import fs from "node:fs";
 import path from "node:path";
+import { imageDownloadCounts } from "./tong-hop-lib.mjs";
 
 const K = "D:\\tmp\\chup-mat-do\\ket-qua";
 const C = "D:\\tmp\\chup-mat-do\\chi-muc";
@@ -103,7 +104,8 @@ const st = rj(path.join(K, "off-stats-v3-p3.json"))?.lastRun;
 p("## Lượt gọi Open Food Facts vòng 3");
 if (st) p(`- search.pl (P3.2, qua Chromium): ${st.search} lượt tìm, ${st.cacheHits} lần trúng cache, ${st.networkErrors} lỗi mạng, ${st.http429or5xx} lỗi 429/5xx, ${st.retries} lần thử lại, ${st.failures} hỏng, cầu dao ${st.breakerTrips}.`);
 if (vn) p(`- Bản xuất: 1 lượt tải (${vn.attempts} lần, ${vn.failures} hỏng) + 5 lượt HEAD xem cỡ (curl, có / không theo chuyển hướng) + 1 lượt đọc trang /data (Chromium) + 2 lượt đọc thử 3 MB đầu file + 1 lượt đo tốc độ 50 MB.`);
-if (chon?.downloadStats) p(`- Ảnh: ${chon.downloadStats.downloads} lượt tải ảnh chỉ mục + ${(loo?.downloadStats?.downloads ?? 0) - chon.downloadStats.downloads} lượt ảnh truy vấn bộ phụ (bucket AWS, giãn 1 giây), 0 lỗi 5xx, cầu dao 0. Không gọi đọc sản phẩm (API product) ở vòng này.`);
+const imgDl = imageDownloadCounts(chon, loo);
+if (chon?.downloadStats) p(`- Ảnh: ${imgDl.index} lượt tải ảnh chỉ mục + ${imgDl.query} lượt ảnh truy vấn bộ phụ (bucket AWS, giãn 1 giây), 0 lỗi 5xx, cầu dao 0. Không gọi đọc sản phẩm (API product) ở vòng này.`);
 p();
 
 const file = path.join(K, "tong-hop-v3.md");
