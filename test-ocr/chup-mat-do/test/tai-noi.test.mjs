@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Readable, Writable } from "node:stream";
-import { parseHttpCode, resumeOk, isComplete, pipeWithBackpressure } from "../tai-noi.mjs";
+import { parseHttpCode, resumeOk, isComplete, pipeWithBackpressure, probeArgs, resumePlan } from "../tai-noi.mjs";
 
 test("parseHttpCode: lấy mã HTTP cuối cùng curl in ra stderr (-w)", () => {
   assert.equal(parseHttpCode("abc\nHTTP_CODE=302\nHTTP_CODE=206\n"), 206);
@@ -37,4 +37,17 @@ test("pipeWithBackpressure: nguồn dừng khi đích đầy, chạy tiếp khi 
   assert.equal(Buffer.concat(got).length, 20 * 64);
   assert.equal(Buffer.concat(fast).length, 20 * 64);
   assert.ok(pauses > 0, "phải dừng nguồn ít nhất 1 lần khi đích chậm");
+});
+
+test("probeArgs: curl thăm dò đúng 1 byte ở vị trí n, chỉ in mã HTTP", () => {
+  assert.deepEqual(probeArgs("https://x/y.gz", 1000), ["-s", "-o", "NUL", "-r", "1000-1000", "-w", "%{http_code}", "https://x/y.gz"]);
+  assert.equal(probeArgs("u", 5, "/dev/null")[2], "/dev/null");
+});
+
+test("resumePlan: chỉ nối khi thăm dò ra 206; 200 / lỗi / không có byte dở -> tải lại từ đầu", () => {
+  assert.equal(resumePlan(206, 1000), "noi");
+  assert.equal(resumePlan(200, 1000), "tu-dau", "server bỏ qua Range (200) thì nối vào sẽ hỏng file");
+  assert.equal(resumePlan(416, 1000), "tu-dau");
+  assert.equal(resumePlan(null, 1000), "tu-dau");
+  assert.equal(resumePlan(206, 0), "tu-dau");
 });
