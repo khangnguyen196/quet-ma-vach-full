@@ -40,8 +40,8 @@ test("pipeWithBackpressure: nguồn dừng khi đích đầy, chạy tiếp khi 
 });
 
 test("probeArgs: curl thăm dò đúng 1 byte ở vị trí n, chỉ in mã HTTP", () => {
-  assert.deepEqual(probeArgs("https://x/y.gz", 1000), ["-s", "-o", "NUL", "-r", "1000-1000", "-w", "%{http_code}", "https://x/y.gz"]);
-  assert.equal(probeArgs("u", 5, "/dev/null")[2], "/dev/null");
+  assert.deepEqual(probeArgs("https://x/y.gz", 1000), ["-s", "-L", "--max-time", "30", "-o", "NUL", "-r", "1000-1000", "-w", "%{http_code}", "https://x/y.gz"]);
+  assert.equal(probeArgs("u", 5, "/dev/null")[5], "/dev/null");
 });
 
 test("resumePlan: chỉ nối khi thăm dò ra 206; 200 / lỗi / không có byte dở -> tải lại từ đầu", () => {

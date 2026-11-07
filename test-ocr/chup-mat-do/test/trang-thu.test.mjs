@@ -62,7 +62,7 @@ test("t1.mjs, tar.mjs không import gì (module thuần cho trình duyệt)", ()
 });
 
 // ---------- trang ----------
-test("chup-mat-do.html: URL CDN có số bản, đúng bộ chế độ cdn (wasm) của assets.js; ngoài CDN chỉ có link OFF", () => {
+test("chup-mat-do.html: URL CDN có số bản, đúng bộ chế độ cdn (wasm) của assets.js; ngoài CDN chỉ có link OFF + link giấy phép ODbL", () => {
   const { VERSIONS, MODELS, assetUrls } = globalThis.OcrAssets;
   const html = read("chup-mat-do.html");
   const urls = [...new Set(html.match(/https?:\/\/[^\s"'`)<>]+/g))];
@@ -83,7 +83,7 @@ test("chup-mat-do.html: URL CDN có số bản, đúng bộ chế độ cdn (was
   const want = [a.paddleSdk, a.ort, a.ortWasmDir, a.opencv, a.clipper, a.jsYaml, a.detOnnx, a.detYml, a.recOnnx, a.recYml];
   assert.deepEqual([...cdn].sort(), [...want].sort());
   const other = urls.filter((u) => !cdn.includes(u));
-  assert.deepEqual(other.sort(), ["https://world.openfoodfacts.org", "https://world.openfoodfacts.org/product/"]);
+  assert.deepEqual(other.sort(), ["https://opendatacommons.org/licenses/odbl/1-0/", "https://world.openfoodfacts.org", "https://world.openfoodfacts.org/product/"]);
 });
 
 test("chup-mat-do.html: noindex, không gọi API Open Food Facts, không innerHTML, link sản phẩm mở tab mới an toàn", () => {
