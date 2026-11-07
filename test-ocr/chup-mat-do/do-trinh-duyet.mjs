@@ -46,6 +46,13 @@ const checkItems = meta.items.slice(0, 5).map((it, i) => ({ i, url: `/anh/${it.c
 
 const HARNESS = `<!doctype html><meta charset="utf-8"><title>cach-2</title><body><script type="module">
 import { loadEmbedder, topK, dot, l2norm } from "/embed-models.mjs";
+// WebKit của Playwright trên Windows không có OffscreenCanvas (transformers.js cần để đọc / thu nhỏ ảnh).
+// ?shim=1: thay bằng <canvas> thường (chỉ để đo trên máy tính; Safari 17+ trên iPhone có OffscreenCanvas thật).
+window.shimOffscreen = false;
+if (typeof OffscreenCanvas === "undefined" && new URL(location.href).searchParams.has("shim")) {
+  window.OffscreenCanvas = class { constructor(w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; } };
+  window.shimOffscreen = true;
+}
 window.runAll = async ({ model, queries, checkItems }) => {
   const out = { gpuAdapter: null, results: [], check: [] };
   try { out.gpuAdapter = !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch { out.gpuAdapter = false; }
@@ -184,7 +191,7 @@ try {
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 300)); });
   page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${String(e.message || e).slice(0, 300)}`));
   run.consoleErrors = consoleErrors;
-  await page.goto(`${base}/harness.html`);
+  await page.goto(`${base}/harness.html${argv.includes("--shim-offscreen") ? "?shim=1" : ""}`);
   await page.waitForFunction(() => window.ready === true, null, { timeout: 60000 });
   if (browserName === "chromium") {
     const cdp = await ctx.newCDPSession(page);
@@ -213,6 +220,7 @@ try {
     console.log(`Chỉ mục trình duyệt ${model}: ${JSON.stringify(info)}`);
     throw new Error("BUILD_DONE");
   }
+  run.shimOffscreen = await page.evaluate(() => window.shimOffscreen);
   res = await Promise.race([
     page.evaluate((a) => window.runAll(a), { model, queries, checkItems }),
     new Promise((_, rej) => setTimeout(() => rej(new Error(`quá ${TIMEOUT_MS / 60000} phút (dừng vì hết giờ)`)), TIMEOUT_MS)),

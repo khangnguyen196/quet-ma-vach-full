@@ -12,6 +12,7 @@ const C = "D:\\tmp\\chup-mat-do\\chi-muc";
 const D = "D:\\tmp\\chup-mat-do\\du-lieu";
 const rj = (p) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null);
 const mb = (b) => (b == null ? "–" : (b / 1e6).toFixed(1));
+const kb = (b) => (b == null ? "–" : (b / 1e3).toFixed(1));
 const f2 = (x) => (x == null || !Number.isFinite(x) ? "–" : x.toFixed(2));
 const L = [];
 const p = (s = "") => L.push(s);
@@ -26,16 +27,17 @@ if (vn) {
   p(`- Nguồn: cách a – bản xuất JSONL chính thức ${vn.url} (S3 openfoodfacts-ds), ${mb(vn.gzBytes)} MB nén, ${vn.lines} dòng, ${f2(vn.minutes)} phút (tải + lọc cùng lúc). Giấy phép: ODbL 1.0 (cơ sở dữ liệu), DbCL 1.0 (nội dung), ảnh CC BY-SA 3.0 (trang https://world.openfoodfacts.org/data).`);
   p(`- Sản phẩm VN (countries_tags có en:vietnam): ${vn.vnProducts}; có ảnh mặt trước đã chọn: ${vn.vnWithFront}; có unique_scans_n: ${vn.vnWithScans}; có ≥ 2 ảnh mặt trước khác imgid: ${vn.vnWithTwoFronts}.`);
 }
-if (dm) p(`- Danh mục chữ T1: ${dm.docs} sản phẩm, ${mb(dm.rawBytes)} MB thô, ${mb(dm.gzipBytes)} MB gzip; mã thử có trong danh mục ${dm.testCodesInCatalog}/31${dm.testCodesMissing.length ? ` (thiếu: ${dm.testCodesMissing.join(", ")})` : ""}.`);
+if (dm) p(`- Danh mục chữ T1: ${dm.docs} sản phẩm, ${kb(dm.rawBytes)} KB thô, ${kb(dm.gzipBytes)} KB gzip; mã thử có trong danh mục ${dm.testCodesInCatalog}/31${dm.testCodesMissing.length ? ` (thiếu: ${dm.testCodesMissing.join(", ")})` : ""}.`);
 if (chon) {
   const ds = chon.downloadStats || {};
+  if (chon.n < 1000) p(`- Chốt "đúng 1.000 sản phẩm" không đạt được: bản xuất chỉ có ${chon.n} sản phẩm VN có ảnh mặt trước dùng được (sau khi bỏ 28 mã thử không dùng được) -> chỉ mục lấy hết ${chon.n}.`);
   p(`- Chỉ mục ảnh: chọn ${chon.n} sản phẩm (mã thử: ${chon.selected.filter((s) => s.test).map((s) => s.code).join(", ")}); ảnh 400 px có ${ds.ok ?? "–"}/${chon.n} (tải mới ${ds.downloads ?? "–"}, có sẵn ${ds.cached ?? "–"}, lỗi ${ds.errors ?? "–"}, 429/5xx ${ds.http429or5xx ?? "–"}, lỗi mạng ${ds.networkErrors ?? "–"}, cầu dao ${ds.breakerTrips ?? 0}${ds.stoppedByTime ? ", DỪNG VÌ HẾT GIỜ" : ""}; ${mb(ds.bytes)} MB). Nguồn ảnh: bucket AWS dữ liệu mở của OFF (openfoodfacts-images).`);
 }
 if (loo) p(`- Bộ phụ leave-one-out: ${loo.candidates} ứng viên, đã kiểm ${loo.checked}, còn ${loo.pairs.length} cặp (> 24 bit), loại ${loo.dropped.length}; ảnh truy vấn không nằm trong chỉ mục: ${loo.queryNotInIndex ? "đúng" : "SAI"}.`);
 p();
 
 p("## P2 – Cách 2: tìm theo hình");
-p("| Model | Giấy phép | Trình duyệt | Chính 2/31: vị trí 1 / 5 đầu | Phụ xem tay 3/31: vị trí 1 / 5 đầu | Bộ phụ: vị trí 1 / 5 đầu | Giây/ảnh trung vị / lớn nhất | Nạp model (giây) | Tải lần đầu MB (thư viện + model + chỉ mục) | Chỉ mục MB thô / gzip | Bộ nhớ đỉnh WS MB | JS heap MB | Backend | Khớp Node (cos nhỏ nhất) |");
+p("| Model | Giấy phép | Trình duyệt | Chính 2/31: vị trí 1 / 5 đầu | Phụ xem tay 3/31: vị trí 1 / 5 đầu | Bộ phụ: vị trí 1 / 5 đầu | Giây/ảnh trung vị / lớn nhất | Nạp model (giây) | Tải lần đầu MB (thư viện + model + chỉ mục) | Chỉ mục MB thô / gzip | Bộ nhớ đỉnh WS MB | JS heap MB | Backend | Khớp chỉ mục (cos nhỏ nhất) |");
 p("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
 const rankOfRow = (r) => { const i = (r.top5 || []).findIndex((c) => String(c).replace(/^0+/, "") === String(r.code).replace(/^0+/, "")); return i < 0 ? null : i + 1; };
 const cach2 = {};
@@ -57,6 +59,15 @@ for (const m of ["clip", "dinov2"]) {
     p(`| ${m} | ${lic} | ${b} | ${cnt(set(["chinh"]))} | ${cnt(set(["chinh", "phu-xem-tay"]))} | ${cnt(set(["bo-phu"]))} | ${f2(med)} / ${f2(secs.at(-1))} | ${f2(r.loadSeconds)} | ${mb(fl.library + fl.model + fl.index)} (${mb(fl.library)} + ${mb(fl.model)} + ${mb(fl.index)}) | ${mb(info?.rawBytes)} / ${mb(info?.gzipBytes)} | ${mb(r.memory?.wsPeak)} | ${r.memory?.jsHeapPeak ? mb(r.memory.jsHeapPeak) : "–"} | ${r.backend}${r.gpuAdapter ? " (có WebGPU adapter, không dùng)" : ""} | ${f2(cosMin)} |`);
   }
 }
+for (const m of ["clip", "dinov2"]) {
+  const k = rj(path.join(K, "khop-node", `cach2-${m}-chromium.json`))?.run;
+  const ib = rj(path.join(C, m, "info-trinh-duyet.json"));
+  if (k?.check) p(`- Khớp Node – trình duyệt (${m}, 5 ảnh, Chromium so với vector Node int8): cosine ${f2(Math.min(...k.check.map((c) => c.cos)))}–${f2(Math.max(...k.check.map((c) => c.cos)))} (${k.check.map((c) => c.cos.toFixed(4)).join(", ")}). ${Math.min(...k.check.map((c) => c.cos)) < 0.99 ? "< 0,99 nên chỉ mục tính bằng trình duyệt (Chromium)" : "≥ 0,99"}${ib ? `: ${ib.n} ảnh, ${f2(ib.seconds)} giây` : ""}. Cột "Khớp" trong bảng = cosine vector truy vấn với vector chỉ mục trình duyệt (chỉ còn sai số int8).`);
+}
+for (const b of ["clip", "dinov2"]) {
+  const w = cach2[`${b}-webkit`];
+  if (w?.shimOffscreen) p(`- WebKit (${b}): Playwright WebKit trên Windows báo "OffscreenCanvas not supported by this environment" (lần chạy đầu, giữ ở cach2-${b}-webkit-loi.json); số WebKit trong bảng đo với lớp thay OffscreenCanvas bằng <canvas> thường (?shim=1). Safari 17+ trên iPhone có OffscreenCanvas thật: cần thử điện thoại thật.`);
+}
 p("- Mẫu số: chính = 2 mã theo luật tự động (2/31); phụ xem tay = 2 + 8934572260543 (3/31, dòng phụ, xem tay); bộ phụ = cặp leave-one-out. Vị trí 1 / 5 đầu đếm trên mẫu số đó.");
 p("- Bộ nhớ: working set cả cây tiến trình trình duyệt (đỉnh, gồm trình duyệt trống); JS heap qua CDP chỉ Chromium.");
 p();
@@ -64,7 +75,7 @@ p();
 const t1 = rj(path.join(K, "t1.json"));
 p("## P3 – T1: tìm theo chữ trên danh mục VN cục bộ (BM25)");
 if (t1) {
-  p(`- Danh mục ${t1.catalog.docs} sản phẩm, tải về ${mb(t1.catalog.rawBytes)} MB thô / ${mb(t1.catalog.gzipBytes)} MB gzip; mã thử có trong danh mục ${t1.testCodesInCatalog}/31 (mã không có tính là sai).`);
+  p(`- Danh mục ${t1.catalog.docs} sản phẩm, tải về ${kb(t1.catalog.rawBytes)} KB thô / ${kb(t1.catalog.gzipBytes)} KB gzip; mã thử có trong danh mục ${t1.testCodesInCatalog}/31 (mã không có tính là sai).`);
   p("| Nguồn chữ | Vị trí 1 | Trong 5 đầu | Mẫu số |");
   p("|---|---|---|---|");
   const denom = { "1a-chromium": 30, "1a-webkit": 30, "1d": 30, "4a": 12 };
@@ -85,6 +96,14 @@ if (rr) {
   for (const [k, v] of [["bộ phụ", rr.boPhu], ["chính 2/31", rr.chinh], ["phụ xem tay 3/31", rr.phuXemTay]]) p(`| ${k} | ${v.n} | ${v.t1.top1} / ${v.t1.top5} | ${v.img.top1} / ${v.img.top5} | ${v.rrf.top1} / ${v.rrf.top5} |`);
   if (rr.boPhu.ocrOk != null) p(`- Bộ phụ: 1a đọc được chữ ${rr.boPhu.ocrOk}/${rr.boPhu.n} ảnh (ảnh không có chữ: T1 rỗng).`);
 } else p("- Chưa chạy.");
+p("- T2 (search.pl nhiều câu) KHÔNG chạy: OFF không ổn (P3.2: 9 lỗi mạng / 13 lượt tìm, 503 không kèm CORS).");
+p();
+
+const st = rj(path.join(K, "off-stats-v3-p3.json"))?.lastRun;
+p("## Lượt gọi Open Food Facts vòng 3");
+if (st) p(`- search.pl (P3.2, qua Chromium): ${st.search} lượt tìm, ${st.cacheHits} lần trúng cache, ${st.networkErrors} lỗi mạng, ${st.http429or5xx} lỗi 429/5xx, ${st.retries} lần thử lại, ${st.failures} hỏng, cầu dao ${st.breakerTrips}.`);
+if (vn) p(`- Bản xuất: 1 lượt tải (${vn.attempts} lần, ${vn.failures} hỏng) + 5 lượt HEAD xem cỡ (curl, có / không theo chuyển hướng) + 1 lượt đọc trang /data (Chromium) + 2 lượt đọc thử 3 MB đầu file + 1 lượt đo tốc độ 50 MB.`);
+if (chon?.downloadStats) p(`- Ảnh: ${chon.downloadStats.downloads} lượt tải ảnh chỉ mục + ${(loo?.downloadStats?.downloads ?? 0) - chon.downloadStats.downloads} lượt ảnh truy vấn bộ phụ (bucket AWS, giãn 1 giây), 0 lỗi 5xx, cầu dao 0. Không gọi đọc sản phẩm (API product) ở vòng này.`);
 p();
 
 const file = path.join(K, "tong-hop-v3.md");
