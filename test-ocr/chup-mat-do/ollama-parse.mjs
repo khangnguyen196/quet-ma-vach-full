@@ -2,7 +2,7 @@
 // câu tìm T1, chấm (rankOf mẫu số 30, đúng tên / thương hiệu bằng textMatch như 4a).
 import { parseGeminiJson } from "./api-parse.mjs";
 import { t1QueryFromGemini, t1QueryFromLines, bm25Search } from "./vn-data.mjs";
-import { rankOf, textMatch, median } from "./lib.mjs";
+import { rankOf, textMatch, median, maxOf } from "./lib.mjs";
 
 /** Body /api/generate: 1 ảnh (base64), format "json" (bỏ khi json = false: model không theo), temperature 0, seed 0,
  *  num_ctx 4096, stream false. keep_alive giữ model trong bộ nhớ giữa các ảnh (không ảnh hưởng câu trả lời). */
@@ -51,4 +51,21 @@ export function slowStopReason(results) {
   if (results.length !== 10) return null;
   const secs = results.map((r) => r.seconds);
   return shouldStopSlow(secs) ? `dừng ở 10 ảnh: trung vị ${median(secs).toFixed(1)} giây > 180 (tính cả ảnh lỗi / quá giờ)` : null;
+}
+
+/** Vòng 6 (review vòng 5): tóm tắt một lượt 4b, tách "đã thử" (tried = mọi ảnh đã gửi, kể cả lỗi / quá giờ), "chạy xong"
+ *  (ok) và "dự kiến" (planned). Đúng / sai đếm trên ảnh chạy xong; mẫu số 30 giữ như 4a. secondsMedian = trung vị ảnh
+ *  chạy xong; secondsMedianAll = trung vị luật dừng (mọi ảnh đã thử, ảnh quá giờ tính giây thật). */
+export function summarize4b(results, planned) {
+  const rows = results || [];
+  const ok = rows.filter((r) => r.status === "ok");
+  const secs = ok.map((r) => r.seconds);
+  const top1 = ok.filter((r) => r.top1).length;
+  const top5 = ok.filter((r) => r.inTop5).length;
+  return {
+    n: rows.length, tried: rows.length, ok: ok.length, planned, parsedOk: ok.filter((r) => r.parsedOk).length,
+    top1, top5, top1Of30: `${top1}/30`, top5Of30: `${top5}/30`,
+    nameOk: ok.filter((r) => r.nameOk === true).length, brandOk: ok.filter((r) => r.brandOk === true).length,
+    secondsMedian: median(secs), secondsMax: maxOf(secs), secondsMedianAll: median(rows.map((r) => r.seconds)),
+  };
 }

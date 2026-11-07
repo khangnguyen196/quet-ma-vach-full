@@ -18,10 +18,10 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { geminiPrompt } from "./api-parse.mjs";
-import { parseCsv, median, maxOf } from "./lib.mjs";
+import { parseCsv } from "./lib.mjs";
 import { buildBm25 } from "./vn-data.mjs";
 import { startSampler } from "./sampler.mjs";
-import { ollamaBody, scoreOllama, slowStopReason } from "./ollama-parse.mjs";
+import { ollamaBody, scoreOllama, slowStopReason, summarize4b } from "./ollama-parse.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -65,16 +65,7 @@ const run = {
 };
 const save = () => { summarize(); fs.writeFileSync(outFile, JSON.stringify({ run }, null, 1), "utf8"); };
 function summarize() {
-  const rows = run.results;
-  const ok = rows.filter((r) => r.status === "ok");
-  const secs = ok.map((r) => r.seconds);
-  run.summary = {
-    n: rows.length, ok: ok.length, parsedOk: ok.filter((r) => r.parsedOk).length,
-    top1: ok.filter((r) => r.top1).length, top5: ok.filter((r) => r.inTop5).length,
-    top1Of30: `${ok.filter((r) => r.top1).length}/30`, top5Of30: `${ok.filter((r) => r.inTop5).length}/30`,
-    nameOk: ok.filter((r) => r.nameOk === true).length, brandOk: ok.filter((r) => r.brandOk === true).length,
-    secondsMedian: median(secs), secondsMax: maxOf(secs),
-  };
+  run.summary = summarize4b(run.results, run.planned); // vòng 6: tách đã thử / chạy xong / dự kiến
 }
 
 // ---- bật serve (chỉ 127.0.0.1) + lấy mẫu bộ nhớ ----

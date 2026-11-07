@@ -7,7 +7,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { fmtRank, rankCell, runTimeText } from "./tong-hop-lib.mjs";
+import { runTimeText, triedDonePlanned, progressRankCell, nameBrandDoneCell, mediansText4b, manualCheckCounts } from "./tong-hop-lib.mjs";
+import { summarize4b } from "./ollama-parse.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const K = "D:\\tmp\\chup-mat-do\\ket-qua";
@@ -27,7 +28,9 @@ const xt = rj(path.join(K, "xem-tay-mo-rong.json"));
 if (xt) {
   const cnt = {};
   for (const x of xt.pairs) cnt[x.verdict ?? "chưa xem"] = (cnt[x.verdict ?? "chưa xem"] || 0) + 1;
-  p(`- Xem tay ${xt.pairs.length} cặp bộ phụ mở rộng (${xt.rule}; chọn lúc ${xt.chonLuc}, xem lúc ${xt.xemLuc ?? "–"}): ${Object.entries(cnt).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
+  p(`- Xem tay ${xt.pairs.length} cặp bộ phụ mở rộng (${xt.rule}; chọn lúc ${xt.chonLuc}, xemLuc ${xt.xemLuc ?? "–"} = lúc ghi file xem tay, không phải lúc bắt đầu xem): ${Object.entries(cnt).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
+  const mc = manualCheckCounts(xt.pairs); // vòng 6 (g5): ghi cả nhóm 0 cặp
+  p(`- xem tay: ${mc["cùng tấm"]} cùng tấm, ${mc["cùng mặt, khác lần chụp"]} cùng mặt khác lần chụp, ${mc["khác hẳn"]} khác hẳn (số từ xem-tay-mo-rong.json).`);
   for (const x of xt.pairs) p(`  - cặp ${x.thuTu} (${x.code}, ${x.distance} bit): ${x.verdict}${x.ghiChu ? ` – ${x.ghiChu}` : ""}`);
 }
 p("- tong-hop-v3.md / tong-hop-v4.md chạy lại (khoảng bit, câu đối thủ, giờ chạy, ô \"–\", lỗi tải theo bước); số đúng / sai không đổi.");
@@ -41,6 +44,7 @@ const smol = ["cach3-smolvlm-chromium-thu1-q4-ranh.json", "cach3-smolvlm-chromiu
 const smolRuns = smol.map((f) => ({ f, r: rj(path.join(K, f))?.run })).filter((x) => x.r);
 for (const { f, r } of smolRuns) p(`| ${f.replace(/^cach3-|\.json$/g, "")} | ${r.dtype} | ${runTimeText(r)} | ${f1(r.loadSeconds)} | ${r.summary?.ok ?? 0}/${r.planned} | ${r.stoppedReason || r.error || "–"} | ${mb(r.memory?.wsPeak)} |`);
 const allSlow = smolRuns.length === 3 && smolRuns.every(({ r }) => !(r.summary?.ok > 0) && /120 giây/.test(r.stoppedReason || ""));
+p("- SmolVLM fp16 dùng tới ~4,4 GB trên máy 8 GB, có thể chậm thêm do phải dùng bộ nhớ ổ đĩa.");
 p(allSlow ? "- Kết luận: q4, q8, fp16 đều > 120 giây/ảnh khi máy rảnh (giờ chạy ở bảng; q4 từ vòng 4) -> theo CHỐT không có kiểu nào chạy được 1 ảnh ≤ 120 giây: không đo 30 ảnh / WebKit." : "- Kết luận: xem bảng (có kiểu chạy được ≤ 120 giây).");
 p();
 
@@ -49,16 +53,18 @@ p("## P3 – 4b: AI ảnh trên máy qua Ollama (chỉ máy tính / máy chủ)"
 const runs4b = fs.readdirSync(K).filter((f) => /^4b-.*\.json$/.test(f)).sort().map((f) => ({ f, r: rj(path.join(K, f))?.run })).filter((x) => x.r);
 p("- Nguồn + giấy phép (đọc 08/11/2026): qwen2.5vl:3b từ thư viện Ollama chính thức (https://ollama.com/library/qwen2.5vl, cần Ollama ≥ 0.7.0); trang thư viện không ghi giấy phép, lớp license trong manifest Ollama là văn bản Apache License 2.0; model gốc Qwen/Qwen2.5-VL-3B-Instruct trên HuggingFace ghi license_name \"qwen-research\" – file LICENSE \"Qwen RESEARCH LICENSE AGREEMENT\" (chỉ dùng nghiên cứu / phi thương mại). Chỉ dùng đo trên máy, không đưa vào app.");
 p("- Dự phòng moondream (https://ollama.com/library/moondream; gốc vikhyatk/moondream2 Apache-2.0): chỉ chạy nếu qwen2.5vl:3b không nạp / ảnh đầu > 300 giây. Vintern-1B-v3_5: không có bản Ollama chính thức, không dựng thêm môi trường.");
-p("| Model (digest) | Ollama | Ảnh chạy / dự kiến | JSON đọc được | T1 vị trí 1 (mẫu số 30) | T1 5 đầu (mẫu số 30) | T1 (mẫu số = số ảnh chạy) | Đúng tên / thương hiệu | Giây/ảnh trung vị / lớn nhất | Nạp lần đầu (giây) | Dung lượng model GB | Bộ nhớ đỉnh WS ollama* MB | RAM trống trước / sau chạy / sau tắt GB | Giờ chạy | Dừng / lỗi |");
-p("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+p("| Model (digest) | Ollama | Đã thử / xong / dự kiến | JSON đọc được | T1 vị trí 1 | T1 5 đầu | Đúng tên / thương hiệu | Giây/ảnh trung vị / lớn nhất (ảnh chạy xong) | Nạp lần đầu (giây) | Dung lượng model GB | Bộ nhớ đỉnh WS ollama* MB | RAM trống trước / sau chạy / sau tắt GB | Giờ chạy | Dừng / lỗi |");
+p("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
 for (const { f, r } of runs4b) {
-  const s = r.summary || {};
-  p(`| ${r.model} (${r.modelInfo?.digest?.slice(0, 12) ?? "–"}) | ${r.ollamaVersion ?? "–"} | ${s.ok ?? 0} / ${r.planned} | ${s.parsedOk ?? 0}/${s.ok ?? 0} | ${s.top1Of30 ?? "–"} | ${s.top5Of30 ?? "–"} | ${rankCell(s)} | ${s.ok > 0 ? `tên ${s.nameOk}/${s.ok} · thương hiệu ${s.brandOk}/${s.ok}` : "–"} | ${f1(s.secondsMedian)} / ${f1(s.secondsMax)} | ${f1(r.loadSeconds)} | ${gb(r.modelInfo?.sizeBytes)} | ${mb(r.memory?.wsPeak)} | ${gb(r.ramBefore?.freeBytes)} / ${gb(r.ramAfterRun?.freeBytes)} / ${gb(r.ramAfterStop?.freeBytes)} (tổng ${gb(r.ramBefore?.totalBytes)}) | ${runTimeText({ startedAt: r.startedAt, wallSeconds: r.finishedAt ? (Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000 : undefined })} | ${[r.error && `LỖI: ${r.error}`, r.stoppedReason].filter(Boolean).join("; ") || "–"} |`);
+  const s = summarize4b(r.results, r.planned); // vòng 6: tính lại từ results trong file (tách đã thử / chạy xong)
+  p(`| ${r.model} (${r.modelInfo?.digest?.slice(0, 12) ?? "–"}) | ${r.ollamaVersion ?? "–"} | ${triedDonePlanned(s)} | ${s.parsedOk}/${s.ok} | ${progressRankCell("vị trí 1", s.top1, s)} | ${progressRankCell("5 đầu", s.top5, s)} | ${nameBrandDoneCell(s)} | ${f1(s.secondsMedian)} / ${f1(s.secondsMax)} | ${f1(r.loadSeconds)} | ${gb(r.modelInfo?.sizeBytes)} | ${mb(r.memory?.wsPeak)} | ${gb(r.ramBefore?.freeBytes)} / ${gb(r.ramAfterRun?.freeBytes)} / ${gb(r.ramAfterStop?.freeBytes)} (tổng ${gb(r.ramBefore?.totalBytes)}) | ${runTimeText({ startedAt: r.startedAt, wallSeconds: r.finishedAt ? (Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000 : undefined })} | ${[r.error && `LỖI: ${r.error}`, r.stoppedReason].filter(Boolean).join("; ") || "–"} |`);
   p(`- ${f}: đầu vào ${r.input}; câu hỏi = geminiPrompt(); /api/generate format ${r.jsonMode ? "json" : "(không)"}, temperature 0, seed 0, num_ctx 4096, stream false, hết giờ ${r.perImageTimeoutS} giây/ảnh; serve đã dừng: ${r.serveStopped ? "có" : "KHÔNG"}. Chi tiết: model ${JSON.stringify(r.modelInfo?.details ?? {})}.`);
 }
+for (const { f, r } of runs4b) p(`- ${f}: ${mediansText4b(summarize4b(r.results, r.planned))}.`);
+if (runs4b.some(({ f }) => f === "4b-qwen2.5vl-3b.json")) p("- file 4b-qwen2.5vl-3b.json do script tạm ngoài repo (v5-finalize-4b.mjs) ghi lý do dừng tay.");
 if (!runs4b.length) p("- Chưa có kết quả (xem báo cáo).");
 p("- Máy: Intel i7-6820HQ (4 nhân / 8 luồng), RAM 8 GB, GPU Quadro M1000M 2 GB: Ollama (Vulkan) đặt 0/37 lớp lên GPU và tắt offload phần ảnh (\"limited-vram\") -> chạy CPU (ollama.log). Chi phí 0 (chạy trên máy).");
-p("- T1 mẫu số 30 (như 4a): ảnh không chạy / lỗi tính là sai. Đúng tên / thương hiệu: textMatch(trường model đọc, đáp án truth.csv) như 4a.");
+p("- T1 ghi 3 mẫu số: ảnh chạy xong / ảnh đã thử (gồm ảnh quá giờ) / tổng 30 (như 4a: ảnh không chạy / lỗi tính là sai). Đúng tên / thương hiệu: textMatch(trường model đọc, đáp án truth.csv) như 4a.");
 p();
 
 // ---- P4 ----

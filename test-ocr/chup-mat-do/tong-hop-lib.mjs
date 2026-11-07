@@ -76,3 +76,39 @@ export function runTimeText(run) {
   if (!Number.isFinite(run.wallSeconds)) return `${iso(t)} → (không có giờ kết thúc)`;
   return `${iso(t)} → ${iso(t + run.wallSeconds * 1000)}`;
 }
+
+/** Vòng 6 (review vòng 5): cột "Đã thử / xong / dự kiến" của bảng 4b, vd "10 / 8 / 30". */
+export function triedDonePlanned(s) {
+  return `${s?.tried ?? s?.n ?? 0} / ${s?.ok ?? 0} / ${s?.planned ?? "–"}`;
+}
+
+/** Ô vị trí 1 / 5 đầu ghi đủ 3 mẫu số: "vị trí 1: 4/8 chạy xong · 4/10 đã thử · 4/30 tổng (20 chưa chạy)".
+ *  Chưa chạy xong ảnh nào -> "–". */
+export function progressRankCell(label, k, s) {
+  if (!(s?.ok > 0)) return "–";
+  const tried = s.tried ?? s.n;
+  return `${label}: ${k}/${s.ok} chạy xong · ${k}/${tried} đã thử · ${k}/${s.planned} tổng (${s.planned - tried} chưa chạy)`;
+}
+
+/** Ô đúng tên / thương hiệu trên ảnh chạy xong: "tên 2/8 chạy xong · thương hiệu 6/8 chạy xong"; chưa xong ảnh nào -> "–". */
+export function nameBrandDoneCell(s) {
+  if (!(s?.ok > 0)) return "–";
+  return `tên ${s.nameOk ?? 0}/${s.ok} chạy xong · thương hiệu ${s.brandOk ?? 0}/${s.ok} chạy xong`;
+}
+
+const vn1 = (x) => (Number.isFinite(x) ? x.toFixed(1).replace(".", ",") : "–");
+
+/** Câu ghi rõ 2 trung vị của 4b (số lấy từ summarize4b, không viết cứng). */
+export function mediansText4b(s) {
+  return `trung vị ${vn1(s?.secondsMedian)} giây tính ${s?.ok ?? 0} ảnh chạy xong; trung vị luật dừng ${vn1(s?.secondsMedianAll)} giây tính cả ${s?.tried ?? s?.n ?? 0} ảnh đã thử (ảnh quá giờ tính giây thật)`;
+}
+
+/** Vòng 6 (g5): đếm kết quả xem tay theo nhóm cố định; nhóm không có cặp nào vẫn ghi 0; cặp chưa có verdict -> "chưa xem". */
+export function manualCheckCounts(pairs) {
+  const c = { "cùng tấm": 0, "cùng mặt, khác lần chụp": 0, "khác hẳn": 0 };
+  for (const x of pairs || []) {
+    const k = x?.verdict ?? "chưa xem";
+    c[k] = (c[k] || 0) + 1;
+  }
+  return c;
+}
