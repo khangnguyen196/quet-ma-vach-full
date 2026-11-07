@@ -202,3 +202,11 @@ test("regex-parity: ghép chữ sản phẩm theo IMAGE_ORDER như product_text"
   const got = productText(files, "1", (f) => f.split("__")[1].replace(".txt", "").toUpperCase());
   assert.equal(got, "FRONT\nINGREDIENTS\nNUTRITION\nBACK\nDATE\nZZZ");
 });
+
+test("ocr-thu-check: % giống chữ (Levenshtein, gom khoảng trắng)", async () => {
+  const { similarity } = await import("../ocr-thu-check.mjs");
+  assert.equal(similarity("Protein 17,14g", "Protein  17,14g\n"), 1);
+  assert.equal(similarity("", ""), 1);
+  assert.equal(similarity("abcd", "abcx"), 0.75);
+  assert.equal(similarity("abc", ""), 0);
+});
