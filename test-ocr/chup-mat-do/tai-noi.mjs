@@ -14,9 +14,10 @@ export function resumeOk(from, httpCode) {
 }
 
 /** Tham số curl thăm dò 1 byte ở vị trí `n` trước khi nối (không lưu dữ liệu, chỉ in mã HTTP ra stdout).
- *  `nullDevice`: "NUL" trên Windows, "/dev/null" nơi khác. */
+ *  `nullDevice`: "NUL" trên Windows, "/dev/null" nơi khác. Vòng 6: -L theo chuyển hướng (không thì 302 -> tải lại từ
+ *  đầu), --max-time 30 để lệnh thăm dò không treo. */
 export function probeArgs(url, n, nullDevice = "NUL") {
-  return ["-s", "-o", nullDevice, "-r", `${n}-${n}`, "-w", "%{http_code}", url];
+  return ["-s", "-L", "--max-time", "30", "-o", nullDevice, "-r", `${n}-${n}`, "-w", "%{http_code}", url];
 }
 
 /** Quyết định tải nối hay tải lại từ đầu, từ mã HTTP thăm dò 1 byte (probeArgs) và số byte đã có.
