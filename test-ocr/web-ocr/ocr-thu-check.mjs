@@ -9,10 +9,14 @@
 //  (a) crossOriginIsolated = false, backend / WebGPU hiện ra;
 //  (b) chọn từng ảnh (--images), đọc bằng PaddleOCR: chữ không rỗng, 11 ô regex, giây tải / đọc; so chữ với outputs;
 //  (c) đọc bằng tesseract.js: có chữ;
-//  (d) bật "Chỉ dùng wasm" (trang tải lại với ?wasm=1), đọc lại ảnh đầu;
+//  (d) bật "Chỉ dùng wasm" (trang tải lại với ?wasm=1), đọc lại ảnh đầu; đếm số lần gọi navigator.gpu.requestAdapter()
+//      (init script bọc hàm thật; WebKit không có navigator.gpu thì tạo bản giả có requestAdapter đếm lần gọi):
+//      sẵn sàng + đọc xong phải 0 lần gọi và navigator.gpu === undefined (trang đã giấu, SDK không gọi được);
 //  (e) đặt cờ sessionStorage rồi tải lại: hiện câu "vừa bị đóng giữa chừng";
 //  (f tiếp) Cache Storage không có URL nào của jsDelivr / HuggingFace;
-//  (g) app chính (trình duyệt mới, chưa có service worker): giao diện chính hiện, không lỗi console.
+//  (g) app chính (trình duyệt mới, chưa có service worker): giao diện chính hiện, không lỗi console;
+//  (h) chỉ đọc, ngoài trình duyệt: Content-Type của ocr-thu.html (text/html), ocr-thu/regex.mjs, ocr-thu/text.mjs (có
+//      "javascript"; sai thì trình duyệt không chạy module); HTML có disabled sẵn ở 2 ô chọn ảnh (mở lại khi trang sẵn sàng).
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +35,39 @@ export function similarity(a, b) {
     prev = cur;
   }
   return 1 - prev[y.length] / Math.max(x.length, y.length);
+}
+
+/** Content-Type đúng loại: HTML cho trang, JavaScript cho module (sai thì trình duyệt không chạy module). */
+export function contentTypeOk(file, type) {
+  const t = String(type || "").toLowerCase();
+  return file.endsWith(".html") ? t.startsWith("text/html") : t.includes("javascript");
+}
+
+/** HTML có thuộc tính disabled sẵn trên thẻ input của ô chọn ảnh id này không. */
+export function inputDisabledInHtml(html, id) {
+  const tag = html.match(new RegExp(`<input\\b[^>]*\\bid="${id}"[^>]*>`));
+  return !!tag && /\sdisabled(\s|>|=|\/)/.test(tag[0]);
+}
+
+/** (h) Tải 3 file của trang thử từ base (GET, chỉ đọc), kiểm Content-Type và ô chọn ảnh khóa sẵn. */
+async function checkServed(base) {
+  const files = ["ocr-thu.html", "ocr-thu/regex.mjs", "ocr-thu/text.mjs"];
+  const out = { contentTypes: {}, pickDisabledInHtml: null };
+  let ok = true;
+  for (const f of files) {
+    const r = await fetch(base + f, { cache: "no-store" });
+    const type = r.headers.get("content-type");
+    out.contentTypes[f] = `${r.status} ${type}`;
+    ok = ok && r.ok && contentTypeOk(f, type);
+    if (f === "ocr-thu.html") {
+      const html = await r.text();
+      out.pickDisabledInHtml = { pickCamera: inputDisabledInHtml(html, "pickCamera"), pickLibrary: inputDisabledInHtml(html, "pickLibrary") };
+    } else {
+      await r.arrayBuffer();
+    }
+  }
+  out.ok = ok && out.pickDisabledInHtml.pickCamera && out.pickDisabledInHtml.pickLibrary;
+  return out;
 }
 
 function parseArgs(argv) {
@@ -80,8 +117,9 @@ async function main() {
 
     const waitReady = () => page.waitForFunction(() => window.__ocrThu && "ready" in window.__ocrThu, null, { timeout: 60000 });
     await waitReady();
-    const a = await page.evaluate(() => ({ ready: window.__ocrThu.ready, gpu: window.__ocrThu.gpu, coi: self.crossOriginIsolated, env: document.getElementById("env").textContent }));
-    report.steps.a = { ...a, ok: a.ready === true && a.coi === false && !!a.env };
+    const a = await page.evaluate(() => ({ ready: window.__ocrThu.ready, gpu: window.__ocrThu.gpu, coi: self.crossOriginIsolated, env: document.getElementById("env").textContent,
+      pickEnabled: !document.getElementById("pickCamera").disabled && !document.getElementById("pickLibrary").disabled }));
+    report.steps.a = { ...a, ok: a.ready === true && a.coi === false && !!a.env && a.pickEnabled };
     console.log("(a)", JSON.stringify(report.steps.a));
     await shot(page, "a");
 
@@ -131,12 +169,32 @@ async function main() {
     await shot(page, "c");
 
     // ---------- (d) Chỉ dùng wasm ----------
+    // Từ lần tải trang sau: đếm số lần gọi navigator.gpu.requestAdapter() (của trang lẫn SDK PaddleOCR).
+    await page.addInitScript(() => {
+      window.__gpuCalls = 0;
+      const gpu = navigator.gpu;
+      if (gpu && gpu.requestAdapter) {
+        const real = gpu.requestAdapter;
+        gpu.requestAdapter = function (...args) { window.__gpuCalls++; return real.apply(this, args); };
+        window.__gpuFake = false;
+      } else {
+        // WebKit không có WebGPU: tạo bản giả để biết có ai gọi không (trả null = không có adapter)
+        Object.defineProperty(navigator, "gpu", { value: { requestAdapter() { window.__gpuCalls++; return Promise.resolve(null); } }, configurable: true });
+        window.__gpuFake = true;
+      }
+    });
+    const gpuState = () => page.evaluate(() => ({ calls: window.__gpuCalls, gpuUndefined: navigator.gpu === undefined, fake: window.__gpuFake }));
     await Promise.all([page.waitForURL(/[?&]wasm=1/), page.click("#wasmOnly")]);
     await waitReady();
+    const gpuReady = await gpuState();
     await pick(images[0]);
     const d = await runAndWait("#runPaddle", "PaddleOCR");
-    report.steps.d = { url: page.url(), gpu: await page.evaluate(() => window.__ocrThu.gpu), backend: d.backend, loadSeconds: d.loadSeconds, readSeconds: d.readSeconds, chars: d.text?.length ?? 0, error: d.error || null };
-    report.steps.d.ok = !d.error && report.steps.d.chars > 0 && report.steps.d.gpu.use === "wasm";
+    const gpuAfterRead = await gpuState();
+    report.steps.d = { url: page.url(), gpu: await page.evaluate(() => window.__ocrThu.gpu), backend: d.backend, loadSeconds: d.loadSeconds, readSeconds: d.readSeconds, chars: d.text?.length ?? 0, error: d.error || null,
+      fakeGpu: gpuAfterRead.fake, requestAdapterCallsReady: gpuReady.calls, requestAdapterCallsAfterRead: gpuAfterRead.calls,
+      navigatorGpuUndefinedReady: gpuReady.gpuUndefined, navigatorGpuUndefinedAfterRead: gpuAfterRead.gpuUndefined };
+    report.steps.d.ok = !d.error && report.steps.d.chars > 0 && report.steps.d.gpu.use === "wasm" &&
+      gpuReady.calls === 0 && gpuAfterRead.calls === 0 && gpuReady.gpuUndefined && gpuAfterRead.gpuUndefined;
     console.log("(d)", JSON.stringify(report.steps.d));
     await shot(page, "d");
 
@@ -183,10 +241,14 @@ async function main() {
   } finally {
     await browser.close();
   }
+
+  // ---------- (h) Content-Type từ máy chủ + ô chọn ảnh khóa sẵn trong HTML (chỉ đọc) ----------
+  report.steps.h = await checkServed(args.base);
+  console.log("(h)", JSON.stringify(report.steps.h));
   const file = path.join(args.shots, `${args.browser}-ket-qua.json`);
   fs.writeFileSync(file, JSON.stringify(report, null, 2), "utf8");
-  const okAll = ["a", "c", "d", "e", "f", "g"].every((k) => report.steps[k]?.ok) && report.steps.b.every((x) => x.ok);
-  console.log(`\n${args.browser}: ${okAll ? "QUA" : "CÓ BƯỚC KHÔNG QUA"} (a)-(g). Ghi ${file}`);
+  const okAll = ["a", "c", "d", "e", "f", "g", "h"].every((k) => report.steps[k]?.ok) && report.steps.b.every((x) => x.ok);
+  console.log(`\n${args.browser}: ${okAll ? "QUA" : "CÓ BƯỚC KHÔNG QUA"} (a)-(h). Ghi ${file}`);
   process.exitCode = okAll ? 0 : 1;
 }
 

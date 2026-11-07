@@ -245,3 +245,20 @@ test("ocr-thu-check: % giống chữ (Levenshtein, gom khoảng trắng)", async
   assert.equal(similarity("abcd", "abcx"), 0.75);
   assert.equal(similarity("abc", ""), 0);
 });
+
+test("ocr-thu-check (h): Content-Type đúng loại, đọc thuộc tính disabled của ô chọn ảnh", async () => {
+  const { contentTypeOk, inputDisabledInHtml } = await import("../ocr-thu-check.mjs");
+  assert.equal(contentTypeOk("ocr-thu.html", "text/html; charset=utf-8"), true);
+  assert.equal(contentTypeOk("ocr-thu.html", "application/octet-stream"), false);
+  assert.equal(contentTypeOk("ocr-thu/text.mjs", "application/javascript; charset=utf-8"), true);
+  assert.equal(contentTypeOk("ocr-thu/text.mjs", "text/javascript"), true);
+  assert.equal(contentTypeOk("ocr-thu/regex.mjs", "application/octet-stream"), false);
+  assert.equal(contentTypeOk("ocr-thu/regex.mjs", null), false);
+  assert.equal(inputDisabledInHtml('<input type="file" id="pickCamera" accept="image/*" hidden disabled>', "pickCamera"), true);
+  assert.equal(inputDisabledInHtml('<input type="file" id="pickCamera" accept="image/*" hidden>', "pickCamera"), false);
+  assert.equal(inputDisabledInHtml('<input type="file" id="pickLibrary" disabled hidden>', "pickCamera"), false);
+  // trang thật (sau khi sửa): cả 2 ô khóa sẵn
+  const html = read("ocr-thu.html");
+  assert.equal(inputDisabledInHtml(html, "pickCamera"), true);
+  assert.equal(inputDisabledInHtml(html, "pickLibrary"), true);
+});
