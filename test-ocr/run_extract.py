@@ -14,6 +14,7 @@ Dự án KHÔNG dùng API Claude / Anthropic: LLM_PROVIDER khác "ollama" thì l
 """
 import os, re, sys, json, math, time, argparse, pathlib, unicodedata, traceback
 from dotenv import load_dotenv
+from score import NOT_OCR_DIRS   # thư mục trong outputs/ không phải công cụ OCR (dùng chung với score.py)
 
 load_dotenv()
 OUT = pathlib.Path("outputs")
@@ -411,7 +412,9 @@ def main():
     ap.add_argument("--extractors", default=",".join(EXTRACTORS))
     args = ap.parse_args()
 
-    ocr_dirs = [d for d in sorted(OUT.iterdir()) if d.is_dir() and d.name != "extract"]
+    # Thư mục công cụ OCR: như score.list_tools, bỏ NOT_OCR_DIRS (extract, hsd-js, web-ocr) và tên bắt đầu bằng dấu chấm
+    ocr_dirs = [d for d in sorted(OUT.iterdir())
+                if d.is_dir() and d.name not in NOT_OCR_DIRS and not d.name.startswith(".")]
     if args.ocr:
         wanted = {x.strip() for x in args.ocr.split(",")}
         ocr_dirs = [d for d in ocr_dirs if d.name in wanted]
