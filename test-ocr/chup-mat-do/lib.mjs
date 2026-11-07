@@ -174,8 +174,16 @@ export const DEFAULT_STRATEGY = "S2";
 // Chấm điểm
 // ---------------------------------------------------------------------------
 
-/** Ngưỡng trùng từ khi so tên / thương hiệu: số từ chung / số từ của chuỗi NGẮN hơn ≥ NAME_OVERLAP. */
+/** Ngưỡng trùng từ khi so tên / thương hiệu: số từ chung / số từ có nghĩa của ĐÁP ÁN ≥ NAME_OVERLAP. */
 export const NAME_OVERLAP = 0.5;
+/** Từ chung phải dài ít nhất bấy nhiêu chữ cái (a–z) thì mới tính là khớp có nghĩa. */
+export const NAME_MIN_LETTERS = 3;
+/** Từ / cụm chỉ loại hàng hoặc bao bì (đã chuẩn hóa không dấu), bỏ khỏi cả hai chuỗi trước khi so tên.
+ *  Danh sách CỐ ĐỊNH (chốt vòng 2 trước khi chạy lại), không chỉnh theo kết quả. */
+export const CATEGORY_WORDS = [
+  "ca phe", "cafe", "mi", "banh", "sua", "nuoc", "keo", "snack", "vi", "tra", "hat",
+  "goi", "hop", "chai", "lon", "tui", "thung",
+];
 
 /** So mã vạch: chỉ chữ số, bỏ số 0 ở đầu (OFF có khi thêm 0 ở đầu mã). */
 export function sameCode(a, b) {
@@ -189,17 +197,32 @@ export function rankOf(codes, truthCode, top = 5) {
   return i < 0 ? null : i + 1;
 }
 
-/** Hai chuỗi có "cùng tên" không: sau chuẩn hóa, chuỗi này chứa chuỗi kia (nguyên từ), hoặc số từ chung /
- *  số từ của chuỗi ngắn hơn ≥ NAME_OVERLAP. Chuỗi trống -> null (không chấm được). */
+/** Từ có nghĩa để so tên: chuẩn hóa (ký tự điều khiển / dấu câu thành dấu cách, bỏ dấu), bỏ cụm CATEGORY_WORDS,
+ *  bỏ từ nhiễu (isNoiseWord: số, đơn vị, từ chung). Bỏ hết mà trống thì giữ các từ đã chuẩn hóa (vd "Sữa"). */
+export function nameWords(s) {
+  const n = normalizeText(s);
+  if (!n) return [];
+  let t = ` ${n} `;
+  for (const c of CATEGORY_WORDS) t = t.split(` ${c} `).join(" ");
+  for (const c of CATEGORY_WORDS) t = t.split(` ${c} `).join(" ");
+  const kept = t.trim().split(/\s+/).filter((w) => w && !isNoiseWord(w));
+  return [...new Set(kept.length ? kept : n.split(" "))];
+}
+
+const letterCount = (w) => w.replace(/[^a-z]/g, "").length;
+
+/** Tên / thương hiệu `a` (kết quả tìm) có khớp ĐÁP ÁN `b` không (luật vòng 2):
+ *  số từ chung / số từ có nghĩa của đáp án ≥ threshold, VÀ có ít nhất 1 từ chung dài ≥ NAME_MIN_LETTERS chữ cái.
+ *  Riêng đáp án không có từ nào dài ≥ NAME_MIN_LETTERS chữ cái (vd "7UP", "TH") thì phải trùng hết từ của đáp án.
+ *  Không còn luật "chứa nhau". Chuỗi trống -> null (không chấm được). */
 export function textMatch(a, b, threshold = NAME_OVERLAP) {
-  const na = normalizeText(a);
-  const nb = normalizeText(b);
-  if (!na || !nb) return null;
-  if (` ${na} `.includes(` ${nb} `) || ` ${nb} `.includes(` ${na} `)) return true;
-  const wa = [...new Set(na.split(" "))];
-  const wb = new Set(nb.split(" "));
-  const common = wa.filter((w) => wb.has(w)).length;
-  return common / Math.min(wa.length, wb.size) >= threshold;
+  const wb = nameWords(b);
+  // bên kết quả chỉ cần tập từ đã chuẩn hóa: từ chung luôn thuộc wb (đã bỏ loại hàng / nhiễu)
+  const sa = new Set(words(a));
+  if (!sa.size || !wb.length) return null;
+  const common = wb.filter((w) => sa.has(w));
+  if (!wb.some((w) => letterCount(w) >= NAME_MIN_LETTERS)) return common.length === wb.length;
+  return common.length / wb.length >= threshold && common.some((w) => letterCount(w) >= NAME_MIN_LETTERS);
 }
 
 /** Thương hiệu: OFF ghi nhiều thương hiệu cách nhau dấu phẩy; khớp một cái là đúng. */
