@@ -58,6 +58,11 @@ export function vnBrandsUrl() {
   return `https://world.openfoodfacts.org/facets/countries/vietnam/brands.json?${appParams()}`;
 }
 
+/** Trang `page` (100 sản phẩm) của /api/v2/search lọc VN, chỉ trường brands (lấy danh sách thương hiệu cho S3). */
+export function vnBrandsSearchUrl(page) {
+  return `https://world.openfoodfacts.org/api/v2/search?countries_tags_en=vietnam&fields=brands&page_size=100&page=${page}&${appParams()}`;
+}
+
 function brandsString(b) {
   if (Array.isArray(b)) return b.join(", ");
   return b == null ? "" : String(b);
@@ -183,11 +188,26 @@ export function createOffClient({
     return { product: r.data?.product ?? null, status: r.data?.status ?? null, cached: r.cached };
   }
 
-  /** Danh sách tên thương hiệu của sản phẩm bán ở VN (1 lượt, có cache). */
-  async function vnBrands() {
-    const r = await cachedGet(vnBrandsUrl(), "other");
-    const tags = Array.isArray(r.data?.tags) ? r.data.tags : [];
-    return tags.map((t) => t.name).filter(Boolean);
+  /** Danh sách tên thương hiệu của sản phẩm bán ở VN (có cache).
+   *  Cách 1: facet brands (1 lượt). Facet lỗi (07/11/2026 OFF trả 503 liên tục) thì cách 2: /api/v2/search lọc VN,
+   *  chỉ lấy trường brands, tối đa `pages` trang × 100 sản phẩm (không dùng truth.csv). Trả { brands, source }. */
+  async function vnBrands({ pages = 3 } = {}) {
+    try {
+      const r = await cachedGet(vnBrandsUrl(), "other");
+      const tags = Array.isArray(r.data?.tags) ? r.data.tags : [];
+      const brands = tags.map((t) => t.name).filter(Boolean);
+      if (brands.length) return { brands, source: "facet brands" };
+    } catch (e) {
+      log(`  facet thương hiệu lỗi: ${e.message || e}; lấy từ /api/v2/search`);
+    }
+    const set = new Set();
+    for (let page = 1; page <= pages; page++) {
+      const r = await cachedGet(vnBrandsSearchUrl(page), "search");
+      const products = Array.isArray(r.data?.products) ? r.data.products : [];
+      for (const p of products) for (const b of String(p.brands ?? "").split(",")) if (b.trim()) set.add(b.trim());
+      if (products.length < 100) break;
+    }
+    return { brands: [...set], source: `/api/v2/search lọc VN, ${pages} trang × 100` };
   }
 
   return { search, product, vnBrands, cachedGet, stats };

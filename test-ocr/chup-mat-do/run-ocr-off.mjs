@@ -79,8 +79,10 @@ fs.mkdirSync(args.out, { recursive: true });
 
 let brands = [];
 let brandsError = null;
+let brandsSource = null;
 try {
-  brands = await off.vnBrands();
+  ({ brands, source: brandsSource } = await off.vnBrands());
+  console.log(`Danh sách thương hiệu VN: ${brands.length} tên (${brandsSource})`);
 } catch (e) {
   brandsError = String(e.message || e);
   console.log(`Không lấy được danh sách thương hiệu VN: ${brandsError} (S3 chạy như S2)`);
@@ -130,7 +132,7 @@ for (const name of args.tools) {
   const runCdn = readJson(path.join(args.ocrDir, "web-ocr", "runs", `${tool}-cdn.json`));
   const out = {
     name, tool, defaultStrategy: DEFAULT_STRATEGY, searchKind: DEFAULT_KIND, generatedAt: new Date().toISOString(),
-    brandsCount: brands.length, brandsError,
+    brandsCount: brands.length, brandsSource, brandsError,
     run: runLocal ? {
       browserVersion: runLocal.browserVersion, loadSeconds: runLocal.loadSeconds, backend: runLocal.init?.backend ?? null,
       ok: runLocal.ok, errors: runLocal.errors, crashes: runLocal.crashes, initError: runLocal.initError,

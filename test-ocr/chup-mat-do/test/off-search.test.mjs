@@ -145,3 +145,22 @@ test("khóa cache bỏ app_name / app_version", async () => {
   const saved = JSON.parse(fs.readFileSync(path.join(dir, fs.readdirSync(dir)[0]), "utf8"));
   assert.doesNotMatch(saved.key, /app_name|app_version/);
 });
+
+test("vnBrands: facet lỗi thì lấy brands từ /api/v2/search lọc VN, bỏ trùng", async () => {
+  const f = fakeFetch([
+    { status: 503 }, { status: 503 }, // facet lỗi 2 lần
+    { status: 200, body: { products: [{ brands: "Omachi, Masan" }, { brands: "Omachi" }, {}] } },
+  ]);
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...fakeClock() });
+  const r = await off.vnBrands({ pages: 3 });
+  assert.deepEqual(r.brands, ["Omachi", "Masan"]);
+  assert.match(r.source, /api\/v2\/search/);
+  assert.match(f.calls[2], /\/api\/v2\/search\?countries_tags_en=vietnam&fields=brands&page_size=100&page=1/);
+  assert.equal(f.calls.length, 3, "trang 1 chưa đủ 100 sản phẩm thì không đọc trang 2");
+});
+
+test("vnBrands: facet được thì dùng facet", async () => {
+  const f = fakeFetch([{ status: 200, body: { tags: [{ name: "Vifon" }, { name: "" }] } }]);
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...fakeClock() });
+  assert.deepEqual(await off.vnBrands(), { brands: ["Vifon"], source: "facet brands" });
+});
