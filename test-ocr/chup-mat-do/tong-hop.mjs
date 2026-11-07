@@ -56,11 +56,19 @@ const rows = [head, "|---|---|---|---|---|---|---|---|---|---|---|---|---|"];
 const perf = ["| Cách | Chạy ở | Nạp (s) | Giây OCR / ảnh trung vị | lớn nhất | Giây tìm OFF trung vị (S2, mạng thật) | lớn nhất | Bộ nhớ đỉnh (working set cả cây, MB) | JS heap (không gồm wasm), đỉnh, MB | Tải lần đầu (MB qua mạng) | Giải nén (MB) | Lượt API | Chi phí |",
   "|---|---|---|---|---|---|---|---|---|---|---|---|---|"];
 const gem = [];
+const notes = [];
+const RUN_NOTES = {
+  "1c": "D:\\tmp\\chup-mat-do\\ocr\\ocrspace-1c\\_lan-chay.json",
+  "4a": "D:\\tmp\\chup-mat-do\\ocr\\gemini-4a\\_lan-chay.json",
+};
 for (const name of names) {
   const r = readJson(path.join(dir, `${name}.json`));
   const [cach, br] = LABELS[name];
   if (!r) { rows.push(`| ${cach} | ${br} | chưa chạy | | | | | | | | | | |`); continue; }
   const ok = r.items.filter((i) => i.status === "ok");
+  const run = RUN_NOTES[name] ? readJson(RUN_NOTES[name]) : null;
+  if (run?.stop) notes.push(`- ${cach}: ${ok.length}/30 ảnh có kết quả; lần gọi API dừng vì: ${run.stop.split("\n")[0].slice(0, 300)} (lượt lần này ${run.calls}, tổng tháng ${run.monthTotal ?? "–"}${run.model ? `, model ${run.model}` : ""}).`);
+  if (!ok.length) { rows.push(`| ${cach} | ${br} | 0/${r.items.length} | bỏ: ${run?.stop ?? "chưa có chữ OCR"} | | | | | | | | | |`); continue; }
   const label = (k) => (k === r.defaultStrategy ? `**${k} (mặc định)**` : k);
   for (const k of ["S1", "S2", "S3"]) {
     const sc = ok.map((i) => i.strategies[k]).filter(Boolean);
@@ -80,25 +88,25 @@ for (const name of names) {
   }
   const ocrS = ok.map((i) => i.giayOcr);
   const d = ok.map((i) => i.strategies[r.defaultStrategy]).filter((x) => x && x.terms && x.offSeconds != null);
-  // 1a / 1b: số giây lưu trong cache lúc gọi thật (vòng 1); 1c / 1d / 4a: chỉ lượt gọi mạng thật lần này (không cache)
-  const offS = (name.startsWith("1a") || name.startsWith("1b") ? d : d.filter((x) => x.cached === false)).map((x) => x.offSeconds);
+  // số giây mạng của lần gọi THẬT (cache lưu lại số đó lúc gọi; lượt lấy từ cache không đo lại thời gian đọc đĩa)
+  const offS = d.map((x) => x.offSeconds);
   const memImg = ok.map((i) => i.boNho?.peakTotalWs).filter((x) => x != null);
   const memPeak = Math.max(r.run?.memory?.peakTotalWs ?? 0, ...memImg) || null;
   const browser = name.includes("-");
-  const api = ok.reduce((a, i) => a + (i.luotApi || 0), 0);
+  const api = run?.calls ?? ok.reduce((a, i) => a + (i.luotApi || 0), 0); // gồm cả lượt lỗi (503) vẫn bị tính
   perf.push(`| ${cach} | ${br} | ${sec(r.run?.loadSeconds)} | ${sec(median(ocrS))} | ${sec(maxOf(ocrS))} | ${offS.length ? `${sec(median(offS))} (${offS.length} lượt)` : "– (không có số)"} | ${offS.length ? sec(maxOf(offS)) : "–"} | ${browser ? MB(memPeak) : "–"} | ${br === "Chromium" ? MB(r.run?.jsHeapPeak) : browser ? "không đo được (WebKit không có CDP)" : "–"} | ${r.firstLoad ? (r.firstLoad.transfer / 1e6).toFixed(1) : browser ? "chưa đo" : "–"} | ${r.firstLoad ? (r.firstLoad.decoded / 1e6).toFixed(1) : "–"} | ${api || (browser || name === "1d" ? 0 : "–")} | 0 |`);
   if (name === "4a") {
     const g = ok.map((i) => i.gemini).filter(Boolean);
     gem.push(`Tên Gemini tự đọc khớp đáp án (textMatch mới): ${pct(g.filter((x) => x.nameOk === true).length, g.filter((x) => x.nameOk != null).length)}; thương hiệu: ${pct(g.filter((x) => x.brandOk === true).length, g.filter((x) => x.brandOk != null).length)} (cột tham khảo, không qua OFF).`);
   }
 }
-md.push("## Độ đúng", "", ...rows, "", ...(gem.length ? ["- 4a: " + gem.join(" "), ""] : []),
+md.push("## Độ đúng", "", ...rows, "", ...(gem.length ? ["- 4a: " + gem.join(" ")] : []), ...notes, "",
   "## Tốc độ, bộ nhớ, dung lượng", "", ...perf, "",
   "- MB = 10^6 byte trong cả bảng.",
   "- Bộ nhớ: đỉnh working set (phần đang nằm trong RAM) của cả cây tiến trình trình duyệt, lấy mẫu mỗi 250 ms bằng PowerShell (Windows). WebKit Windows có tiến trình Playwright.exe nền khoảng 0,8 GB; số trên điện thoại sẽ khác.",
   "- JS heap (không gồm wasm): CDP Performance.getMetrics của Chromium; bộ nhớ wasm của model không nằm trong số này.",
   "- Byte tải lần đầu: chạy lại ở chế độ cdn (jsDelivr / HuggingFace, bộ nhớ đệm trống), 1 ảnh, cộng byte qua mạng (Playwright request.sizes()).",
-  "- Giây tìm OFF: thời gian mạng của lượt tìm mặc định (không tính lúc chờ giãn cách 6 giây). 1a / 1b: số giây lưu trong cache lúc gọi thật; 1c / 1d / 4a: chỉ lượt gọi mạng thật lần này.",
+  "- Giây tìm OFF: thời gian mạng của lượt tìm mặc định (không tính lúc chờ giãn cách 6 giây). lấy từ số giây lưu trong cache lúc gọi thật (không phải thời gian đọc cache); lượt gọi trước khi cache lưu số giây thì không có số.",
   "- Giây OCR: 1d trên CPU máy tính (i7-6820HQ, 8 luồng); 1c / 4a gồm cả thời gian mạng tới máy chủ API.",
   "");
 
