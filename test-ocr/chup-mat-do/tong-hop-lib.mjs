@@ -39,3 +39,40 @@ export function downloadErrorStats(...stats) {
   const pick = (k) => Math.max(0, ...stats.map((s) => (Number.isFinite(s?.[k]) ? s[k] : 0)));
   return { http429or5xx: pick("http429or5xx"), networkErrors: pick("networkErrors"), breakerTrips: pick("breakerTrips") };
 }
+
+/** Vòng 5 (g1): số lỗi tải ảnh RIÊNG từng bước (không gộp, không lấy số lớn nhất). `steps` = { tên bước: downloadStats };
+ *  bước không có số (null) thì bỏ. Trả [{ step, http429or5xx, networkErrors, breakerTrips }]. */
+export function downloadErrorsByStep(steps) {
+  const n = (x) => (Number.isFinite(x) ? x : 0);
+  return Object.entries(steps || {})
+    .filter(([, s]) => s && typeof s === "object")
+    .map(([step, s]) => ({ step, http429or5xx: n(s.http429or5xx), networkErrors: n(s.networkErrors), breakerTrips: n(s.breakerTrips) }));
+}
+
+/** Vòng 5 (g2): ô vị trí 1 / 5 đầu của một lượt; lượt chưa chạy được ảnh nào (ok = 0) -> "–" (không in "0/1"). */
+export function rankCell(s, n = s?.n) {
+  if (!(s?.ok > 0)) return "–";
+  return fmtRank(s.top1 ?? 0, s.top5 ?? 0, n);
+}
+
+/** Vòng 5 (g2): ô đúng tên / thương hiệu; lượt chưa chạy được ảnh nào -> "–". */
+export function nameBrandCell(s) {
+  if (!(s?.ok > 0)) return "–";
+  return `tên ${s.nameOk ?? 0}/${s.n} · thương hiệu ${s.brandOk ?? 0}/${s.n}`;
+}
+
+/** Khoảng bit (mã băm ảnh chỉ mục – ảnh truy vấn) của các cặp: { min, max, le30, n } hoặc null khi không có cặp có số. */
+export function bitRange(pairs) {
+  const d = (pairs || []).map((x) => x?.distance).filter(Number.isFinite);
+  if (!d.length) return null;
+  return { min: Math.min(...d), max: Math.max(...d), le30: d.filter((x) => x <= 30).length, n: d.length };
+}
+
+/** Vòng 5 (g4): giờ bắt đầu → kết thúc (ISO, tới giây, giờ UTC) của một lượt đo từ run.startedAt + run.wallSeconds. */
+export function runTimeText(run) {
+  const t = Date.parse(run?.startedAt ?? "");
+  if (!Number.isFinite(t)) return "(không có giờ, chạy trước khi thêm trường)";
+  const iso = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  if (!Number.isFinite(run.wallSeconds)) return `${iso(t)} → (không có giờ kết thúc)`;
+  return `${iso(t)} → ${iso(t + run.wallSeconds * 1000)}`;
+}
