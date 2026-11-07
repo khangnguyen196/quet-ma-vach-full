@@ -449,5 +449,30 @@ class OutputEncodingTest(TmpDirCase):
         self.assertTrue((self.out / "summary_combo.md").exists())
 
 
+class NonOcrDirsTest(TmpDirCase):
+    def test_e6_without_ocr_arg_skips_non_ocr_dirs_like_score(self):
+        # Không truyền --ocr: chỉ chạy trên thư mục công cụ OCR. outputs/hsd-js (phần C), outputs/web-ocr (số đo trình
+        # duyệt, ocr-c), outputs/extract và thư mục bắt đầu bằng dấu chấm không phải OCR, giống score.py.
+        self.write_ocr("tesseract", "1", "front", "chữ")
+        for name in ["hsd-js", "web-ocr", ".tam"]:
+            self.write_ocr(name, "1", "front", "không phải OCR")
+        seen = []
+
+        def fake_extract(text):
+            seen.append(text)
+            return {"ten": "x"}
+
+        with mock.patch.dict(run_extract.EXTRACTORS, {"gia": (fake_extract, lambda: True)}), \
+                mock.patch.object(sys, "argv", ["run_extract.py", "--extractors", "gia"]), \
+                mock.patch.object(sys, "stdout", io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()):
+            run_extract.main()
+        self.assertEqual(sorted(p.name for p in (self.out / "extract").iterdir()), ["tesseract__gia"])
+        self.assertEqual(seen, ["chữ"])
+
+    def test_e6b_not_ocr_dirs_same_as_score(self):
+        import score
+        self.assertEqual(run_extract.NOT_OCR_DIRS, score.NOT_OCR_DIRS)
+
+
 if __name__ == "__main__":
     unittest.main()
