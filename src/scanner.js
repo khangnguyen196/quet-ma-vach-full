@@ -206,7 +206,9 @@ export function createScanner(elementId) {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     let detector = await makeDetector();
     let warned = false;
-    let pending = null; // mã 8 số đang chờ đọc lần 2 ({ code, at }, confirmCode)
+    let pending = null; // mã 8 số đang chờ đọc lần 2 ({ code, at, frame }, confirmCode)
+    // Số khung đã cắt + giải mã (kể cả khung không ra mã); lượt bỏ qua vì video chưa sẵn sàng thì không tăng.
+    let frame = 0;
     const tick = async () => {
       if (my !== session || !cam) return;
       const { video } = cam;
@@ -215,6 +217,7 @@ export function createScanner(elementId) {
         const r = video.readyState >= 2
           ? cameraCrop(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight) : null;
         if (r) {
+          frame++;
           if (canvas.width !== r.dw || canvas.height !== r.dh) { canvas.width = r.dw; canvas.height = r.dh; }
           ctx.drawImage(video, r.sx, r.sy, r.sw, r.sh, 0, 0, r.dw, r.dh);
           if (detector) {
@@ -236,8 +239,8 @@ export function createScanner(elementId) {
         if (!warned) { console.warn("Lỗi khi giải mã khung hình camera:", e); warned = true; }
       }
       if (my !== session || !cam) return; // đã tắt trong lúc giải mã: bỏ kết quả, không gọi onCode
-      // mã 8 số phải đọc ra lần nữa trong CONFIRM_WINDOW_MS (1 giây) mới nhận (tránh mảnh đọc nhầm)
-      const c = confirmCode(pending, code, performance.now());
+      // mã 8 số phải đọc ra lần nữa trong CONFIRM_WINDOW_MS (1 giây) hoặc ở khung ngay sau mới nhận (tránh mảnh đọc nhầm)
+      const c = confirmCode(pending, code, performance.now(), frame);
       pending = c.state;
       if (c.accept) { onCode(c.accept); return; }
       cam.timer = setTimeout(tick, FRAME_GAP_MS);

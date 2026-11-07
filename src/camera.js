@@ -73,19 +73,25 @@ export const CONFIRM_WINDOW_MS = 1000;
 
 /**
  * Xác nhận mã trước khi tra: mã 12–13 số nhận ngay; mã 8 số (EAN-8, UPC-E: dễ là mảnh đọc nhầm của mã dài)
- * phải đọc ra lần nữa trong CONFIRM_WINDOW_MS (không cần 2 khung liền nhau) mới nhận.
- * state: mã 8 số đang chờ { code, at } (at = lúc đọc lần đầu, mili giây) hoặc null; now: giờ hiện tại (mili giây,
- * vd performance.now()). Quá hạn thì lần này coi như lần đầu. Khung không có mã giữ nguyên state (vẫn hết hạn theo giờ).
- * Trả { accept: mã được nhận hoặc null, state: trạng thái mới }.
- * Ví dụ: let s = confirmCode(null, "96385074", 0) → accept null, state { code: "96385074", at: 0 };
- *   confirmCode(s.state, "96385074", 500) → accept "96385074"; confirmCode(s.state, "96385074", 1500) → accept null,
- *   state { code: "96385074", at: 1500 }.
+ * phải đọc ra lần nữa trong CONFIRM_WINDOW_MS (không cần 2 khung liền nhau) HOẶC ở khung giải mã ngay sau mới nhận.
+ * Vì sao có "khung ngay sau" (code-reviewer, nhay-hon vòng 2): máy chậm giải mã 1 khung hơn ~880 ms thì 2 lần đọc
+ * luôn cách nhau quá 1 giây, mã EAN-8 sẽ không bao giờ được nhận.
+ * state: mã 8 số đang chờ { code, at, frame } (at = lúc đọc lần đầu, mili giây; frame = số khung lúc đó) hoặc null;
+ * now: giờ hiện tại (mili giây, vd performance.now()); frame: số thứ tự khung đã giải mã (decodeLoop tăng 1 mỗi khung
+ * cắt + giải mã, kể cả khung không ra mã). Quá hạn và không liền khung thì lần này coi như lần đầu. Khung không có mã
+ * giữ nguyên state (vẫn hết hạn theo giờ). Trả { accept: mã được nhận hoặc null, state: trạng thái mới }.
+ * Ví dụ: let s = confirmCode(null, "96385074", 0, 5) → accept null, state { code: "96385074", at: 0, frame: 5 };
+ *   confirmCode(s.state, "96385074", 500, 8) → accept "96385074" (trong 1 giây);
+ *   confirmCode(s.state, "96385074", 1500, 6) → accept "96385074" (khung liền sau, máy chậm);
+ *   confirmCode(s.state, "96385074", 1500, 7) → accept null, state { code: "96385074", at: 1500, frame: 7 }.
  */
-export function confirmCode(state, code, now) {
+export function confirmCode(state, code, now, frame) {
   if (!code) return { accept: null, state };
   if (code.length !== 8) return { accept: code, state: null };
-  if (state && state.code === code && now - state.at <= CONFIRM_WINDOW_MS) return { accept: code, state: null };
-  return { accept: null, state: { code, at: now } };
+  if (state && state.code === code && (now - state.at <= CONFIRM_WINDOW_MS || frame === state.frame + 1)) {
+    return { accept: code, state: null };
+  }
+  return { accept: null, state: { code, at: now, frame } };
 }
 
 /** 4 định dạng mã hàng theo tên của BarcodeDetector (giống formatsToSupport của html5-qrcode). */
