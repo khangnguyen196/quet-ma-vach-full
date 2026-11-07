@@ -5,6 +5,8 @@
 //   node web-ocr/run-browser.mjs --engine paddlejs --join rows --browser webkit  # khung cùng hàng nối 1 dòng -> paddlejs-rows-webkit
 //   node web-ocr/run-browser.mjs --engine tesseractjs --browser webkit --mode cdn --limit 1   # đo byte tải lần đầu
 //   node web-ocr/run-browser.mjs --report                                        # gom outputs/web-ocr/metrics.csv
+//   node web-ocr/run-browser.mjs --engine paddlejs --join rows --only front --lines --out D:\tmp\chup-mat-do\ocr --photos D:\quet-ma-vach-full\test-ocr\photos
+//       # đợt chup-mat-do: chỉ ảnh front.*, ghi thêm <mã>__front.json (dòng + chiều cao chữ + độ tin + bộ nhớ của ảnh)
 //
 // Kết quả (mode local): outputs/<engine>-<browser>/<mã>__<ảnh>.txt + dòng outputs/times.csv (tool,code,image,seconds,status).
 // Mỗi lần chạy ghi thêm outputs/web-ocr/runs/<tool>-<mode>.json (thời gian nạp, backend, bộ nhớ, byte tải).
@@ -16,13 +18,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { startServer } from "./serve.mjs";
+import { startServer, defaultMounts } from "./serve.mjs";
 import {
   resultFileName, toolName, timesRow, pickPhotos, summarizeMemory, sumBytes, timeStats, mb, csvLine, shouldWriteRun, metricsNotes,
+  onlyImages, imagePeak,
 } from "./lib.mjs";
 
 function parseArgs(argv) {
-  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false, join: "" };
+  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false, join: "", only: "", lines: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -35,6 +38,8 @@ function parseArgs(argv) {
     else if (k === "--timeout") a.timeout = Number(v());
     else if (k === "--report") a.report = true;
     else if (k === "--join") a.join = v(); // "rows": khung cùng hàng nối 1 dòng (công cụ paddlejs-rows-<trình duyệt>)
+    else if (k === "--only") a.only = v(); // chỉ ảnh có tên này (không đuôi), vd front
+    else if (k === "--lines") a.lines = true; // ghi thêm <mã>__<ảnh>.json: dòng + chiều cao chữ + độ tin + bộ nhớ
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
@@ -124,13 +129,15 @@ async function runOnce(args) {
   const pw = await loadPlaywright();
   const tool = toolName(args.engine, args.browser, args.join);
   const photos = listPhotos(args.photos);
-  const todo = args.limit > 0 ? photos.slice(0, args.limit) : photos;
+  const picked = onlyImages(photos, args.only);
+  const todo = args.limit > 0 ? picked.slice(0, args.limit) : picked;
   const outDir = path.join(args.out, tool);
   const timesPath = path.join(args.out, "times.csv");
   const runsDir = path.join(args.out, "web-ocr", "runs");
   fs.mkdirSync(runsDir, { recursive: true });
 
-  const server = await startServer({ port: 0 });
+  // ảnh lấy từ --photos (trước đây server luôn lấy <thư mục hiện tại>/photos)
+  const server = await startServer({ port: 0, mounts: { ...defaultMounts(), "/photos/": path.resolve(args.photos) } });
   const base = `http://localhost:${server.port}`;
   const launchOpts = { headless: true };
   if (args.browser === "chromium" && process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
@@ -143,6 +150,7 @@ async function runOnce(args) {
   const samples = [];
   let phase = "baseline";
   let jsHeapPeak = 0;
+  let imgHeapPeak = 0; // đỉnh JS heap trong lúc đọc 1 ảnh (Chromium)
   const net = [];
   const netPending = []; // promise của bộ xử lý requestfinished (lấy cỡ là việc bất đồng bộ), chờ hết trước khi đóng
   const netFailed = [];
@@ -220,13 +228,14 @@ async function runOnce(args) {
           const { metrics } = await cdp.send("Performance.getMetrics");
           const used = metrics.find((m) => m.name === "JSHeapUsedSize")?.value || 0;
           jsHeapPeak = Math.max(jsHeapPeak, used);
+          imgHeapPeak = Math.max(imgHeapPeak, used);
         } catch { /* trang đang bận / đã đóng */ }
         busy = false;
       }, 250);
     };
 
     const openAndInit = async () => {
-      const url = `${base}/harness.html?engine=${args.engine}&mode=${args.mode}${args.join ? `&join=${args.join}` : ""}`;
+      const url = `${base}/harness.html?engine=${args.engine}&mode=${args.mode}${args.join ? `&join=${args.join}` : ""}${args.lines ? "&lines=1" : ""}`;
       await page.goto(url);
       await page.waitForFunction(() => window.harnessReady === true, null, { timeout: 120000 });
       return withTimeout(page.evaluate(() => window.harness.init()), 900000, "init");
@@ -248,6 +257,9 @@ async function runOnce(args) {
         let status = "ok";
         let text = "";
         let secs = 0;
+        let lines;
+        const sampleFrom = samples.length;
+        imgHeapPeak = 0;
         try {
           const r = await withTimeout(
             page.evaluate((u) => window.harness.run(u), `${base}/photos/${encodeURI(ph.rel)}`),
@@ -256,6 +268,7 @@ async function runOnce(args) {
           );
           text = r.text;
           secs = r.seconds;
+          lines = r.lines;
           run.lastImage = { width: r.width, height: r.height, srcWidth: r.srcWidth, srcHeight: r.srcHeight };
         } catch (e) {
           status = `error: ${String(e.message || e)}`;
@@ -277,6 +290,15 @@ async function runOnce(args) {
           if (status === "ok") {
             fs.mkdirSync(outDir, { recursive: true });
             fs.writeFileSync(outFile, text, "utf8");
+          }
+          if (args.lines) {
+            // bộ nhớ của riêng ảnh này: đỉnh các mẫu PowerShell lấy trong lúc đọc ảnh + đỉnh JS heap (Chromium)
+            const mem = imagePeak(samples.slice(sampleFrom));
+            fs.mkdirSync(outDir, { recursive: true });
+            fs.writeFileSync(outFile.replace(/\.txt$/, ".json"), JSON.stringify({
+              code: ph.code, image: ph.image, status, seconds: secs, text, lines: lines ?? null,
+              memory: { ...mem, jsHeapPeak: args.browser === "chromium" ? imgHeapPeak : null },
+            }, null, 2), "utf8");
           }
           if (!fs.existsSync(timesPath)) fs.writeFileSync(timesPath, csvLine(["tool", "code", "image", "seconds", "status"]), "utf8");
           fs.appendFileSync(timesPath, timesRow(tool, ph.code, ph.image, secs, status), "utf8");

@@ -12,7 +12,8 @@
 <script src="assets.js"></script>
 <script>
   // Tham số: engine=paddlejs|tesseractjs, mode=local|cdn, ort=wasm|webgpu (chỉ paddlejs),
-  // join=rows (khung cùng hàng nối 1 dòng, cách chính của PaddleOCR.js; xem harness.mjs).
+  // join=rows (khung cùng hàng nối 1 dòng, cách chính của PaddleOCR.js; xem harness.mjs),
+  // lines=1 (đợt chup-mat-do: trả thêm từng dòng kèm chiều cao chữ + độ tin).
   // paddlejs chưa có ort: dò WebGPU trước (navigator.gpu + requestAdapter() thành công) rồi tải lại trang với
   // ort=webgpu hoặc ort=wasm, vì import map phải có TRƯỚC khi nạp module nào, mà dò WebGPU là việc bất đồng bộ.
   (function () {
@@ -37,7 +38,7 @@
     }
     var urls = OcrAssets.assetUrls(mode, { webgpu: q.get("ort") === "webgpu" });
     window.__OCR_ASSETS = urls;
-    window.__OCR_PARAMS = { engine: engine, mode: mode, ort: q.get("ort") || "", gpuReason: q.get("gpuReason") || "", join: q.get("join") || "" };
+    window.__OCR_PARAMS = { engine: engine, mode: mode, ort: q.get("ort") || "", gpuReason: q.get("gpuReason") || "", join: q.get("join") || "", lines: q.get("lines") === "1" };
     if (engine === "paddlejs") {
       var map = document.createElement("script");
       map.type = "importmap";

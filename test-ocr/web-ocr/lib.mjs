@@ -62,9 +62,14 @@ function bbox(poly) {
  *  - Trong hàng, sắp trái sang phải (minX). Hàng sắp trên xuống.
  *  items: [{ poly: [[x,y]x4], text }]. Trả về mảng hàng, mỗi hàng là mảng chuỗi (bỏ khung chữ rỗng). */
 export function groupRows(items, minOverlap = 0.5) {
+  return groupRowBoxes(items, minOverlap).map((r) => r.map((b) => b.text));
+}
+
+/** Như groupRows nhưng mỗi hàng giữ khung: [{ text, minX, maxX, minY, maxY, score }]. */
+function groupRowBoxes(items, minOverlap = 0.5) {
   const boxes = items
     .filter((it) => it && typeof it.text === "string" && it.text.trim() !== "" && Array.isArray(it.poly) && it.poly.length)
-    .map((it) => ({ ...bbox(it.poly), text: it.text.trim() }))
+    .map((it) => ({ ...bbox(it.poly), text: it.text.trim(), score: Number.isFinite(it.score) ? it.score : null }))
     .sort((a, b) => a.minY - b.minY || a.minX - b.minX);
   const rows = [];
   for (const b of boxes) {
@@ -81,7 +86,37 @@ export function groupRows(items, minOverlap = 0.5) {
     }
     rows.push({ minY: b.minY, maxY: b.maxY, boxes: [b] });
   }
-  return rows.map((r) => r.boxes.sort((a, b) => a.minX - b.minX).map((b) => b.text));
+  return rows.map((r) => r.boxes.sort((a, b) => a.minX - b.minX));
+}
+
+/** Dòng kèm chiều cao chữ + độ tin (đợt chup-mat-do, chiến lược S1 "dòng chữ cao nhất"): mỗi hàng của
+ *  rowLines thành { text, h, conf }: h = chiều cao lớn nhất của các khung trong hàng (px của ảnh đã thu nhỏ),
+ *  conf = trung bình score của các khung (null nếu không có score). */
+export function rowLineInfo(items, minOverlap = 0.5) {
+  return groupRowBoxes(items, minOverlap).map((r) => {
+    const scores = r.map((b) => b.score).filter((s) => s != null);
+    return {
+      text: r.map((b) => b.text).join(" "),
+      h: Math.max(...r.map((b) => b.maxY - b.minY)),
+      conf: scores.length ? scores.reduce((s, x) => s + x, 0) / scores.length : null,
+    };
+  });
+}
+
+/** Dòng của tesseract.js (kết quả có blocks) thành { text, h, conf }: h = cao khung dòng, conf = 0–100. */
+export function tessLineInfo(blocks) {
+  const out = [];
+  for (const b of blocks || []) {
+    for (const p of b?.paragraphs || []) {
+      for (const l of p?.lines || []) {
+        const text = String(l?.text ?? "").trim();
+        if (!text) continue;
+        const h = l.bbox ? l.bbox.y1 - l.bbox.y0 : null;
+        out.push({ text, h, conf: Number.isFinite(l.confidence) ? l.confidence : null });
+      }
+    }
+  }
+  return out;
 }
 
 /** Cách ghi cũ của Paddle (paddlejs-chromium / -webkit, giữ để so): mỗi khung chữ 1 dòng, theo thứ tự của groupRows. */
@@ -258,4 +293,25 @@ export function makeTar(files) {
     off += b.length;
   }
   return out;
+}
+
+/** Chỉ giữ ảnh có tên (không đuôi) bằng `name` (vd "front"); name trống thì giữ hết.
+ *  photos: kết quả pickPhotos ([{ code, image, rel }]). */
+export function onlyImages(photos, name) {
+  if (!name) return photos;
+  return photos.filter((p) => p.image === name);
+}
+
+/** Đỉnh bộ nhớ trong một khoảng mẫu (vd lúc đọc 1 ảnh): tổng working set / private lớn nhất của cả cây và
+ *  working set lớn nhất của 1 tiến trình. samples: [{ procs: [{ private, ws }] }]. Không có mẫu -> giá trị null. */
+export function imagePeak(samples) {
+  const list = (samples || []).filter((s) => s && Array.isArray(s.procs) && s.procs.length);
+  if (!list.length) return { samples: 0, peakTotalWs: null, peakTotalPrivate: null, peakProcWs: null };
+  const sum = (procs, k) => procs.reduce((t, p) => t + (Number(p[k]) || 0), 0);
+  return {
+    samples: list.length,
+    peakTotalWs: Math.max(...list.map((s) => sum(s.procs, "ws"))),
+    peakTotalPrivate: Math.max(...list.map((s) => sum(s.procs, "private"))),
+    peakProcWs: Math.max(...list.flatMap((s) => s.procs.map((p) => Number(p.ws) || 0))),
+  };
 }

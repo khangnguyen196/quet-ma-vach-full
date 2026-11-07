@@ -2,7 +2,7 @@
 //   await harness.init()          -> nạp thư viện + model, trả số giây nạp, backend, tính năng trình duyệt
 //   await harness.run(url)        -> đọc 1 ảnh, trả { text, seconds, ... }
 // Tham số và đường dẫn do harness.html đặt sẵn ở window.__OCR_PARAMS / window.__OCR_ASSETS.
-import { orderLines, rowLines, makeTar, tessLangObjects } from "./lib.mjs";
+import { orderLines, rowLines, rowLineInfo, tessLineInfo, makeTar, tessLangObjects } from "./lib.mjs";
 
 const P = window.__OCR_PARAMS;
 const A = window.__OCR_ASSETS;
@@ -98,7 +98,9 @@ async function initPaddle() {
       // join=rows (cách chính từ vòng 2, công cụ paddlejs-rows-*): khung cùng hàng nối thành 1 dòng;
       // không join: mỗi khung 1 dòng (paddlejs-chromium / -webkit, giữ để so)
       const lines = P.join === "rows" ? rowLines(res.items) : orderLines(res.items);
-      return { text: lines.join("\n"), boxes: res.items.length, metrics: res.metrics };
+      // lines=1 (đợt chup-mat-do): trả thêm từng hàng kèm chiều cao chữ + độ tin
+      const info = P.lines ? rowLineInfo(res.items) : undefined;
+      return { text: lines.join("\n"), boxes: res.items.length, metrics: res.metrics, lines: info };
     },
   };
 }
@@ -121,8 +123,9 @@ async function initTesseract() {
   return {
     info: { backend: "wasm (tesseract.js-core)", langs: window.OcrAssets.TESS_LANGS, psm: 3 },
     async recognize(canvas) {
-      const { data } = await worker.recognize(canvas);
-      return { text: data.text || "" };
+      // lines=1 (đợt chup-mat-do): xin thêm blocks để có khung + độ tin từng dòng (chữ text giữ nguyên)
+      const { data } = P.lines ? await worker.recognize(canvas, {}, { text: true, blocks: true }) : await worker.recognize(canvas);
+      return { text: data.text || "", lines: P.lines ? tessLineInfo(data.blocks) : undefined };
     },
   };
 }
@@ -151,6 +154,7 @@ window.harness = {
       srcWidth: img.srcWidth,
       srcHeight: img.srcHeight,
       boxes: r.boxes ?? null,
+      lines: r.lines,
     };
   },
 };
