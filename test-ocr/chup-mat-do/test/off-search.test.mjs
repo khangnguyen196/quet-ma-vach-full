@@ -195,3 +195,46 @@ test("cache lưu số giây mạng của lần gọi thật, lần lấy từ ca
   assert.equal(b.cached, true);
   assert.equal(b.seconds, 0.7);
 });
+
+test("lỗi mạng (fetch ném lỗi, vd 503 không kèm CORS) được đếm ở stats.networkErrors", async () => {
+  const f = fakeFetch([{ throw: "Failed to fetch" }, { status: 200, body: { products: [{ code: "1" }] } }]);
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...fakeClock() });
+  const r = await off.search("abc");
+  assert.equal(r.hits[0].code, "1");
+  assert.equal(off.stats.networkErrors, 1);
+  assert.equal(off.stats.http429or5xx, 0);
+  assert.equal(off.stats.retries, 1);
+});
+
+test("cầu dao: 5 lần hỏng liền nhau thì nghỉ 10 phút; lại 5 lần hỏng liền thì ngừng hẳn (breakerOpen)", async () => {
+  const c = fakeClock();
+  const f = fakeFetch(Array.from({ length: 20 }, (_, i) => (i % 2 ? { status: 503 } : { throw: "Failed to fetch" })));
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...c });
+  let openErr = null;
+  for (let i = 0; i < 10 && !openErr; i++) {
+    try {
+      await off.search(`q${i}`);
+    } catch (e) {
+      if (e.breakerOpen) openErr = e;
+    }
+  }
+  assert.ok(openErr, "phải ném lỗi có cờ breakerOpen");
+  assert.equal(f.calls.length, 10, "đúng 10 lần gọi: 5 hỏng -> nghỉ -> 5 hỏng -> ngừng");
+  assert.equal(c.sleeps.filter((ms) => ms === 10 * 60 * 1000).length, 1, "nghỉ 10 phút đúng 1 lần");
+  assert.equal(off.stats.breakerTrips, 2);
+  // đã ngừng hẳn: lượt sau ném lỗi ngay, không gọi mạng
+  await assert.rejects(off.search("khac"), (e) => e.breakerOpen === true);
+  await assert.rejects(off.product("1"), (e) => e.breakerOpen === true);
+  assert.equal(f.calls.length, 10);
+});
+
+test("cầu dao: một lần thành công thì đếm lại từ 0", async () => {
+  const c = fakeClock();
+  const seq = [];
+  for (let k = 0; k < 3; k++) seq.push({ status: 503 }, { status: 503 }, { status: 503 }, { status: 503 }, { status: 200, body: { products: [{ code: "1" }] } });
+  const f = fakeFetch(seq);
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...c });
+  for (let i = 0; i < 6; i++) await off.search(`q${i}`).catch(() => {});
+  assert.equal(off.stats.breakerTrips, 0);
+  assert.ok(!c.sleeps.includes(10 * 60 * 1000));
+});
