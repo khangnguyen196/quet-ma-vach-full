@@ -13,11 +13,13 @@ import {
 import { buildExport, exportFileName, parseImport, IMPORT_MAX_BYTES } from "./backup.js";
 import { compareWaitMs } from "./compare.js";
 import { initPwa } from "./pwa.js";
+import { cameraControls, nextZoom, zoomLabel } from "./camera.js";
 
 initPwa(); // service worker + thanh "Đã có bản mới" (chỉ ở bản build)
 
 const $ = (s) => document.querySelector(s);
 const reader = $("#reader"), btnCam = $("#btnCam"), fileInput = $("#file");
+const camTools = $("#camTools"), btnTorch = $("#btnTorch"), btnZoom = $("#btnZoom");
 const form = $("#manual"), codeInput = $("#codeInput"), msg = $("#msg");
 const result = $("#result"), historyList = $("#historyList");
 const screenLookup = $("#screenLookup"), screenPantry = $("#screenPantry");
@@ -69,7 +71,59 @@ function setBusy(on) {
   fileInput.disabled = on;
 }
 
+// ---- Đèn pin / phóng to (đợt nhay-hon): chỉ hiện khi máy hỗ trợ (cameraControls trong src/camera.js) ----
+let torchOn = false;
+let zoomState = null; // { levels, current } khi có nút phóng to
+
+/** Đọc khả năng của camera đang chạy rồi hiện nút đèn / phóng to (máy không hỗ trợ thì không hiện gì). */
+function showCamTools() {
+  const { caps, settings } = scanner.trackInfo();
+  const c = cameraControls(caps, settings);
+  torchOn = false;
+  zoomState = c.zoom;
+  btnTorch.hidden = !c.torch;
+  btnTorch.textContent = "Bật đèn";
+  btnTorch.setAttribute("aria-pressed", "false");
+  btnZoom.hidden = !c.zoom;
+  if (c.zoom) btnZoom.textContent = zoomLabel(c.zoom.levels, c.zoom.current);
+  camTools.hidden = !c.torch && !c.zoom;
+}
+
+function hideCamTools() {
+  camTools.hidden = true;
+  btnTorch.hidden = true;
+  btnZoom.hidden = true;
+  torchOn = false;
+  zoomState = null;
+}
+
+btnTorch.addEventListener("click", async () => {
+  if (!scanner.running) return;
+  const want = !torchOn;
+  try {
+    await scanner.applyTrack({ torch: want });
+    torchOn = want;
+    btnTorch.textContent = want ? "Tắt đèn" : "Bật đèn";
+    btnTorch.setAttribute("aria-pressed", String(want));
+  } catch (e) {
+    setMsg(`Máy không đổi được đèn pin (${errorText(e)}).`, true);
+  }
+});
+
+btnZoom.addEventListener("click", async () => {
+  if (!scanner.running || !zoomState) return;
+  const next = nextZoom(zoomState.levels, zoomState.current);
+  try {
+    await scanner.applyTrack({ zoom: next });
+    zoomState.current = next;
+    btnZoom.textContent = zoomLabel(zoomState.levels, next);
+  } catch (e) {
+    setMsg(`Máy không phóng to được (${errorText(e)}).`, true);
+  }
+});
+
 async function stopCam() {
+  hideCamTools();
   await scanner.stop();
   btnCam.textContent = "Bật camera";
   btnCam.classList.remove("live");
@@ -91,6 +145,7 @@ btnCam.addEventListener("click", async () => {
     });
     btnCam.textContent = "Tắt camera";
     btnCam.classList.add("live");
+    if (scanner.running) showCamTools();
     setMsg("Đưa mã vạch vào khung, giữ máy yên khoảng 1–2 giây.");
   } catch (e) {
     placeholder("Không mở được camera ở đây.");
