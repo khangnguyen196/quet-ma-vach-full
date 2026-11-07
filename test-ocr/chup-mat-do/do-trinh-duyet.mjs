@@ -28,7 +28,12 @@ const TIMEOUT_MS = Number(opt("--timeout-min", "35")) * 60000; // GIỚI HẠN T
 
 const chon = JSON.parse(fs.readFileSync(path.join(idxDir, "chon.json"), "utf8"));
 const loo = JSON.parse(fs.readFileSync(path.join(idxDir, "loo.json"), "utf8"));
-const meta = JSON.parse(fs.readFileSync(path.join(idxDir, model, "index.json"), "utf8"));
+// --index node | trinh-duyet: chỉ mục tính bằng Node (index.*) hay bằng trình duyệt (index-trinh-duyet.*, tạo bằng
+// --build-index trong Chromium). Mặc định: trình duyệt nếu đã có, vì vector Node lệch (cosine < 0,99, xem tong-hop-v3.md).
+const buildIndex = argv.includes("--build-index");
+const idxKind = opt("--index", fs.existsSync(path.join(idxDir, model, "index-trinh-duyet.json")) ? "trinh-duyet" : "node");
+const idxName = (ext) => (idxKind === "trinh-duyet" ? `index-trinh-duyet.${ext}` : `index.${ext}`);
+const meta = buildIndex ? { items: [] } : JSON.parse(fs.readFileSync(path.join(idxDir, model, idxName("json")), "utf8"));
 const SIDE_CODE = "8934572260543";
 
 // truy vấn: { id, set: "chinh" | "phu-xem-tay" | "bo-phu", code (đáp án), url }
@@ -45,7 +50,9 @@ window.runAll = async ({ model, queries, checkItems }) => {
   const out = { gpuAdapter: null, results: [], check: [] };
   try { out.gpuAdapter = !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch { out.gpuAdapter = false; }
   const t0 = performance.now();
-  const T = await import("${TRANSFORMERS_CDN}/dist/transformers.web.min.js");
+  // transformers.min.js: bản gói sẵn onnxruntime-web (transformers.web.min.js còn import trần "onnxruntime-web/webgpu",
+  // trình duyệt không tự tìm được)
+  const T = await import("${TRANSFORMERS_CDN}/dist/transformers.min.js");
   T.env.allowLocalModels = false;
   const embed = await loadEmbedder(T, model, { device: "wasm" });
   // làm nóng không tính: nạp model xong là phiên đã sẵn, lần chạy đầu tính vào giây nạp model
@@ -70,6 +77,20 @@ window.runAll = async ({ model, queries, checkItems }) => {
   }
   return out;
 };
+// Tính vector chỉ mục trong trình duyệt (dùng khi vector Node lệch: cosine < 0,99). Trả int8 (v × 127).
+window.buildIndex = async ({ model, items }) => {
+  const T = await import("${TRANSFORMERS_CDN}/dist/transformers.min.js");
+  T.env.allowLocalModels = false;
+  const embed = await loadEmbedder(T, model, { device: "wasm" });
+  const out = [];
+  for (const it of items) {
+    try {
+      const v = await embed(await T.RawImage.fromURL(it.url));
+      out.push({ code: it.code, imgid: it.imgid, q: Array.from(v, (x) => Math.max(-127, Math.min(127, Math.round(x * 127)))) });
+    } catch (e) { out.push({ code: it.code, imgid: it.imgid, error: String(e && e.message || e) }); }
+  }
+  return out;
+};
 window.ready = true;
 </script>`;
 
@@ -80,7 +101,7 @@ function startServer() {
     let file = null;
     if (u === "/" || u === "/harness.html") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); res.end(HARNESS); return; }
     if (u === "/embed-models.mjs") file = path.join(HERE, "embed-models.mjs");
-    else if (u.startsWith("/idx/")) file = path.join(idxDir, model, path.basename(u));
+    else if (u.startsWith("/idx/")) file = path.join(idxDir, model, idxName(path.extname(u).slice(1)));
     else if (u.startsWith("/anh/")) file = path.join(idxDir, "anh", path.basename(u));
     else if (u.startsWith("/photos/")) file = path.join(photosDir, ...u.slice(8).split("/").map((s) => path.basename(s)));
     if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
@@ -175,6 +196,23 @@ try {
       } catch { /* bận */ }
     }, 250);
   }
+  if (buildIndex) {
+    const items = chon.selected.filter((s) => fs.existsSync(path.join(idxDir, "anh", `${s.code}_${s.imgid}.400.jpg`)))
+      .map((s) => ({ code: s.code, imgid: s.imgid, url: `/anh/${s.code}_${s.imgid}.400.jpg` }));
+    const tb = Date.now();
+    const built = await page.evaluate((a) => window.buildIndex(a), { model, items });
+    const ok = built.filter((b) => b.q);
+    const dims = ok[0].q.length;
+    const bin = Buffer.from(Int8Array.from(ok.flatMap((b) => b.q)).buffer);
+    fs.writeFileSync(path.join(idxDir, model, "index-trinh-duyet.bin"), bin);
+    const metaRaw = JSON.stringify({ model, dims, quant: "int8 (v × 127, làm tròn)", builtIn: `${browserName} ${run.browserVersion}`, items: ok.map((b) => ({ code: b.code, imgid: b.imgid })) });
+    fs.writeFileSync(path.join(idxDir, model, "index-trinh-duyet.json"), metaRaw, "utf8");
+    const zlib = await import("node:zlib");
+    const info = { n: ok.length, errors: built.length - ok.length, dims, seconds: (Date.now() - tb) / 1000, rawBytes: bin.length + Buffer.byteLength(metaRaw), gzipBytes: zlib.gzipSync(bin, { level: 9 }).length + zlib.gzipSync(metaRaw, { level: 9 }).length };
+    fs.writeFileSync(path.join(idxDir, model, "info-trinh-duyet.json"), JSON.stringify(info, null, 1), "utf8");
+    console.log(`Chỉ mục trình duyệt ${model}: ${JSON.stringify(info)}`);
+    throw new Error("BUILD_DONE");
+  }
   res = await Promise.race([
     page.evaluate((a) => window.runAll(a), { model, queries, checkItems }),
     new Promise((_, rej) => setTimeout(() => rej(new Error(`quá ${TIMEOUT_MS / 60000} phút (dừng vì hết giờ)`)), TIMEOUT_MS)),
@@ -189,6 +227,8 @@ try {
   sampler?.kill();
   server.close();
 }
+if (buildIndex) process.exit(run.error === "BUILD_DONE" ? 0 : 1);
+run.index = idxKind;
 
 run.wallSeconds = (Date.now() - tWall) / 1000;
 run.memory = { wsBaseline: wsBase, wsPeak: wsPeak || null, jsHeapPeak: browserName === "chromium" ? heapPeak || null : null };
@@ -213,3 +253,5 @@ const file = path.join(outDir, `cach2-${model}-${browserName}.json`);
 fs.writeFileSync(file, JSON.stringify({ run, net: net.filter((e) => !e.url.includes("/anh/")) }, null, 1), "utf8");
 console.log(JSON.stringify({ ...run, results: run.results?.length, consoleErrors: run.consoleErrors?.slice(0, 3) }, null, 1));
 console.log(`Ghi: ${file}`);
+// thoát hẳn: kết nối giữ sống của máy chủ local / tiến trình lấy mẫu có khi giữ Node chạy tiếp sau khi đã ghi xong
+process.exit(0);
