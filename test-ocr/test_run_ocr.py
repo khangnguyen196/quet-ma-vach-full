@@ -340,6 +340,21 @@ class LastRowTest(unittest.TestCase):
         (out / "times.csv").write_text("", encoding="utf-8")   # file, không phải thư mục
         self.assertEqual(score.list_tools(out), ["google", "tesseract"])
 
+    def test_11f_non_ocr_dirs_are_not_tools(self):
+        # outputs/hsd-js (phần C) và outputs/web-ocr (số đo trình duyệt, ocr-c) không phải công cụ OCR:
+        # không được hiện thành công cụ 0 điểm trong summary.md, kể cả khi times.csv có dòng mang tên đó.
+        out = pathlib.Path(self.tmp.name) / "outputs"
+        for name in ["tesseract", "paddlejs-webkit", "extract", "hsd-js", "web-ocr"]:
+            (out / name).mkdir(parents=True)
+        with open(out / "times.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["tool", "code", "image", "seconds", "status"])
+            w.writerow(["tesseract", "1", "front", 1.0, "ok"])
+            w.writerow(["web-ocr", "1", "front", 1.0, "ok"])
+            w.writerow(["hsd-js", "1", "front", 1.0, "ok"])
+        self.assertEqual(score.list_tools(out), ["paddlejs-webkit", "tesseract"])
+        self.assertEqual(score.all_tools(out), ["paddlejs-webkit", "tesseract"])
+
 
 class ScoreMainTest(unittest.TestCase):
     """Danh sách công cụ của score.py lấy cả từ times.csv, và score.main() chạy trên thư mục tạm.
