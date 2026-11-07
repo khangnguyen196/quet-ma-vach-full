@@ -79,13 +79,36 @@ test("sameCode / rankOf: bỏ số 0 đầu, chỉ xét 5 đầu", () => {
   assert.equal(rankOf([], "1"), null);
 });
 
-test("textMatch: chứa nhau nguyên từ hoặc trùng từ ≥ 50% chuỗi ngắn", () => {
+// Luật vòng 2 (chặt hơn vòng 1): mẫu số là số từ có nghĩa của ĐÁP ÁN (tham số thứ 2), bỏ từ chỉ loại hàng,
+// cần ≥ 1 từ chung dài ≥ 3 chữ cái, bỏ luật "chứa nhau".
+test("textMatch: tỉ lệ trên từ có nghĩa của đáp án ≥ 0,5 và có từ chung ≥ 3 chữ cái", () => {
   assert.equal(textMatch("Mì Omachi xốt bò hầm 80g", "Omachi xốt bò hầm"), true);
-  assert.equal(textMatch("Omachi", "Mì khoai tây Omachi xốt Bò hầm"), true);
-  assert.equal(textMatch("Koreno vị ngon nguyên bản", "Mì Koreno"), true); // 1/2 từ của chuỗi ngắn
+  // vòng 1 coi là đúng (chứa nhau); vòng 2: 1/6 từ có nghĩa của đáp án -> sai
+  assert.equal(textMatch("Omachi", "Mì khoai tây Omachi xốt Bò hầm"), false);
+  // "mì" là từ chỉ loại hàng: đáp án "Mì Koreno" còn 1 từ "koreno" -> trùng 1/1
+  assert.equal(textMatch("Koreno vị ngon nguyên bản", "Mì Koreno"), true);
+  // vòng 1 coi là đúng (1/2 từ của chuỗi ngắn); vòng 2: 1/4 từ có nghĩa của đáp án -> sai
+  assert.equal(textMatch("Mì Koreno", "Koreno vị ngon nguyên bản"), false);
   assert.equal(textMatch("Hảo Hảo tôm chua cay", "Omachi xốt bò hầm"), false);
   assert.equal(textMatch("Omachilicious", "Omachi"), false);
   assert.equal(textMatch("", "abc"), null);
+});
+
+test("textMatch: 3 ca phải SAI (review vòng 1)", () => {
+  // (1) như prompt ghi: tên rác có ký tự điều khiển so với tên Omachi
+  assert.equal(textMatch("\u001aCA \u001aCA", "Mì khoai tây Omachi xốt Bò hầm"), false);
+  // (1b) ca thật trong 1b-webkit (tham khảo): cùng tên rác, đáp án 8936017367107 -> vòng 1 chấm ĐÚNG nhờ từ "ca"
+  assert.equal(textMatch("\u001aCA \u001aCA", "Tam Thái Tử Nhất Ca"), false);
+  // (2) chỉ có từ chỉ loại hàng + 2/6 từ có nghĩa
+  assert.equal(textMatch("Mi khoai Tay", "Mì khoai tây Omachi xốt Bò hầm"), false);
+  // (3) chỉ chung từ chỉ loại hàng "mì"
+  assert.equal(textMatch("Mì Hảo Hảo", "Mì Koreno"), false);
+});
+
+test("textMatch: đáp án không có từ ≥ 3 chữ cái thì phải trùng hết từ của đáp án", () => {
+  assert.equal(textMatch("7UP chanh", "7UP"), true);
+  assert.equal(textMatch("TH true MILK", "TH"), true);
+  assert.equal(textMatch("Nước uống có gaz 7UP", "Nước uống có gaz 7UP"), true);
 });
 
 test("brandMatch: OFF có nhiều thương hiệu cách dấu phẩy; đáp án trống -> null", () => {
