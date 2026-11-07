@@ -1,0 +1,24 @@
+# Venv riêng cho run_vietocr.py (đợt ocr-c), KHÔNG dùng chung test-ocr/.venv.
+# Cài (Windows, ổ C ít chỗ: cache ở ổ D), trong thư mục test-ocr:
+#   python -m venv vietocr\.venv
+#   set PIP_CACHE_DIR=D:\cache\pip   (Git Bash: export PIP_CACHE_DIR='D:\cache\pip')
+#   set PYTHONUTF8=1                 (Git Bash: export PYTHONUTF8=1; file có chữ tiếng Việt, thiếu biến này pip trên
+#                                     Windows đọc bằng cp1252 và báo UnicodeDecodeError)
+#   vietocr\.venv\Scripts\python -m pip install -r vietocr\requirements.txt
+#   vietocr\.venv\Scripts\python -m pip install --no-deps vietocr==0.3.13
+# vietocr 0.3.13 ghim bản cũ (imgaug 0.4.0, albumentations 1.4.2, pillow 10.2.0, einops 0.2.0) chỉ cần khi
+# huấn luyện; imgaug 0.4.0 không chạy với numpy 2. Nên cài vietocr bằng --no-deps và chỉ cài phần cần để đọc chữ.
+# torch trên PyPI cho Windows là bản CPU. Bản ghim dưới đây là bản đã cài và chạy ở đợt ocr-c (07/11/2026, Python 3.12.6).
+# gdown, requests, tqdm: vietocr/tool/utils.py import ngay khi nạp (không dùng để tải vì đã tải sẵn file).
+torch==2.15.0
+torchvision==0.29.2
+onnxruntime==1.31.1
+opencv-python-headless==5.0.0.93
+pyclipper==1.4.0
+numpy==2.5.4
+pillow==13.0.0
+pyyaml==6.0.3
+einops==0.8.2
+gdown==6.5.1
+requests==2.34.2
+tqdm==4.70.1
