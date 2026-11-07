@@ -175,3 +175,12 @@ test("shareWith: 2 client dùng chung bộ giãn cách + bộ đếm", async () 
   assert.ok(c.sleeps.includes(6000), "lượt của client thứ 2 vẫn phải chờ 6 giây");
   assert.equal(a.stats, b.stats);
 });
+
+test("vnBrands: trang sau lỗi thì giữ các trang đã đọc", async () => {
+  const full = Array.from({ length: 100 }, (_, i) => ({ brands: `B${i}` }));
+  const f = fakeFetch([{ status: 503 }, { status: 503 }, { status: 200, body: { products: full } }, { status: 503 }, { status: 503 }]);
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...fakeClock() });
+  const r = await off.vnBrands({ pages: 3 });
+  assert.equal(r.brands.length, 100);
+  assert.match(r.source, /1 trang .*trang 2 lỗi/);
+});

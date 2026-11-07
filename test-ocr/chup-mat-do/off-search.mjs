@@ -204,8 +204,18 @@ export function createOffClient({
       log(`  facet thương hiệu lỗi: ${e.message || e}; lấy từ /api/v2/search`);
     }
     const set = new Set();
+    let got = 0;
     for (let page = 1; page <= pages; page++) {
-      const r = await cachedGet(vnBrandsSearchUrl(page), "search");
+      let r;
+      try {
+        r = await cachedGet(vnBrandsSearchUrl(page), "search");
+      } catch (e) {
+        // trang sau lỗi: giữ các trang đã đọc được; chưa đọc được trang nào thì báo lỗi
+        if (!got) throw e;
+        log(`  trang ${page} lỗi, dùng ${got} trang đã có: ${e.message || e}`);
+        return { brands: [...set], source: `/api/v2/search lọc VN, ${got} trang × 100 (trang ${page} lỗi)` };
+      }
+      got++;
       const products = Array.isArray(r.data?.products) ? r.data.products : [];
       for (const p of products) for (const b of String(p.brands ?? "").split(",")) if (b.trim()) set.add(b.trim());
       if (products.length < 100) break;
