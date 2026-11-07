@@ -34,6 +34,13 @@ function groupRowBoxes(items, minOverlap = 0.5) {
 }
 
 /** Mỗi hàng khung chữ -> { text, h, conf } (h = khung cao nhất, conf = trung bình score, thang 0–1). */
+/** Vòng 6 (g1): danh sách khung chữ từ kết quả ocr.predict(...) (mảng, phần tử đầu có items); rỗng / thiếu items -> []
+ *  để trang báo "Không đọc được chữ nào trong ảnh." thay vì lỗi JS. Không thuộc luật T1. */
+export function ocrItems(result) {
+  const first = Array.isArray(result) ? result[0] : null;
+  return first && Array.isArray(first.items) ? first.items : [];
+}
+
 export function rowLineInfo(items, minOverlap = 0.5) {
   return groupRowBoxes(items, minOverlap).map((r) => {
     const scores = r.map((b) => b.score).filter((s) => s != null);
