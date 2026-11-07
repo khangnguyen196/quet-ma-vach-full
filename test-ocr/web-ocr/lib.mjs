@@ -145,6 +145,26 @@ export function mb(bytes) {
   return bytes == null ? "" : (bytes / 1e6).toFixed(1);
 }
 
+/** Có ghi file runs/<công cụ>-<mode>.json của lần chạy này không.
+ *  Chạy lại khi ảnh đã có kết quả hết (ok = 0, có ảnh bỏ qua) thì KHÔNG ghi: lần đó chỉ nạp model, số bộ nhớ /
+ *  giây nạp của nó sẽ thay số của lần đọc 96 ảnh mà không ai biết. Còn lại (có đọc ảnh, lỗi nạp, mode cdn) thì ghi. */
+export function shouldWriteRun(run) {
+  return !(Number(run.ok) === 0 && Number(run.skippedExisting) > 0);
+}
+
+/** Cột note của metrics.csv cho 1 công cụ, từ file runs của mode local và cdn (thiếu thì null). */
+export function metricsNotes({ local, cdn }) {
+  const notes = [];
+  if (local?.initError) notes.push(`lỗi nạp (local): ${local.initError}`);
+  if (cdn?.initError) notes.push(`lỗi nạp (cdn): ${cdn.initError}`);
+  if (local?.crashes) notes.push(`trang sập / quá giờ ${local.crashes} lần`);
+  if (local?.skippedExisting) {
+    notes.push(`local: bỏ qua ${local.skippedExisting} ảnh đã có, bộ nhớ / giây nạp chỉ của lần đọc ${local.ok} ảnh`);
+  }
+  if (cdn?.network?.failed?.length) notes.push(`cdn: ${cdn.network.failed.length} request lỗi`);
+  return notes.join("; ");
+}
+
 /** Thống kê giây/ảnh: chỉ tính ảnh ok. Trả { ok, errors, mean, max }. */
 export function timeStats(rows) {
   const ok = rows.filter((r) => r.status === "ok").map((r) => Number(r.seconds));

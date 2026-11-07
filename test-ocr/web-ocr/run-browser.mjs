@@ -16,7 +16,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { startServer } from "./serve.mjs";
-import { resultFileName, toolName, timesRow, pickPhotos, summarizeMemory, sumBytes, timeStats, mb, csvLine } from "./lib.mjs";
+import {
+  resultFileName, toolName, timesRow, pickPhotos, summarizeMemory, sumBytes, timeStats, mb, csvLine, shouldWriteRun, metricsNotes,
+} from "./lib.mjs";
 
 function parseArgs(argv) {
   const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false, join: "" };
@@ -279,13 +281,15 @@ async function runOnce(args) {
   run.network = { ...bytes, failed: netFailed, localBytes: { transfer: local.transfer, count: local.count } };
   run.processNames = [...new Set(samples.flatMap((s) => s.procs.map((p) => p.name)))];
   const file = path.join(runsDir, `${tool}-${args.mode}.json`);
-  fs.writeFileSync(file, JSON.stringify(run, null, 2), "utf8");
+  const write = shouldWriteRun(run);
+  if (write) fs.writeFileSync(file, JSON.stringify(run, null, 2), "utf8");
+  else console.warn(`\nCẢNH BÁO: không đọc ảnh nào (bỏ qua ${run.skippedExisting} ảnh đã có), KHÔNG ghi đè ${file}.`);
   console.log(`\n${tool} (${args.mode}): ok ${run.ok}, lỗi ${run.errors}, bỏ qua (đã có) ${run.skippedExisting}, sập ${run.crashes}` +
     (run.initError ? `\nLỖI NẠP: ${run.initError}` : "") +
     `\nnạp ${run.loadSeconds?.toFixed?.(1) ?? "?"} s, backend ${run.init?.backend ?? "?"}, crossOriginIsolated ${run.init?.features?.crossOriginIsolated}` +
     `\nbộ nhớ: nền ${mb(run.memory.baseline)} MB, đỉnh 1 tiến trình ${mb(run.memory.peakProc)} MB, đỉnh tổng ${mb(run.memory.peakTotal)} MB` +
     `\nmạng (không tính localhost): ${mb(bytes.transfer)} MB qua mạng, ${mb(bytes.decoded)} MB giải nén, ${bytes.count} request;` +
-    ` localhost ${mb(local.transfer)} MB\nGhi: ${file}`);
+    ` localhost ${mb(local.transfer)} MB\n${write ? "Ghi" : "Không ghi"}: ${file}`);
   return run;
 }
 
@@ -333,18 +337,13 @@ function report(args) {
     const cdn = runs.find((r) => r.tool === tool && r.mode === "cdn");
     const st = timeStats(times.filter((r) => r.tool === tool));
     const r = local || cdn;
-    const notes = [];
-    if (local?.initError) notes.push(`lỗi nạp (local): ${local.initError}`);
-    if (cdn?.initError) notes.push(`lỗi nạp (cdn): ${cdn.initError}`);
-    if (local?.crashes) notes.push(`trang sập / quá giờ ${local.crashes} lần`);
-    if (cdn?.network?.failed?.length) notes.push(`cdn: ${cdn.network.failed.length} request lỗi`);
     csv += csvLine([
       tool, r.browser, r.init?.backend ?? "", r.init?.features?.crossOriginIsolated ?? r.featuresAtError?.crossOriginIsolated ?? "",
       local?.loadSeconds?.toFixed(1) ?? "", cdn?.loadSeconds?.toFixed(1) ?? "",
       st.mean == null ? "" : st.mean.toFixed(2), st.max == null ? "" : st.max.toFixed(2),
       mb(local?.memory?.baseline), mb(local?.memory?.peakProc), mb(local?.memory?.peakTotal),
       mb(local?.memory?.peakProcWs), mb(local?.memory?.peakTotalWs), local?.jsHeapPeak ? mb(local.jsHeapPeak) : "",
-      mb(cdn?.network?.transfer), mb(cdn?.network?.decoded), st.ok, st.errors, notes.join("; "),
+      mb(cdn?.network?.transfer), mb(cdn?.network?.decoded), st.ok, st.errors, metricsNotes({ local, cdn }),
     ]);
     if (cdn) {
       dl.push(`## ${tool}`, "", `Tổng: ${mb(cdn.network.transfer)} MB qua mạng, ${mb(cdn.network.decoded)} MB sau giải nén, ${cdn.network.count} request.`, "",
