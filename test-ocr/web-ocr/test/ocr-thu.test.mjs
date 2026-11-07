@@ -56,6 +56,16 @@ test("isMemoryError: RangeError, câu lỗi có memory / OOM / allocate; lỗi k
   assert.equal(page.isMemoryError(null), false);
 });
 
+test("isMemoryError: RangeError chỉ tính là thiếu bộ nhớ khi câu lỗi có alloc / memory / buffer", () => {
+  assert.equal(page.isMemoryError(new RangeError("Array buffer allocation failed")), true);
+  assert.equal(page.isMemoryError(new RangeError("WebAssembly.Memory.grow(): Maximum memory size exceeded")), true);
+  assert.equal(page.isMemoryError(new RangeError("Out of memory: Cannot allocate Wasm memory for new instance")), true);
+  assert.equal(page.isMemoryError(new RangeError("Invalid typed array length: 99999999999 (buffer)")), true);
+  assert.equal(page.isMemoryError(new RangeError("Maximum call stack size exceeded")), false);
+  assert.equal(page.isMemoryError(new RangeError("Invalid array length")), false);
+  assert.equal(page.isMemoryError(new RangeError("toFixed() digits argument must be between 0 and 100")), false);
+});
+
 test("sumResourceBytes: byte qua mạng, file lấy từ bộ nhớ đệm, file không đo được (thiếu Timing-Allow-Origin)", () => {
   const r = page.sumResourceBytes([
     { transferSize: 1000, decodedBodySize: 4000 },
@@ -116,9 +126,34 @@ test("trang: noindex, chỉ wasm 1 luồng, WebGPU có giới hạn 3 giây, 2 n
   assert.match(html, /GPU_TIMEOUT_MS = 3000/);
   assert.match(html, /id="pickCamera" accept="image\/\*" capture="environment"/);
   assert.match(html, /id="pickLibrary" accept="image\/\*" hidden/);
+  // 2 ô chọn ảnh khóa sẵn trong HTML, setBusy(false) cuối main() mới mở (main lỗi thì vẫn khóa)
+  assert.match(html, /<input type="file" id="pickCamera"[^>]* disabled[ >]/);
+  assert.match(html, /<input type="file" id="pickLibrary"[^>]* disabled[ >]/);
+  assert.match(html, /\$\("pickCamera"\)\.disabled = b;/);
+  assert.match(html, /\$\("pickLibrary"\)\.disabled = b;/);
   assert.match(html, /"ocr-thu-dang-doc"/);
   assert.match(html, /Trang vừa bị đóng giữa chừng, có thể do thiếu bộ nhớ/);
   assert.doesNotMatch(html, /localStorage/);
+});
+
+test("trang: không dùng WebGPU thì giấu navigator.gpu trước khi nạp SDK (SDK luôn gọi requestAdapter() không giới hạn giờ)", () => {
+  const html = read("ocr-thu.html");
+  // hàm giấu: đè navigator.gpu = undefined, có try/catch
+  assert.match(html, /function hideGpu\(\) \{\s*try \{ Object\.defineProperty\(navigator, "gpu", \{ value: undefined, configurable: true \}\); \} catch/);
+  // nhánh "Chỉ dùng wasm" gọi hideGpu() trước khi trả về, không gọi requestAdapter()
+  assert.match(html, /if \(wasmOnly\) \{\s*hideGpu\(\);\s*return \{ use: "wasm"/);
+  // nhánh quá 3 giây cũng giấu
+  assert.match(html, /if \(timedOut\) \{[^}]*hideGpu\(\);\s*return \{ use: "wasm"/);
+  // chỉ khi có adapter (dùng WebGPU) thì không giấu
+  assert.match(html, /if \(adapter\) return \{ use: "webgpu"/);
+  // dò WebGPU (và giấu) xong mới thêm import map / import SDK
+  const main = html.slice(html.indexOf("async function main()"));
+  assert.ok(main.indexOf("await detectGpu()") >= 0 && main.indexOf("await detectGpu()") < main.indexOf("addImportMap("));
+});
+
+test("trang: ô Thương hiệu ghi rõ luật regex không rút ô này", () => {
+  assert.equal(page.FIELD_LABELS.thuong_hieu, "Thương hiệu (luật regex không rút ô này)");
+  assert.equal(extractRegex("Thương hiệu: Vina Acecook\nMì ăn liền").thuong_hieu, "");
 });
 
 test("app không có link nào tới trang thử", () => {
