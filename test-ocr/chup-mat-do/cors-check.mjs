@@ -106,11 +106,16 @@ server.close();
 // Kiểu mặc định: tìm được theo CHỮ (apiv2 không), có lọc VN, fetch trong trang thành công ở CẢ 2 trình duyệt.
 // Ưu tiên searchalicious (Elasticsearch, xếp hạng theo độ liên quan) rồi searchpl.
 const textKinds = ["searchalicious", "searchpl"];
+// OFF hay trả 503 (không kèm CORS) nên một lần chạy có thể trượt hết: xét cả các lần chạy trước (history trong
+// cors.json). Kiểu được chọn khi ở MỖI trình duyệt có ít nhất một lần fetch thành công với HTTP 200.
+const old = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
+const history = old ? [...(old.history || []), { checkedAt: old.checkedAt, results: old.results }] : [];
+const allResults = [...history.flatMap((h) => h.results || []), ...results];
 const okKinds = textKinds.filter((k) => ["chromium", "webkit"].every((b) =>
-  results.some((r) => r.kind === k && r.browser === b && r.fetchOkInPage && r.httpStatus === 200)));
+  allResults.some((r) => r.kind === k && r.browser === b && r.fetchOkInPage && r.httpStatus === 200)));
 const chosen = okKinds[0] ?? null;
 const summary = Object.fromEntries(KINDS.map((k) => {
-  const rows = results.filter((r) => r.kind === k);
+  const rows = allResults.filter((r) => r.kind === k);
   return [k, {
     fetchOk: rows.filter((r) => r.fetchOkInPage).map((r) => `${r.browser} lần ${r.attempt}`),
     httpStatuses: [...new Set(rows.map((r) => r.httpStatus).filter((s) => s != null))],
@@ -119,7 +124,7 @@ const summary = Object.fromEntries(KINDS.map((k) => {
 }));
 const report = {
   checkedAt: new Date().toISOString(),
-  summary,
+  summary, // tính trên mọi lần chạy (history + lần này)
   noteErrors: "Lỗi 503 của OFF (trang HTML, không kèm header CORS) hiện trong trình duyệt thành lỗi CORS " +
     "(Chromium: MissingAllowOriginHeader, WebKit: Load failed). Mã HTTP khi bị chặn chỉ đọc được ở Chromium (CDP).",
   terms: TERMS,
@@ -127,6 +132,7 @@ const report = {
   rule: "Chọn kiểu tìm theo chữ, có lọc VN, fetch trong trang thành công ở cả Chromium và WebKit; ưu tiên searchalicious rồi searchpl.",
   chosen,
   results,
+  history,
 };
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, JSON.stringify(report, null, 2), "utf8");
