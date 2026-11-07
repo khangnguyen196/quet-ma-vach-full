@@ -124,7 +124,8 @@ export function createOffClient({
     if (fs.existsSync(file)) {
       stats.cacheHits++;
       const c = JSON.parse(fs.readFileSync(file, "utf8"));
-      return { data: c.data, cached: true, seconds: 0 };
+      // seconds = thời gian mạng của lần gọi thật lúc lưu cache (cache cũ không có -> null)
+      return { data: c.data, cached: true, seconds: c.seconds ?? null };
     }
     const limiter = cls === "product" ? limiters.product : limiters.search;
     let lastErr = null;
@@ -155,7 +156,7 @@ export function createOffClient({
       }
       const data = res.status === 404 ? null : await res.json();
       const seconds = (now() - t0) / 1000;
-      fs.writeFileSync(file, JSON.stringify({ key, status: res.status, at: new Date(now()).toISOString(), data }), "utf8");
+      fs.writeFileSync(file, JSON.stringify({ key, status: res.status, at: new Date(now()).toISOString(), seconds, data }), "utf8");
       return { data, cached: false, seconds };
     }
     stats.failures++;
@@ -180,7 +181,7 @@ export function createOffClient({
       const b = await cachedGet(searchUrl(kind, t, { vn: false }), "search");
       queries.push({ vn: false, cached: b.cached });
       hits = parseHits(kind, b.data);
-      seconds += b.seconds;
+      seconds = seconds == null || b.seconds == null ? null : seconds + b.seconds;
       cached = cached && b.cached;
     }
     return { hits, vnFallback, cached, seconds, queries };

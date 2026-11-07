@@ -25,7 +25,7 @@ md.push(
 
 const head = "| Cách | Trình duyệt | Ảnh chạy được | Chiến lược | Đúng mã vị trí 1 | Trong 5 đầu | Đúng tên | Đúng thương hiệu | Lỗi OFF | Phải bỏ lọc VN |";
 const rows = [head, "|---|---|---|---|---|---|---|---|---|---|"];
-const perf = ["| Cách | Trình duyệt | Nạp (s) | Giây OCR / ảnh trung vị | lớn nhất | Giây tìm OFF trung vị (S2, không cache) | lớn nhất | Bộ nhớ đỉnh (working set cả cây, MB) | JS heap đỉnh (MB) | Byte tải lần đầu (MB qua mạng) | Giải nén (MB) |",
+const perf = ["| Cách | Trình duyệt | Nạp (s) | Giây OCR / ảnh trung vị | lớn nhất | Giây tìm OFF trung vị (S2) | lớn nhất | Bộ nhớ đỉnh (working set cả cây, MB) | JS heap đỉnh (MB) | Byte tải lần đầu (MB qua mạng) | Giải nén (MB) |",
   "|---|---|---|---|---|---|---|---|---|---|---|"];
 for (const name of names) {
   const r = readJson(path.join(dir, `${name}.json`));
@@ -44,15 +44,16 @@ for (const name of names) {
     rows.push(`| ${cach} | ${br} | ${ok.length}/${r.items.length} | S2 + search-a-licious (tham khảo, không CORS) | ${pct(s.top1, s.n)} | ${pct(s.top5, s.n)} | ${pct(s.nameOk, s.nameN)} | ${pct(s.brandOk, s.brandN)} | ${ref.filter((x) => x.error).length} | ${ref.filter((x) => x.vnFallback).length} |`);
   }
   const ocrS = ok.map((i) => i.giayOcr);
-  const offS = ok.map((i) => i.strategies[r.defaultStrategy]).filter((x) => !x.cached && x.offSeconds != null).map((x) => x.offSeconds);
+  // thời gian mạng của lần gọi thật (lưu trong cache); câu tìm trống (không gọi) bỏ qua
+  const offS = ok.map((i) => i.strategies[r.defaultStrategy]).filter((x) => x.terms && x.offSeconds != null).map((x) => x.offSeconds);
   const memImg = ok.map((i) => i.boNho?.peakTotalWs).filter((x) => x != null);
   const memPeak = Math.max(r.run?.memory?.peakTotalWs ?? 0, ...memImg) || null;
-  perf.push(`| ${cach} | ${br} | ${sec(r.run?.loadSeconds)} | ${sec(median(ocrS))} | ${sec(maxOf(ocrS))} | ${offS.length ? sec(median(offS)) : "– (toàn cache)"} | ${offS.length ? sec(maxOf(offS)) : "–"} | ${mb(memPeak)} | ${br === "chromium" ? mb(r.run?.jsHeapPeak) : "không đo được (WebKit không có CDP)"} | ${r.firstLoad ? (r.firstLoad.transfer / 1e6).toFixed(1) : "chưa đo"} | ${r.firstLoad ? (r.firstLoad.decoded / 1e6).toFixed(1) : "–"} |`);
+  perf.push(`| ${cach} | ${br} | ${sec(r.run?.loadSeconds)} | ${sec(median(ocrS))} | ${sec(maxOf(ocrS))} | ${offS.length ? `${sec(median(offS))} (${offS.length} lượt)` : "– (không có số)"} | ${offS.length ? sec(maxOf(offS)) : "–"} | ${mb(memPeak)} | ${br === "chromium" ? mb(r.run?.jsHeapPeak) : "không đo được (WebKit không có CDP)"} | ${r.firstLoad ? (r.firstLoad.transfer / 1e6).toFixed(1) : "chưa đo"} | ${r.firstLoad ? (r.firstLoad.decoded / 1e6).toFixed(1) : "–"} |`);
 }
 md.push("## Độ đúng", "", ...rows, "", "## Tốc độ, bộ nhớ, dung lượng", "", ...perf, "",
   "- Bộ nhớ: đỉnh working set (phần đang nằm trong RAM) của cả cây tiến trình trình duyệt, lấy mẫu mỗi 250 ms bằng PowerShell (Windows). WebKit Windows có tiến trình Playwright.exe nền khoảng 0,8 GB; số trên điện thoại sẽ khác.",
   "- Byte tải lần đầu: chạy lại ở chế độ cdn (jsDelivr / HuggingFace, bộ nhớ đệm trống), 1 ảnh, cộng byte qua mạng (Playwright request.sizes()).",
-  "- Giây tìm OFF: thời gian mạng của lượt tìm mặc định (không tính lúc chờ giãn cách 6 giây); lượt lấy từ cache không tính.",
+  "- Giây tìm OFF: thời gian mạng của lượt tìm mặc định (không tính lúc chờ giãn cách 6 giây); lấy từ số giây lưu trong cache lúc gọi thật; lượt gọi trước khi cache có lưu số giây thì không có số.",
   "");
 
 const stats = readJson(path.join(dir, "off-stats-v1.json"));

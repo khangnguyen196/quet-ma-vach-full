@@ -58,12 +58,11 @@ async function searchScored(off, words, truth, kind) {
     const r = await off.search(terms, { kind });
     const s = scoreHits(r.hits, truth);
     return {
-      terms, top5: r.hits.map((h) => h.code), top1Name: r.hits[0]?.name ?? null, top1Brands: r.hits[0]?.brands ?? null,
-      ...s, vnFallback: r.vnFallback, cached: r.cached, offSeconds: r.seconds, wallSeconds: (Date.now() - t0) / 1000, error: null,
+      terms, ...s, top5: r.hits.map((h) => h.code), top1Name: r.hits[0]?.name ?? null, top1Brands: r.hits[0]?.brands ?? null, vnFallback: r.vnFallback, cached: r.cached, offSeconds: r.seconds, wallSeconds: (Date.now() - t0) / 1000, error: null,
     };
   } catch (e) {
     return {
-      terms, top5: [], top1Name: null, top1Brands: null, ...scoreHits([], truth), vnFallback: null, cached: false,
+      terms, ...scoreHits([], truth), top5: [], top1Name: null, top1Brands: null, vnFallback: null, cached: false,
       offSeconds: null, wallSeconds: (Date.now() - t0) / 1000, error: String(e.message || e),
     };
   }

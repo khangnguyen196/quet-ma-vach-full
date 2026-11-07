@@ -184,3 +184,14 @@ test("vnBrands: trang sau lỗi thì giữ các trang đã đọc", async () => 
   assert.equal(r.brands.length, 100);
   assert.match(r.source, /1 trang .*trang 2 lỗi/);
 });
+
+test("cache lưu số giây mạng của lần gọi thật, lần lấy từ cache trả lại số đó", async () => {
+  const c = fakeClock();
+  const f = async (url) => { c.advance(700); return { status: 200, ok: true, json: async () => ({ products: [{ code: "1" }] }) }; };
+  const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...c });
+  const a = await off.search("abc");
+  const b = await off.search("abc");
+  assert.equal(a.seconds, 0.7);
+  assert.equal(b.cached, true);
+  assert.equal(b.seconds, 0.7);
+});

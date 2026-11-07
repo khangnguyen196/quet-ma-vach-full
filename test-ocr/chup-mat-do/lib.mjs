@@ -218,7 +218,7 @@ export function scoreHits(hits, truth) {
   return {
     rank,
     top1: rank === 1,
-    top5: rank != null,
+    inTop5: rank != null,
     nameOk: top ? textMatch(top.name, truth.ten) : (normalizeText(truth.ten) ? false : null),
     brandOk: top ? brandMatch(top.brands, truth.thuong_hieu) : (normalizeText(truth.thuong_hieu) ? false : null),
   };
@@ -231,7 +231,7 @@ export function summarize(scores) {
   return {
     n,
     top1: count((s) => s.top1),
-    top5: count((s) => s.top5),
+    top5: count((s) => s.inTop5),
     nameOk: count((s) => s.nameOk === true),
     nameN: count((s) => s.nameOk != null),
     brandOk: count((s) => s.brandOk === true),

@@ -101,16 +101,16 @@ test("scoreHits: vị trí, top1, top5, tên + thương hiệu của kết quả
     { code: "1", name: "Omachi xốt bò hầm", brands: "Omachi" },
     { code: "8936017368111", name: "x", brands: "y" },
   ];
-  assert.deepEqual(scoreHits(hits, truth), { rank: 2, top1: false, top5: true, nameOk: true, brandOk: true });
-  assert.deepEqual(scoreHits([], truth), { rank: null, top1: false, top5: false, nameOk: false, brandOk: false });
+  assert.deepEqual(scoreHits(hits, truth), { rank: 2, top1: false, inTop5: true, nameOk: true, brandOk: true });
+  assert.deepEqual(scoreHits([], truth), { rank: null, top1: false, inTop5: false, nameOk: false, brandOk: false });
   assert.equal(scoreHits([], { code: "1", ten: "", thuong_hieu: "" }).brandOk, null);
 });
 
 test("summarize: đếm đúng, chỉ đếm ảnh chấm được tên / thương hiệu", () => {
   const s = summarize([
-    { top1: true, top5: true, nameOk: true, brandOk: null },
-    { top1: false, top5: true, nameOk: false, brandOk: true },
-    { top1: false, top5: false, nameOk: null, brandOk: false },
+    { top1: true, inTop5: true, nameOk: true, brandOk: null },
+    { top1: false, inTop5: true, nameOk: false, brandOk: true },
+    { top1: false, inTop5: false, nameOk: null, brandOk: false },
   ]);
   assert.deepEqual(s, { n: 3, top1: 1, top5: 2, nameOk: 1, nameN: 2, brandOk: 1, brandN: 2 });
 });
