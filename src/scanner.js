@@ -159,7 +159,7 @@ export function createScanner(elementId) {
   // thì tự dừng, KHÔNG gọi onCode. Ví dụ: tắt camera đúng lúc zxing-wasm đang đọc 1 khung → kết quả bị bỏ.
   let session = 0;
   let mode = null; // "zxing" (tự giải mã) | "html5" (html5-qrcode) | null (đang tắt)
-  let cam = null; // { stream, video, guide, wait, timer } khi mode === "zxing"
+  let cam = null; // { stream, video, guide, wait, timer } khi mode === "zxing" (wait: null nếu không hiện chữ chờ)
 
   /** Dọn camera tự mở: dừng vòng lặp, dừng mọi track, gỡ video (gọi lần 2 không sao: cam đã null). */
   function closeOwnCamera() {
@@ -170,7 +170,7 @@ export function createScanner(elementId) {
     cam.video.srcObject = null;
     cam.video.remove();
     cam.guide.remove();
-    cam.wait.remove();
+    cam.wait?.remove();
     cam = null;
   }
 
@@ -253,7 +253,8 @@ export function createScanner(elementId) {
 
     /**
      * Bật camera sau; gọi onCode(text) khi đọc được mã. Ném lỗi nếu không mở được camera.
-     * Tải zxing-wasm cùng lúc với mở camera; hình camera hiện ngay (chữ "Đang tải bộ đọc mã…" trong lúc chờ wasm).
+     * Tải zxing-wasm cùng lúc với mở camera; hình camera hiện ngay (chữ "Đang tải bộ đọc mã…" trong lúc chờ wasm;
+     * wasm đã tải từ lần bật trước thì không hiện chữ này).
      * Không có zxing-wasm (mất mạng, hết giờ) thì tắt camera tự mở và bật lại bằng html5-qrcode.
      * Chỉ trả về khi đã biết dùng đường nào (main.js khóa nút tới lúc đó).
      */
@@ -264,6 +265,10 @@ export function createScanner(elementId) {
       if (!navigator.mediaDevices?.getUserMedia || !el) return startHtml5(onCode, my);
       const reader = loadCameraReader();
       reader.catch(() => {}); // lỗi xử lý bên dưới (kể cả khi getUserMedia ném trước)
+      // wasm đã tải (lần bật thứ 2 trở đi: lời hứa xong ngay, trong lúc chờ getUserMedia) thì không hiện chữ chờ,
+      // tránh chữ "Đang tải bộ đọc mã…" chớp lên ~170 ms (lý do: code-reviewer nhay-hon vòng 2).
+      let readerReady = false;
+      reader.then(() => { readerReady = true; }, () => {});
       const stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(), audio: false });
       if (my !== session) { stopTracks(stream); return; }
       // Hiện hình ngay (lý do: code-reviewer nhay-hon vòng 1: chờ wasm trước thì mạng chậm thấy khung đen tới 10 giây
@@ -277,11 +282,14 @@ export function createScanner(elementId) {
       const guide = document.createElement("div");
       guide.className = "scan-guide"; // khung vẽ đúng vùng giải mã (cameraCrop: 92% × 60% giữa khung)
       guide.setAttribute("aria-hidden", "true");
-      const wait = document.createElement("p");
-      wait.className = "scan-wait";
-      wait.setAttribute("role", "status");
-      wait.textContent = "Đang tải bộ đọc mã…";
-      el.replaceChildren(video, guide, wait);
+      let wait = null;
+      if (!readerReady) {
+        wait = document.createElement("p");
+        wait.className = "scan-wait";
+        wait.setAttribute("role", "status");
+        wait.textContent = "Đang tải bộ đọc mã…";
+      }
+      el.replaceChildren(video, guide, ...(wait ? [wait] : []));
       cam = { stream, video, guide, wait, timer: 0 };
       mode = "zxing";
       running = true;
@@ -306,7 +314,7 @@ export function createScanner(elementId) {
         return startHtml5(onCode, my);
       }
       if (my !== session || !cam) return;
-      cam.wait.remove(); // đã có bộ đọc: gỡ chữ chờ
+      cam.wait?.remove(); // đã có bộ đọc: gỡ chữ chờ (nếu có)
       decodeLoop(onCode, my, mod);
     },
 
