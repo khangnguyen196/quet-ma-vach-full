@@ -1,7 +1,7 @@
 // Test vòng 5 (không gọi mạng): phần thuần của 4b Ollama (dựng body request, câu trả lời -> câu tìm T1, chấm).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ollamaBody, parseOllamaText, ollamaQuery, scoreOllama, shouldStopSlow } from "../ollama-parse.mjs";
+import { ollamaBody, parseOllamaText, ollamaQuery, scoreOllama, shouldStopSlow, slowStopReason } from "../ollama-parse.mjs";
 import { buildBm25 } from "../vn-data.mjs";
 import { geminiPrompt } from "../api-parse.mjs";
 
@@ -49,4 +49,11 @@ test("shouldStopSlow: dừng ở 10 ảnh khi trung vị > 180 giây", () => {
   assert.equal(shouldStopSlow(Array(9).fill(200)), false);
   assert.equal(shouldStopSlow(Array(10).fill(200)), true);
   assert.equal(shouldStopSlow([...Array(6).fill(100), ...Array(4).fill(300)]), false);
+});
+
+test("slowStopReason: sau 10 ảnh, ảnh quá giờ (300 giây) cũng tính vào trung vị (không chỉ ảnh ok)", () => {
+  const rows = [210, 295, 276, 300, 300, 294, 280, 290, 300, 285].map((s, i) => ({ status: i % 3 === 0 ? "lỗi: quá 300 giây" : "ok", seconds: s }));
+  assert.match(String(slowStopReason(rows)), /dừng ở 10 ảnh/);
+  assert.equal(slowStopReason(rows.slice(0, 9)), null);
+  assert.equal(slowStopReason(rows.map((r) => ({ ...r, seconds: 100 }))), null);
 });

@@ -45,3 +45,9 @@ export function scoreOllama(text, truth, index) {
 export function shouldStopSlow(seconds) {
   return seconds.length >= 10 && median(seconds) > 180;
 }
+
+/** Lý do dừng sớm sau đúng 10 ảnh (mọi ảnh đã chạy, kể cả ảnh lỗi / quá giờ, tính giây thật); không dừng -> null. */
+export function slowStopReason(results) {
+  if (results.length !== 10) return null;
+  return null;
+}
