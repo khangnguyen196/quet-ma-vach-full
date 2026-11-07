@@ -239,9 +239,11 @@ def main():
             out_file = out_dir / f"{code}__{name}.txt"
             if out_file.exists():
                 continue
-            rgb = np.array(prepare(src))
             t = time.perf_counter()
             try:
+                # ảnh hỏng / không mở được: ghi dòng error: vào times.csv rồi chạy tiếp, không dừng cả lần chạy
+                rgb = np.array(prepare(src))
+                t = time.perf_counter()   # giây/ảnh chỉ tính bước đọc (không tính chuẩn bị ảnh), như trước
                 boxes = det(rgb)
                 crops = [Image.fromarray(crop(rgb, b)) for b in boxes]
                 texts = rec.predict_batch(crops) if crops else []
