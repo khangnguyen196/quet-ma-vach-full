@@ -123,13 +123,22 @@ async function main() {
       .then(() => true, () => false);
     await page.goto(args.base + "ocr-thu.html");
     // trước khi trang sẵn sàng (nếu kịp): 2 ô chọn ảnh khóa, nút chọn ảnh mờ (chỉ để xem, không tính vào QUA)
-    report.beforeReady = await page.evaluate(() => ({
+    const isReady = () => page.evaluate(() => !!(window.__ocrThu && "ready" in window.__ocrThu));
+    const before = await page.evaluate(() => ({
       readyAlready: !!(window.__ocrThu && "ready" in window.__ocrThu),
       pickDisabled: ["pickCamera", "pickLibrary"].map((id) => document.getElementById(id)?.disabled ?? null),
       labelOpacity: [...document.querySelectorAll("label.btn")].map((l) => getComputedStyle(l).opacity),
     }));
-    if (!report.beforeReady.readyAlready) await shot(page, "a0");
-    console.log("(a0) trước khi sẵn sàng:", JSON.stringify(report.beforeReady), report.beforeReady.readyAlready ? "– trang đã sẵn sàng, chưa chụp" : "– đã chụp a0");
+    let shotBeforeReady = false;
+    if (!before.readyAlready) {
+      // chụp khung nhìn (nhanh hơn cả trang); sẵn sàng xong trong lúc chụp thì ảnh không còn đúng: xóa, ghi "chưa chụp"
+      const a0 = path.join(args.shots, `${args.browser}-a0.png`);
+      await page.screenshot({ path: a0 });
+      shotBeforeReady = !(await isReady());
+      if (!shotBeforeReady) fs.rmSync(a0, { force: true });
+    }
+    report.beforeReady = { ...before, shotBeforeReady };
+    console.log("(a0) trước khi sẵn sàng:", JSON.stringify(report.beforeReady), shotBeforeReady ? "– đã chụp a0" : "– chưa chụp (trang sẵn sàng trước khi chụp xong)");
     const viaSw = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
     const title = await page.title();
     const isTestPage = (await page.locator("#runPaddle").count()) === 1;
