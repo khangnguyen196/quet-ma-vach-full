@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, summarizeMemory, sumBytes, mb, timeStats, makeTar,
+  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar,
 } from "../lib.mjs";
 
 test("tên file kết quả và tên công cụ giống run_ocr.py", () => {
@@ -48,6 +48,12 @@ test("thứ tự dòng Paddle: chồng dọc < 50% thì khác hàng; bỏ khung 
   // lệch 10/30 -> chồng 20/30 >= 0.5 -> cùng hàng, B bên trái đứng trước
   assert.deepEqual(orderLines([box(200, 0, 100, 30, "A"), box(0, 10, 100, 30, "B")]), ["B", "A"]);
   assert.deepEqual(orderLines([]), []);
+});
+
+test("cách ghi phụ rowLines: khung cùng hàng nối 1 dòng (chỉ để thử)", () => {
+  const items = [box(300, 12, 100, 30, "17,14g"), box(10, 10, 100, 30, "Protein"), box(10, 100, 200, 30, "Calories")];
+  assert.deepEqual(rowLines(items), ["Protein 17,14g", "Calories"]);
+  assert.deepEqual(orderLines(items), ["Protein", "17,14g", "Calories"]);
 });
 
 test("gom bộ nhớ: nền = trung vị tổng private lúc trang trống; đỉnh 1 tiến trình và đỉnh tổng lúc chạy", () => {

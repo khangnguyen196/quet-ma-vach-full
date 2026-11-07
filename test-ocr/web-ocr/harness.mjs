@@ -2,7 +2,7 @@
 //   await harness.init()          -> nạp thư viện + model, trả số giây nạp, backend, tính năng trình duyệt
 //   await harness.run(url)        -> đọc 1 ảnh, trả { text, seconds, ... }
 // Tham số và đường dẫn do harness.html đặt sẵn ở window.__OCR_PARAMS / window.__OCR_ASSETS.
-import { orderLines, makeTar } from "./lib.mjs";
+import { orderLines, rowLines, makeTar } from "./lib.mjs";
 
 const P = window.__OCR_PARAMS;
 const A = window.__OCR_ASSETS;
@@ -95,7 +95,9 @@ async function initPaddle() {
     },
     async recognize(canvas) {
       const [res] = await ocr.predict(canvas);
-      return { text: orderLines(res.items).join("\n"), boxes: res.items.length, metrics: res.metrics };
+      // join=rows (chỉ để thử): khung cùng hàng nối thành 1 dòng; mặc định mỗi khung 1 dòng
+      const lines = P.join === "rows" ? rowLines(res.items) : orderLines(res.items);
+      return { text: lines.join("\n"), boxes: res.items.length, metrics: res.metrics };
     },
   };
 }

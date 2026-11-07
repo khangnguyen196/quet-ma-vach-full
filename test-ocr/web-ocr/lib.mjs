@@ -53,13 +53,13 @@ function bbox(poly) {
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
 }
 
-/** Xếp các khung chữ của PaddleOCR theo thứ tự đọc, mỗi khung 1 dòng.
+/** Gom các khung chữ của PaddleOCR thành hàng theo thứ tự đọc.
  *  - Sắp các khung theo cạnh trên (minY).
  *  - Gom thành hàng: khung chồng chiều dọc với hàng đang xét ít nhất `minOverlap` (tính trên chiều cao
  *    nhỏ hơn giữa khung và hàng) thì cùng hàng; hàng nở theo khung mới.
  *  - Trong hàng, sắp trái sang phải (minX). Hàng sắp trên xuống.
- *  items: [{ poly: [[x,y]x4], text }]. Trả về mảng chuỗi (bỏ khung chữ rỗng). */
-export function orderLines(items, minOverlap = 0.5) {
+ *  items: [{ poly: [[x,y]x4], text }]. Trả về mảng hàng, mỗi hàng là mảng chuỗi (bỏ khung chữ rỗng). */
+export function groupRows(items, minOverlap = 0.5) {
   const boxes = items
     .filter((it) => it && typeof it.text === "string" && it.text.trim() !== "" && Array.isArray(it.poly) && it.poly.length)
     .map((it) => ({ ...bbox(it.poly), text: it.text.trim() }))
@@ -79,7 +79,17 @@ export function orderLines(items, minOverlap = 0.5) {
     }
     rows.push({ minY: b.minY, maxY: b.maxY, boxes: [b] });
   }
-  return rows.flatMap((r) => r.boxes.sort((a, b) => a.minX - b.minX).map((b) => b.text));
+  return rows.map((r) => r.boxes.sort((a, b) => a.minX - b.minX).map((b) => b.text));
+}
+
+/** Cách ghi chữ chính của Paddle (dùng cho chấm điểm): mỗi khung chữ 1 dòng, theo thứ tự của groupRows. */
+export function orderLines(items, minOverlap = 0.5) {
+  return groupRows(items, minOverlap).flat();
+}
+
+/** Cách ghi phụ (chỉ để thử, không vào bảng chính): các khung cùng hàng nối thành 1 dòng, cách nhau 1 dấu cách. */
+export function rowLines(items, minOverlap = 0.5) {
+  return groupRows(items, minOverlap).map((r) => r.join(" "));
 }
 
 /** Gom số đo bộ nhớ.

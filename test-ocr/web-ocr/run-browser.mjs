@@ -19,7 +19,7 @@ import { startServer } from "./serve.mjs";
 import { resultFileName, toolName, timesRow, pickPhotos, summarizeMemory, sumBytes, timeStats, mb, csvLine } from "./lib.mjs";
 
 function parseArgs(argv) {
-  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false };
+  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false, join: "" };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -31,11 +31,13 @@ function parseArgs(argv) {
     else if (k === "--photos") a.photos = v();
     else if (k === "--timeout") a.timeout = Number(v());
     else if (k === "--report") a.report = true;
+    else if (k === "--join") a.join = v(); // "rows": chỉ để thử (khung cùng hàng nối 1 dòng), ghi vào --out riêng
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
   if (!["chromium", "webkit"].includes(a.browser)) throw new Error("--browser phải là chromium hoặc webkit");
   if (!["local", "cdn"].includes(a.mode)) throw new Error("--mode phải là local hoặc cdn");
+  if (a.join && path.resolve(a.out) === path.resolve("outputs")) throw new Error("--join chỉ để thử: phải kèm --out thư mục khác outputs/");
   return a;
 }
 
@@ -196,7 +198,7 @@ async function runOnce(args) {
     };
 
     const openAndInit = async () => {
-      const url = `${base}/harness.html?engine=${args.engine}&mode=${args.mode}`;
+      const url = `${base}/harness.html?engine=${args.engine}&mode=${args.mode}${args.join ? `&join=${args.join}` : ""}`;
       await page.goto(url);
       await page.waitForFunction(() => window.harnessReady === true, null, { timeout: 120000 });
       return withTimeout(page.evaluate(() => window.harness.init()), 900000, "init");
