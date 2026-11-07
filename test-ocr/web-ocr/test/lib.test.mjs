@@ -1,4 +1,5 @@
 import test from "node:test";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import {
   resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar, tessLangObjects, quantile,
@@ -152,4 +153,14 @@ test("tessLangObjects: lần sao chép đầu (nạp ngôn ngữ) mang byte, l�
   assert.deepEqual(load[1].data, eng);
   const init = structuredClone(langs); // rồi gửi việc initialize: tesseract.js 7.0.0 ghép tên bằng l.data
   assert.equal(init.map((l) => l.data).join("+"), "vie+eng");
+});
+
+test("chặn nâng bản tesseract.js: node_modules và URL CDN của trang thử đều là 7.0.0 (cách lách tessLangObjects dựa vào bản này)", () => {
+  const hint = "nâng bản thì kiểm lại cách lách tessLangObjects (README Phần D)";
+  const pkg = JSON.parse(fs.readFileSync(new URL("../node_modules/tesseract.js/package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.version, "7.0.0", `node_modules/tesseract.js là ${pkg.version}: ${hint}`);
+  const html = fs.readFileSync(new URL("../../../public/ocr-thu.html", import.meta.url), "utf8");
+  const m = html.match(/tesseract: "(https:[^"]+)"/);
+  assert.ok(m, `không thấy CDN.tesseract trong ocr-thu.html: ${hint}`);
+  assert.ok(m[1].includes("tesseract.js@7.0.0"), `CDN.tesseract là ${m[1]}: ${hint}`);
 });
