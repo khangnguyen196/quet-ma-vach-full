@@ -18,6 +18,17 @@ export const SEARCH_GAP_MS = 6000; // 60 giây / 10 lượt
 export const PRODUCT_GAP_MS = 1000;
 export const RETRY_WAIT_MS = 30000;
 export const PAGE_SIZE = 5;
+// Cầu dao: BREAKER_FAILS lần hỏng liền nhau (lỗi mạng / 429 / 5xx) thì nghỉ BREAKER_PAUSE_MS; sau khi nghỉ mà lại
+// hỏng BREAKER_FAILS lần liền thì ngừng hẳn (lỗi có cờ breakerOpen), script ghi trạng thái + các mã chưa tìm.
+export const BREAKER_FAILS = 5;
+export const BREAKER_PAUSE_MS = 10 * 60 * 1000;
+
+/** Lỗi khi cầu dao đã ngừng hẳn. */
+export function breakerError(detail) {
+  const e = new Error(`OFF hỏng ${BREAKER_FAILS} lần liền nhau sau khi đã nghỉ: ngừng gọi OFF (${detail})`);
+  e.breakerOpen = true;
+  return e;
+}
 // Kiểu tìm mặc định: cgi/search.pl (có CORS khi trả 200, lọc VN được, tìm theo chữ). search-a-licious không có
 // header CORS cho trang ngoài OFF (kiểm 07/11/2026, xem cors-check.mjs), chỉ dùng tham khảo trong Node.
 export const DEFAULT_KIND = "searchpl";
@@ -104,6 +115,8 @@ export function createOffClient({
   searchGapMs = SEARCH_GAP_MS,
   productGapMs = PRODUCT_GAP_MS,
   retryWaitMs = RETRY_WAIT_MS,
+  breakerFails = BREAKER_FAILS,
+  breakerPauseMs = BREAKER_PAUSE_MS,
   log = () => {},
   // dùng chung bộ giãn cách + bộ đếm với client khác (vd 1 client gọi từ trình duyệt, 1 client gọi từ Node):
   // tổng lượt tìm của cả 2 vẫn ≤ 10 / phút
@@ -114,7 +127,28 @@ export function createOffClient({
     search: makeLimiter(searchGapMs, { now, sleep }),
     product: makeLimiter(productGapMs, { now, sleep }),
   };
-  const stats = shareWith ? shareWith.stats : { search: 0, product: 0, other: 0, cacheHits: 0, http429or5xx: 0, retries: 0, failures: 0, vnFallback: 0 };
+  const stats = shareWith ? shareWith.stats : {
+    search: 0, product: 0, other: 0, cacheHits: 0, http429or5xx: 0, networkErrors: 0, retries: 0, failures: 0, vnFallback: 0,
+    breakerTrips: 0,
+  };
+  // trạng thái cầu dao (dùng chung khi shareWith)
+  const breaker = shareWith ? shareWith.breaker : { streak: 0, open: false, last: "" };
+
+  /** Ghi một lần hỏng (lỗi mạng / 429 / 5xx); đủ breakerFails lần liền thì nghỉ, lần thứ 2 thì ngừng hẳn. */
+  async function noteFailure(msg) {
+    breaker.streak++;
+    breaker.last = msg;
+    if (breaker.streak < breakerFails) return;
+    stats.breakerTrips++;
+    breaker.streak = 0;
+    if (stats.breakerTrips >= 2) {
+      breaker.open = true;
+      log(`  CẦU DAO NGỪNG HẲN: ${msg}`);
+      throw breakerError(msg);
+    }
+    log(`  cầu dao: ${breakerFails} lần hỏng liền nhau (${msg}), nghỉ ${breakerPauseMs / 60000} phút`);
+    await sleep(breakerPauseMs);
+  }
 
   /** GET có cache. cls: "search" | "product" | "other" (other dùng bộ giãn của search). */
   async function cachedGet(url, cls) {
@@ -130,6 +164,7 @@ export function createOffClient({
     const limiter = cls === "product" ? limiters.product : limiters.search;
     let lastErr = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (breaker.open) throw breakerError(breaker.last);
       if (attempt === 1) {
         stats.retries++;
         log(`  thử lại sau ${retryWaitMs / 1000} giây: ${lastErr}`);
@@ -142,14 +177,18 @@ export function createOffClient({
       try {
         res = await fetchImpl(url);
       } catch (e) {
+        stats.networkErrors++;
         lastErr = `lỗi mạng: ${e?.message || e}`;
+        await noteFailure(lastErr);
         continue;
       }
       if (res.status === 429 || res.status >= 500) {
         stats.http429or5xx++;
         lastErr = `HTTP ${res.status}`;
+        await noteFailure(lastErr);
         continue;
       }
+      breaker.streak = 0;
       if (!res.ok && res.status !== 404) {
         stats.failures++;
         throw new Error(`OFF trả HTTP ${res.status} cho ${key}`);
@@ -224,5 +263,5 @@ export function createOffClient({
     return { brands: [...set], source: `/api/v2/search lọc VN, ${pages} trang × 100` };
   }
 
-  return { search, product, vnBrands, cachedGet, stats, limiters };
+  return { search, product, vnBrands, cachedGet, stats, limiters, breaker };
 }
