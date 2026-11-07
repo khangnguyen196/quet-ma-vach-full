@@ -143,10 +143,16 @@ btnCam.addEventListener("click", async () => {
       if (navigator.vibrate) navigator.vibrate(60);
       lookup(text);
     });
-    btnCam.textContent = "Tắt camera";
-    btnCam.classList.add("live");
-    if (scanner.running) showCamTools();
-    setMsg("Đưa mã vạch vào khung, giữ máy yên khoảng 1–2 giây.");
+    // start() có thể trả về mà camera không chạy (đã tắt trong lúc mở, vd chuyển sang Tủ đồ): khi đó nút giữ
+    // "Bật camera" và khung về như lúc tắt, không ghi đè lời nhắn đang có.
+    if (scanner.running) {
+      btnCam.textContent = "Tắt camera";
+      btnCam.classList.add("live");
+      showCamTools();
+      setMsg("Đưa mã vạch vào khung, giữ máy yên khoảng 1–2 giây.");
+    } else {
+      placeholder();
+    }
   } catch (e) {
     placeholder("Không mở được camera ở đây.");
     setMsg(`Không mở được camera (${errorText(e)}). Bấm “Chụp ảnh mã” hoặc nhập số bên dưới.`, true);

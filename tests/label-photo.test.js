@@ -177,6 +177,8 @@ describe("renderProduct: khối Bổ sung trên Open Food Facts", () => {
 });
 
 describe("main.js: nút Chép mã tìm vùng báo trong .copy-area", () => {
+  // Test node không có DOM (không chạy được main.js) nên kiểm thẳng mã nguồn: dò đúng chuỗi dưới đây.
+  // Đổi cách viết dòng đó trong main.js (mà vẫn đúng ý) thì sửa chuỗi trong test cho khớp.
   test("listener dùng closest(\".copy-area\") (chạy cho màn không tìm thấy, cột So sánh và khối Bổ sung)", async () => {
     const { readFile } = await import("node:fs/promises");
     const src = await readFile(new URL("../src/main.js", import.meta.url), "utf8");

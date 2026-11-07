@@ -144,9 +144,9 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
 /* Nút bị khóa trong lúc đang đọc ảnh / mở camera.
    Tách 2 rule: trình duyệt cũ không hiểu :has() sẽ bỏ cả rule chứa nó, rule :disabled vẫn còn. */
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 /* Nút đèn pin / phóng to: chỉ hiện khi camera đang bật và máy hỗ trợ */
 .cam-tools[hidden], .cam-tools .btn[hidden] { display: none; }
-.btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 form.manual { display: flex; gap: 8px; margin-top: 14px; }
 form.manual input {
