@@ -26,6 +26,21 @@ export function displayName(names) {
   return n.product_name_vi || n.product_name || Object.values(n)[0] || "";
 }
 
+export const ODBL_URL = "https://opendatacommons.org/licenses/odbl/1-0/";
+
+/** Khối meta của danh mục: nguồn, giấy phép (vòng 6: thêm link ODbL 1.0 + câu cơ sở dữ liệu phái sinh), ngày xuất. */
+export function catalogMeta({ withNameBrand, count, date }) {
+  return {
+    nguon: "Open Food Facts (https://world.openfoodfacts.org), bản xuất JSONL chính thức, sản phẩm có countries_tags en:vietnam",
+    giayPhep: "ODbL 1.0 (dữ liệu) – © Open Food Facts contributors",
+    ngayXuat: date,
+    soSanPham: count,
+    truong: withNameBrand ? "code, name (tên hiển thị), brand, text (chữ tìm: product_name* + brands + generic_name*)" : "code, text",
+    giayPhepUrl: ODBL_URL,
+    ghiChuGiayPhep: "Cơ sở dữ liệu phái sinh từ Open Food Facts, phát hành theo ODbL 1.0",
+  };
+}
+
 /** Chuỗi JSON: meta + mỗi sản phẩm một dòng. */
 export function catalogJson(meta, products) {
   return `{"meta":${JSON.stringify(meta)},\n"products":[\n${products.map((p) => JSON.stringify(p)).join(",\n")}\n]}\n`;
@@ -39,13 +54,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (!r) throw new Error(`không thấy ${d.code} trong vn-products.json`);
     return withNameBrand ? { code: d.code, name: displayName(r.names), brand: r.brands || "", text: d.text } : { code: d.code, text: d.text };
   });
-  const meta = {
-    nguon: "Open Food Facts (https://world.openfoodfacts.org), bản xuất JSONL chính thức, sản phẩm có countries_tags en:vietnam",
-    giayPhep: "ODbL 1.0 (dữ liệu) – © Open Food Facts contributors",
-    ngayXuat: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }), // giờ VN
-    soSanPham: products.length,
-    truong: withNameBrand ? "code, name (tên hiển thị), brand, text (chữ tìm: product_name* + brands + generic_name*)" : "code, text",
-  };
+  const meta = catalogMeta({ withNameBrand, count: products.length, date: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }) }); // ngày giờ VN
   const s = catalogJson(meta, products);
   fs.writeFileSync(outFile, s, "utf8");
   const raw = Buffer.byteLength(s);
