@@ -29,8 +29,9 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
 - `public/` – `manifest.webmanifest` + `icons/` (PNG), Vite chép nguyên vào `dist/`.
 - `public/ocr-thu.html` (+ `public/ocr-thu/regex.mjs`, `text.mjs`) – trang THỬ OCR riêng (đợt ocr-c), không có link từ app, noindex; PaddleOCR.js + tesseract.js và model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định của `test-ocr/web-ocr/assets.js`, không vào bundle / package.json của app. `regex.mjs` là bản JS của `extract_regex` (Python là chuẩn; sửa luật thì chạy `test-ocr/web-ocr/regex-parity.mjs`).
-- `test-ocr/` – so sánh OCR (Python, `test-ocr/README.md`); `test-ocr/web-ocr/` đo OCR trong trình duyệt bằng Playwright (package.json riêng), `test-ocr/vietocr/` PP-OCRv5 det + VietOCR (venv riêng, chỉ để so mức máy chủ). Không thuộc app.
-- `tools/` – `make-icons.mjs` (vẽ icon, chạy một lần: `node tools/make-icons.mjs`), `sw-build.mjs` (ghép mã sw.js). `sw.js` sinh lúc build bằng plugin trong `vite.config.js`; không sửa tay trong `dist/`.
+- `public/chup-mat-do.html` (+ `public/chup-mat-do/t1.mjs`, `tar.mjs`, `danh-muc-vn.json`) – trang THỬ chụp mặt trước (đợt chup-mat-do), không link từ app, noindex; PaddleOCR.js từ CDN đúng bản ghim + T1 (BM25) trên danh mục VN tĩnh (dữ liệu Open Food Facts, ODbL), không gọi Open Food Facts. `t1.mjs` là bản trình duyệt của T1 trong `test-ocr/chup-mat-do` (Node là chuẩn; sửa luật thì chạy `test-ocr/chup-mat-do/trang-thu-parity.mjs`).
+- `test-ocr/` – so sánh OCR (Python, `test-ocr/README.md`); `test-ocr/web-ocr/` đo OCR trong trình duyệt bằng Playwright (package.json riêng), `test-ocr/vietocr/` PP-OCRv5 det + VietOCR (venv riêng, chỉ để so mức máy chủ), `test-ocr/chup-mat-do/` đo cách chụp mặt trước → nhận ra sản phẩm (package.json riêng, `test-ocr/README.md` Phần E). Không thuộc app.
+- `tools/` – `make-icons.mjs` (vẽ icon, chạy một lần: `node tools/make-icons.mjs`), `sw-build.mjs` (ghép mã sw.js; danh sách lưu sẵn bỏ `ocr-thu*`, `chup-mat-do*`). `sw.js` sinh lúc build bằng plugin trong `vite.config.js`; không sửa tay trong `dist/`.
 
 ## Quy ước
 - Giao diện, thông báo lỗi, comment: **tiếng Việt**. Tên biến, hàm, file: tiếng Anh.
