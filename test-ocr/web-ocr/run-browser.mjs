@@ -153,7 +153,11 @@ async function runOnce(args) {
     if (args.browser === "chromium") ctxOpts.isMobile = true; // WebKit trên Windows: chỉ đặt khổ + DPR
     const context = await browser.newContext(ctxOpts);
     context.on("requestfinished", async (req) => {
-      const entry = { url: req.url(), transfer: null, decoded: null, status: null };
+      // HuggingFace chuyển hướng (302) sang máy chủ xet: ghi URL gốc (request đầu chuỗi chuyển hướng) cho dễ đọc
+      let first = req;
+      while (first.redirectedFrom()) first = first.redirectedFrom();
+      const host = new URL(req.url()).hostname;
+      const entry = { url: first.url(), finalHost: host, local: host === "localhost" || host === "127.0.0.1", transfer: null, decoded: null, status: null };
       net.push(entry);
       try {
         const sizes = await req.sizes();
@@ -268,8 +272,11 @@ async function runOnce(args) {
   run.finishedAt = new Date().toISOString();
   run.memory = summarizeMemory(samples);
   run.jsHeapPeak = args.browser === "chromium" ? jsHeapPeak : null;
-  const bytes = sumBytes(net.filter((e) => !e.url.startsWith("data:")));
-  run.network = { ...bytes, failed: netFailed };
+  // Byte tải lần đầu: chỉ file lấy từ mạng (CDN). Bỏ file của máy (localhost: trang đo + ảnh thử, ảnh là của người dùng)
+  // và data: URL. Mode local thì mọi file đều từ máy, nên chỉ ghi số localBytes.
+  const bytes = sumBytes(net.filter((e) => !e.url.startsWith("data:") && !e.local));
+  const local = sumBytes(net.filter((e) => e.local));
+  run.network = { ...bytes, failed: netFailed, localBytes: { transfer: local.transfer, count: local.count } };
   run.processNames = [...new Set(samples.flatMap((s) => s.procs.map((p) => p.name)))];
   const file = path.join(runsDir, `${tool}-${args.mode}.json`);
   fs.writeFileSync(file, JSON.stringify(run, null, 2), "utf8");
@@ -277,7 +284,8 @@ async function runOnce(args) {
     (run.initError ? `\nLỖI NẠP: ${run.initError}` : "") +
     `\nnạp ${run.loadSeconds?.toFixed?.(1) ?? "?"} s, backend ${run.init?.backend ?? "?"}, crossOriginIsolated ${run.init?.features?.crossOriginIsolated}` +
     `\nbộ nhớ: nền ${mb(run.memory.baseline)} MB, đỉnh 1 tiến trình ${mb(run.memory.peakProc)} MB, đỉnh tổng ${mb(run.memory.peakTotal)} MB` +
-    `\nmạng: ${mb(bytes.transfer)} MB qua mạng, ${mb(bytes.decoded)} MB giải nén, ${bytes.count} request\nGhi: ${file}`);
+    `\nmạng (không tính localhost): ${mb(bytes.transfer)} MB qua mạng, ${mb(bytes.decoded)} MB giải nén, ${bytes.count} request;` +
+    ` localhost ${mb(local.transfer)} MB\nGhi: ${file}`);
   return run;
 }
 
@@ -341,7 +349,7 @@ function report(args) {
     if (cdn) {
       dl.push(`## ${tool}`, "", `Tổng: ${mb(cdn.network.transfer)} MB qua mạng, ${mb(cdn.network.decoded)} MB sau giải nén, ${cdn.network.count} request.`, "",
         "| File (> 100 kB) | qua mạng (kB) | giải nén (kB) |", "|---|---|---|");
-      for (const b of cdn.network.big) dl.push(`| ${b.url} | ${(b.transfer / 1000).toFixed(0)} | ${(b.decoded / 1000).toFixed(0)} |`);
+      for (const b of cdn.network.big) dl.push(`| ${b.url.split("?")[0]} | ${(b.transfer / 1000).toFixed(0)} | ${(b.decoded / 1000).toFixed(0)} |`);
       if (cdn.network.failed.length) dl.push("", "Request lỗi: " + cdn.network.failed.map((f) => `${f.url} (${f.error})`).join("; "));
       dl.push("");
     }

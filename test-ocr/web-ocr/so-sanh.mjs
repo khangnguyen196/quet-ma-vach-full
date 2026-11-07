@@ -66,7 +66,7 @@ const both = (a, b) => (a === b ? a : `${a} / ${b}`);
 export function buildTable({ A, B, metrics, engines, others }) {
   const m = Object.fromEntries(metrics.map((r) => [r.tool, r]));
   const lines = [
-    "| Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium | giây/ảnh WebKit | bộ nhớ đỉnh (MB) Chromium / WebKit | MB tải lần đầu (qua mạng) Chromium / WebKit | backend | chạy được cả 2 trình duyệt? |",
+    "| Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium | giây/ảnh WebKit | bộ nhớ đỉnh 1 tiến trình (MB, private / working set) Chromium; WebKit | MB tải lần đầu (qua mạng) Chromium / WebKit | backend | chạy được cả 2 trình duyệt? |",
     "|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const e of engines) {
@@ -78,7 +78,7 @@ export function buildTable({ A, B, metrics, engines, others }) {
       ` | ${both(pct(B[e.tools.chromium]?.regex), pct(B[e.tools.webkit]?.regex))}` +
       ` | ${both(pct(B[e.tools.chromium]?.dict), pct(B[e.tools.webkit]?.dict))}` +
       ` | ${c.sec_per_image_mean || "–"} | ${w.sec_per_image_mean || "–"}` +
-      ` | ${c.ws_peak_proc_mb || "–"} / ${w.ws_peak_proc_mb || "–"}` +
+      ` | ${c.mem_peak_proc_mb || "–"} / ${c.ws_peak_proc_mb || "–"}; ${w.mem_peak_proc_mb || "–"} / ${w.ws_peak_proc_mb || "–"}` +
       ` | ${c.net_mb_first_load || "–"} / ${w.net_mb_first_load || "–"}` +
       ` | ${both(c.backend || "–", w.backend || "–")}` +
       ` | ${okBoth ? "có" : `Chromium: ${runs(c)}; WebKit: ${runs(w)}`} |`);
@@ -116,7 +116,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   });
   const md = ["# So sánh OCR trong trình duyệt (đợt ocr-c)", "",
     "% A: OCR có chứa thông tin (score.py). % B: extractor rút ra đúng (score_combo.py). Giây/ảnh: chỉ ảnh ok, chỉ bước đọc (không tính nạp model).",
-    "Bộ nhớ đỉnh: working set lớn nhất của MỘT tiến trình trong cây tiến trình trình duyệt (thường là tiến trình chạy trang), đo trên Windows, chỉ là ước lượng.",
+    "Bộ nhớ đỉnh: số lớn nhất của MỘT tiến trình trong cây tiến trình trình duyệt (thường là tiến trình chạy trang), mẫu mỗi 250 ms: private (PrivateMemorySize64, bộ nhớ đã cam kết riêng) / working set (WorkingSet64, đang nằm trong RAM). Đo trên Windows, chỉ là ước lượng; private của WebKit tính cả vùng nhớ ảo JavaScriptCore giữ sẵn cho wasm nên rất lớn, nên so working set.",
     "MB tải lần đầu: tổng byte qua mạng (đã nén) khi mở trang lần đầu với cache trống, từ CDN (jsDelivr + HuggingFace).", "", table, ""].join("\n");
   fs.mkdirSync(path.join(out, "web-ocr"), { recursive: true });
   fs.writeFileSync(path.join(out, "web-ocr", "so-sanh.md"), md, "utf8");
