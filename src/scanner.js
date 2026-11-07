@@ -196,11 +196,15 @@ export function createScanner(elementId) {
     running = true;
   }
 
-  /** Vòng giải mã khung hình camera tự mở (BarcodeDetector trước nếu có, rồi zxing-wasm). */
+  /**
+   * Vòng giải mã khung hình camera tự mở (BarcodeDetector trước nếu có, rồi zxing-wasm).
+   * BarcodeDetector ném lỗi (vd Chrome Android báo hỗ trợ ean_13 mà detect() ném "Barcode detection service
+   * unavailable") thì bỏ hẳn nó, đọc bằng zxing-wasm ngay trong khung đó và các khung sau.
+   */
   async function decodeLoop(onCode, my, mod) {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    const detector = await makeDetector();
+    let detector = await makeDetector();
     let warned = false;
     let pending = null; // mã 8 số đang chờ đọc lần 2 ({ code, at }, confirmCode)
     const tick = async () => {
@@ -213,8 +217,20 @@ export function createScanner(elementId) {
         if (r) {
           if (canvas.width !== r.dw || canvas.height !== r.dh) { canvas.width = r.dw; canvas.height = r.dh; }
           ctx.drawImage(video, r.sx, r.sy, r.sw, r.sh, 0, 0, r.dw, r.dh);
-          if (detector) code = detectorCode(await detector.detect(canvas));
-          if (!code && my === session) code = pickCameraCode(await mod.readCameraCodes(ctx.getImageData(0, 0, r.dw, r.dh)));
+          if (detector) {
+            try {
+              code = detectorCode(await detector.detect(canvas));
+            } catch (e) {
+              console.warn("BarcodeDetector lỗi, từ giờ chỉ đọc bằng zxing-wasm:", e);
+              detector = null; // không gọi lại (lỗi kiểu này thường lặp ở mọi khung)
+            }
+          }
+          // Không có mã, hoặc BarcodeDetector chỉ ra mã 8 số (có thể là mảnh của mã dài): vẫn đọc bằng zxing-wasm;
+          // zxing-wasm ra mã dài hơn thì lấy, không thì giữ mã 8 số cho confirmCode.
+          if ((!code || code.length === 8) && my === session) {
+            const z = pickCameraCode(await mod.readCameraCodes(ctx.getImageData(0, 0, r.dw, r.dh)));
+            if (z && (!code || z.length > code.length)) code = z;
+          }
         }
       } catch (e) {
         if (!warned) { console.warn("Lỗi khi giải mã khung hình camera:", e); warned = true; }
