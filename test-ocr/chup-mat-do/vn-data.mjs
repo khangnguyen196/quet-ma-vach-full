@@ -169,6 +169,60 @@ export function queryNotInIndex(pairs, index) {
 }
 
 // ---------------------------------------------------------------------------
+// Bộ phụ mở rộng (vòng 4, luật CHỐT ở tong-hop-v4.md): sản phẩm ngoài VN có ≥ 2 ảnh mặt trước khác imgid
+// ---------------------------------------------------------------------------
+
+/** Nước ưu tiên (Đông Nam Á / Đông Á), đúng thứ tự CHỐT. */
+export const EXT_PRIORITY_COUNTRIES = [
+  "en:thailand", "en:indonesia", "en:malaysia", "en:philippines", "en:singapore", "en:cambodia", "en:laos",
+  "en:myanmar", "en:japan", "en:south-korea", "en:china", "en:taiwan", "en:hong-kong",
+];
+
+/** Số imgid khác nhau trong các ảnh mặt trước của bản ghi (vnRecord). */
+export function distinctFrontCount(r) {
+  return new Set((r?.fronts || []).map((f) => String(f.imgid))).size;
+}
+
+/** Một sản phẩm (đã JSON.parse) -> ứng viên bộ phụ mở rộng hoặc null.
+ *  Ứng viên: KHÔNG có en:vietnam, KHÔNG thuộc mã thử, có ≥ 2 ảnh front_xx khác imgid.
+ *  Trả bản ghi vnRecord + { group: 0 (có nước ưu tiên) | 1 (nhóm còn lại), priorityTags: [...] }. */
+export function extCandidate(product, testCodes = new Set()) {
+  if (!product || isVn(product)) return null;
+  const code = String(product.code ?? "");
+  if (!code || testCodes.has(code)) return null;
+  const r = vnRecord(product);
+  if (distinctFrontCount(r) < 2) return null;
+  const tags = Array.isArray(product.countries_tags) ? product.countries_tags : [];
+  const priorityTags = EXT_PRIORITY_COUNTRIES.filter((c) => tags.includes(c));
+  return { ...r, group: priorityTags.length ? 0 : 1, priorityTags };
+}
+
+/** Một dòng JSONL -> ứng viên hoặc null. priorityOnly: chỉ JSON.parse dòng có chuỗi một nước ưu tiên (lọc nhanh). */
+export function extCandidateFromLine(line, testCodes = new Set(), { priorityOnly = true } = {}) {
+  if (!line) return null;
+  if (priorityOnly && !EXT_PRIORITY_COUNTRIES.some((c) => line.includes(`"${c}"`))) return null;
+  let p;
+  try { p = JSON.parse(line); } catch { return null; }
+  const c = extCandidate(p, testCodes);
+  if (!c || (priorityOnly && c.group !== 0)) return null;
+  return c;
+}
+
+/** Thứ tự CHỐT: nhóm ưu tiên trước, trong nhóm như rankCompare (unique_scans_n, completeness giảm dần, mã tăng dần). */
+export function extRankCompare(a, b) {
+  return (a.group ?? 1) - (b.group ?? 1) || rankCompare(a, b);
+}
+
+/** Cặp của ứng viên: ảnh chỉ mục = front_xx đầu tiên, ảnh truy vấn = front_xx đầu tiên có imgid khác. */
+export function extPair(r) {
+  const fronts = r?.fronts || [];
+  if (!fronts.length) return null;
+  const idx = String(fronts[0].imgid);
+  const q = fronts.find((f) => String(f.imgid) !== idx);
+  return q ? { code: r.code, indexImgid: idx, queryImgid: String(q.imgid) } : null;
+}
+
+// ---------------------------------------------------------------------------
 // BM25 (T1)
 // ---------------------------------------------------------------------------
 
