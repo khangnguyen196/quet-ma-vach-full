@@ -23,7 +23,7 @@ export function probeArgs(url, n, nullDevice = "NUL") {
  *  "noi" = nối tiếp từ byte đã có; "tu-dau" = xóa file dở, tải lại từ đầu (luồng giải nén mới). */
 export function resumePlan(probeCode, partialBytes) {
   if (!(partialBytes > 0)) return "tu-dau";
-  return "noi";
+  return probeCode === 206 ? "noi" : "tu-dau"; // 200 = server bỏ qua Range, nối vào sẽ hỏng file
 }
 
 /** Đủ byte: số byte cuối bằng Content-Length. Không biết Content-Length thì không kết luận được là đủ. */
