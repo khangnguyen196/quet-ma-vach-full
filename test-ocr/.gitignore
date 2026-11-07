@@ -7,3 +7,11 @@ photos/
 __pycache__/
 !hsd-js/package.json
 !hsd-js/package-lock.json
+!web-ocr/package.json
+!web-ocr/package-lock.json
+# model OCR tải về (ONNX, VietOCR…) để ở D:\cache, không bao giờ commit
+*.onnx
+*.pth
+*.pt
+*.traineddata
+*.traineddata.gz

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đo OCR trong trình duyệt</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 8px; }
+</style>
+<!-- assets.js: phiên bản + đường dẫn cố định (script thường, chạy trước import map) -->
+<script src="assets.js"></script>
+<script>
+  // Tham số: engine=paddlejs|tesseractjs, mode=local|cdn, ort=wasm|webgpu (chỉ paddlejs).
+  // paddlejs chưa có ort: dò WebGPU trước (navigator.gpu + requestAdapter() thành công) rồi tải lại trang với
+  // ort=webgpu hoặc ort=wasm, vì import map phải có TRƯỚC khi nạp module nào, mà dò WebGPU là việc bất đồng bộ.
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var engine = q.get("engine") || "paddlejs";
+    var mode = q.get("mode") || "local";
+    if (engine === "paddlejs" && !q.get("ort")) {
+      (async function () {
+        var gpu = "wasm", reason = "";
+        try {
+          if (!navigator.gpu || !navigator.gpu.requestAdapter) reason = "không có navigator.gpu";
+          else {
+            var adapter = await navigator.gpu.requestAdapter();
+            if (adapter) gpu = "webgpu"; else reason = "requestAdapter() trả null";
+          }
+        } catch (e) { reason = "requestAdapter() lỗi: " + (e && e.message || e); }
+        q.set("ort", gpu);
+        q.set("gpuReason", reason);
+        location.replace(location.pathname + "?" + q.toString());
+      })();
+      return;
+    }
+    var urls = OcrAssets.assetUrls(mode, { webgpu: q.get("ort") === "webgpu" });
+    window.__OCR_ASSETS = urls;
+    window.__OCR_PARAMS = { engine: engine, mode: mode, ort: q.get("ort") || "", gpuReason: q.get("gpuReason") || "" };
+    if (engine === "paddlejs") {
+      var map = document.createElement("script");
+      map.type = "importmap";
+      map.textContent = JSON.stringify({
+        imports: {
+          "@paddleocr/paddleocr-js": urls.paddleSdk,
+          "onnxruntime-web": urls.ort,
+          "js-yaml": urls.jsYaml,
+          "@techstark/opencv-js": new URL("shims/opencv.mjs", location.href).href,
+          "clipper-lib": new URL("shims/clipper.mjs", location.href).href,
+        },
+      });
+      document.head.appendChild(map);
+    }
+    var mod = document.createElement("script");
+    mod.type = "module";
+    mod.src = "harness.mjs";
+    document.head.appendChild(mod);
+  })();
+</script>
+</head>
+<body>
+<h1>Đo OCR trong trình duyệt</h1>
+<p id="status">Đang nạp…</p>
+<pre id="out"></pre>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "web-ocr",
+  "private": true,
+  "type": "module",
+  "description": "Đo OCR chạy trong trình duyệt (PaddleOCR.js, tesseract.js) trên Chromium và WebKit; chỉ để đo, không vào app",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@paddleocr/paddleocr-js": "0.4.2",
+    "onnxruntime-web": "1.24.3",
+    "tesseract.js": "7.0.0"
+  }
+}
