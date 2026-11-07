@@ -31,18 +31,25 @@ const loo = JSON.parse(fs.readFileSync(path.join(idxDir, "loo.json"), "utf8"));
 // --index node | trinh-duyet: chỉ mục tính bằng Node (index.*) hay bằng trình duyệt (index-trinh-duyet.*, tạo bằng
 // --build-index trong Chromium). Mặc định: trình duyệt nếu đã có, vì vector Node lệch (cosine < 0,99, xem tong-hop-v3.md).
 const buildIndex = argv.includes("--build-index");
-const idxKind = opt("--index", fs.existsSync(path.join(idxDir, model, "index-trinh-duyet.json")) ? "trinh-duyet" : "node");
-const idxName = (ext) => (idxKind === "trinh-duyet" ? `index-trinh-duyet.${ext}` : `index.${ext}`);
+// --ext (vòng 4, P3): bộ phụ mở rộng. Chỉ mục = index-mo-rong.* (970 ảnh VN của index-trinh-duyet + ảnh chỉ mục của
+// mọi ứng viên đã tải, chi-muc\mo-rong\cap.json extIndex); --build-index chỉ tính vector ảnh mới rồi ghép, không ghi đè
+// chỉ mục vòng 3. Truy vấn = 15 cặp bộ phụ gốc + cặp mở rộng. Ra cach2-<model>-<trình duyệt>-mo-rong.json.
+const ext = argv.includes("--ext");
+const cap = ext ? JSON.parse(fs.readFileSync(path.join(idxDir, "mo-rong", "cap.json"), "utf8")) : null;
+const idxKind = ext ? "mo-rong" : opt("--index", fs.existsSync(path.join(idxDir, model, "index-trinh-duyet.json")) ? "trinh-duyet" : "node");
+const idxName = (e) => (idxKind === "mo-rong" ? `index-mo-rong.${e}` : idxKind === "trinh-duyet" ? `index-trinh-duyet.${e}` : `index.${e}`);
 const meta = buildIndex ? { items: [] } : JSON.parse(fs.readFileSync(path.join(idxDir, model, idxName("json")), "utf8"));
 const SIDE_CODE = "8934572260543";
 
 // truy vấn: { id, set: "chinh" | "phu-xem-tay" | "bo-phu", code (đáp án), url }
 const queries = [];
-for (const s of chon.selected.filter((x) => x.test)) {
+for (const s of ext ? [] : chon.selected.filter((x) => x.test)) {
   queries.push({ id: `test-${s.code}`, set: s.code === SIDE_CODE ? "phu-xem-tay" : "chinh", code: s.code, url: `/photos/${s.code}/front.jpg` });
 }
 for (const p of loo.pairs) queries.push({ id: `loo-${p.code}`, set: "bo-phu", code: p.code, url: `/anh/${p.code}_${p.queryImgid}.400.jpg` });
+for (const p of cap?.pairs || []) queries.push({ id: `ext-${p.code}`, set: "mo-rong", code: p.code, url: `/anh-mo-rong/${p.code}_${p.queryImgid}.400.jpg` });
 const checkItems = meta.items.slice(0, 5).map((it, i) => ({ i, url: `/anh/${it.code}_${it.imgid}.400.jpg` }));
+const extImgFile = (c) => path.join(idxDir, "anh-mo-rong", `${c.code}_${c.imgid}.400.jpg`);
 
 const HARNESS = `<!doctype html><meta charset="utf-8"><title>cach-2</title><body><script type="module">
 import { loadEmbedder, topK, dot, l2norm } from "/embed-models.mjs";
@@ -110,6 +117,7 @@ function startServer() {
     if (u === "/embed-models.mjs") file = path.join(HERE, "embed-models.mjs");
     else if (u.startsWith("/idx/")) file = path.join(idxDir, model, idxName(path.extname(u).slice(1)));
     else if (u.startsWith("/anh/")) file = path.join(idxDir, "anh", path.basename(u));
+    else if (u.startsWith("/anh-mo-rong/")) file = path.join(idxDir, "anh-mo-rong", path.basename(u));
     else if (u.startsWith("/photos/")) file = path.join(photosDir, ...u.slice(8).split("/").map((s) => path.basename(s)));
     if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
@@ -167,6 +175,22 @@ try {
       } catch { /* bận */ }
     }, 250);
   }
+  if (buildIndex && ext) {
+    const items = cap.extIndex.filter((c) => fs.existsSync(extImgFile(c))).map((c) => ({ code: c.code, imgid: c.imgid, url: `/anh-mo-rong/${c.code}_${c.imgid}.400.jpg` }));
+    const tb = Date.now();
+    const built = await page.evaluate((a) => window.buildIndex(a), { model, items });
+    const ok = built.filter((b) => b.q);
+    const baseMeta = JSON.parse(fs.readFileSync(path.join(idxDir, model, "index-trinh-duyet.json"), "utf8"));
+    const baseBin = fs.readFileSync(path.join(idxDir, model, "index-trinh-duyet.bin"));
+    const bin = Buffer.concat([baseBin, Buffer.from(Int8Array.from(ok.flatMap((b) => b.q)).buffer)]);
+    fs.writeFileSync(path.join(idxDir, model, "index-mo-rong.bin"), bin);
+    const metaRaw = JSON.stringify({ ...baseMeta, builtIn: `${baseMeta.builtIn}; ảnh mở rộng ${browserName} ${run.browserVersion}`, items: [...baseMeta.items, ...ok.map((b) => ({ code: b.code, imgid: b.imgid, ext: true }))] });
+    fs.writeFileSync(path.join(idxDir, model, "index-mo-rong.json"), metaRaw, "utf8");
+    const info = { n: baseMeta.items.length + ok.length, vn: baseMeta.items.length, ext: ok.length, errors: built.length - ok.length, seconds: (Date.now() - tb) / 1000 };
+    fs.writeFileSync(path.join(idxDir, model, "info-mo-rong.json"), JSON.stringify(info, null, 1), "utf8");
+    console.log(`Chỉ mục mở rộng ${model}: ${JSON.stringify(info)}`);
+    throw new Error("BUILD_DONE");
+  }
   if (buildIndex) {
     const items = chon.selected.filter((s) => fs.existsSync(path.join(idxDir, "anh", `${s.code}_${s.imgid}.400.jpg`)))
       .map((s) => ({ code: s.code, imgid: s.imgid, url: `/anh/${s.code}_${s.imgid}.400.jpg` }));
@@ -221,7 +245,7 @@ if (res) {
   run.results = res.results.map((r) => ({ ...r, ...queries.find((q) => q.id === r.id) }));
 }
 fs.mkdirSync(outDir, { recursive: true });
-const file = path.join(outDir, `cach2-${model}-${browserName}.json`);
+const file = path.join(outDir, `cach2-${model}-${browserName}${ext ? "-mo-rong" : ""}.json`);
 fs.writeFileSync(file, JSON.stringify({ run, net: net.filter((e) => !e.url.includes("/anh/")) }, null, 1), "utf8");
 console.log(JSON.stringify({ ...run, results: run.results?.length, consoleErrors: run.consoleErrors?.slice(0, 3) }, null, 1));
 console.log(`Ghi: ${file}`);

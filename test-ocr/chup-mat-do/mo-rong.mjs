@@ -174,3 +174,43 @@ if (step === "catalog") {
   }
   log(`danh mục mở rộng: ${vnDocs.length} VN + ${extDocs.length} ngoài VN = ${docs.length}; chép ${cap.pairs.length} ảnh truy vấn vào ${photos}`);
 }
+
+// ---- 4. T1 / ảnh / T1 + ảnh trên chỉ mục + danh mục mở rộng (RRF k = 60, hòa điểm T1 trước như rrf.mjs) ----
+if (step === "rrf") {
+  const { rrf, rankOf, CONF_SCALE } = await import("./lib.mjs");
+  const { buildBm25, bm25Search, t1QueryFromLines } = await import("./vn-data.mjs");
+  const cap = readJson(path.join(outDir, "cap.json"));
+  const loo = readJson(path.join(idxDir, "loo.json"));
+  const index = buildBm25(readJson(path.join(outDir, "danh-muc.json")));
+  const ketQua = path.join(path.dirname(idxDir), "ket-qua");
+  const ocrDir = path.join(path.dirname(idxDir), "ocr");
+  const img = readJson(path.join(ketQua, "cach2-clip-chromium-mo-rong.json")).run;
+  const imgTop = new Map((img.results || []).map((r) => [r.id, r.top5 || []]));
+  const t1Top = (file) => {
+    if (!fs.existsSync(file)) return null;
+    const ocr = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (ocr.status !== "ok") return null;
+    const lines = (ocr.lines || []).map((l) => (l.conf == null ? l : { ...l, conf: Number(l.conf) / CONF_SCALE.paddlejs }));
+    return bm25Search(index, t1QueryFromLines(lines), 5).map((h) => h.code);
+  };
+  const row = (id, code, ocrFile, set) => {
+    const t1 = t1Top(ocrFile);
+    const im = imgTop.get(id) || [];
+    const fused = rrf([t1 || [], im], 60).slice(0, 5).map((x) => x.code);
+    return { id, set, code, ocrOk: t1 != null, imgOk: imgTop.has(id), t1: t1 || [], img: im, rrf: fused, t1Rank: rankOf(t1 || [], code), imgRank: rankOf(im, code), rrfRank: rankOf(fused, code) };
+  };
+  const rows = [
+    ...loo.pairs.map((p) => row(`loo-${p.code}`, p.code, path.join(ocrDir, "loo-1a", "paddlejs-rows-chromium",`${p.code}__front.json`), "goc")),
+    ...cap.pairs.map((p) => row(`ext-${p.code}`, p.code, path.join(ocrDir, "mo-rong-1a", "paddlejs-rows-chromium",`${p.code}__front.json`), "mo-rong")),
+  ];
+  const score = (rs) => {
+    const c = (k, f) => rs.filter((r) => f(r[k])).length;
+    return { n: rs.length, ocrOk: rs.filter((r) => r.ocrOk).length, imgOk: rs.filter((r) => r.imgOk).length,
+      t1: { top1: c("t1Rank", (x) => x === 1), top5: c("t1Rank", (x) => x != null) },
+      img: { top1: c("imgRank", (x) => x === 1), top5: c("imgRank", (x) => x != null) },
+      rrf: { top1: c("rrfRank", (x) => x === 1), top5: c("rrfRank", (x) => x != null) } };
+  };
+  const out = { k: 60, note: "mỗi danh sách 5 kết quả đầu; T1 từ chữ 1a PaddleOCR.js Chromium trên danh mục mở rộng; ảnh CLIP Chromium trên chỉ mục mở rộng; RRF hòa điểm thì T1 đứng trước", catalogDocs: index.N, goc: score(rows.filter((r) => r.set === "goc")), moRong: score(rows.filter((r) => r.set === "mo-rong")), gop: score(rows), rows };
+  writeJson(path.join(ketQua, "rrf-mo-rong.json"), out);
+  log(JSON.stringify({ goc: out.goc, moRong: out.moRong, gop: out.gop }));
+}
