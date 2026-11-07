@@ -21,7 +21,7 @@ import { geminiPrompt } from "./api-parse.mjs";
 import { parseCsv, median, maxOf } from "./lib.mjs";
 import { buildBm25 } from "./vn-data.mjs";
 import { startSampler } from "./sampler.mjs";
-import { ollamaBody, scoreOllama, shouldStopSlow } from "./ollama-parse.mjs";
+import { ollamaBody, scoreOllama, slowStopReason } from "./ollama-parse.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -142,8 +142,8 @@ try {
     save();
     console.log(`${t.code}: ${row.seconds.toFixed(1)} s ${row.status === "ok" ? `rank ${row.rank ?? "-"} [${row.parsed?.thuong_hieu ?? "-"} | ${row.parsed?.ten ?? "-"}]` : row.status}`);
     if (run.results.length === 1 && row.status !== "ok") { run.stoppedReason = `ảnh thử đầu không xong (${row.status}) -> theo CHỐT chuyển dự phòng`; break; }
-    const secs = run.results.filter((r) => r.status === "ok").map((r) => r.seconds);
-    if (run.results.length === 10 && shouldStopSlow(secs)) { run.stoppedReason = `dừng ở 10 ảnh: trung vị ${median(secs).toFixed(1)} giây > 180`; break; }
+    const slow = slowStopReason(run.results); // vòng 5: tính cả ảnh quá giờ (bản chạy đầu chỉ lấy ảnh ok)
+    if (slow) { run.stoppedReason = slow; break; }
   }
   run.ramAfterRun = ramFree();
 } catch (e) {

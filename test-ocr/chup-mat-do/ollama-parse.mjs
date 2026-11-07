@@ -49,5 +49,6 @@ export function shouldStopSlow(seconds) {
 /** Lý do dừng sớm sau đúng 10 ảnh (mọi ảnh đã chạy, kể cả ảnh lỗi / quá giờ, tính giây thật); không dừng -> null. */
 export function slowStopReason(results) {
   if (results.length !== 10) return null;
-  return null;
+  const secs = results.map((r) => r.seconds);
+  return shouldStopSlow(secs) ? `dừng ở 10 ảnh: trung vị ${median(secs).toFixed(1)} giây > 180 (tính cả ảnh lỗi / quá giờ)` : null;
 }
