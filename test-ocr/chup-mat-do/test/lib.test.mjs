@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   normalizeText, isNoiseWord, lineKeywords, usableLine, strategyS1, strategyS2, strategyS3, findBrands,
   allStrategies, DEFAULT_STRATEGY, MAX_WORDS, sameCode, rankOf, textMatch, brandMatch, scoreHits, summarize, rrf,
-  median, maxOf, imgidFromUrl, frontImages, dHashFromGray, hamming, chooseIndexImage, DHASH_NEAR, parseCsv,
+  median, maxOf, imgidFromUrl, frontImages, dHashFromGray, hamming, chooseIndexImage, DHASH_NEAR, parseCsv, confOf, CONF_SCALE,
 } from "../lib.mjs";
 
 test("normalizeText: bỏ dấu, đ -> d, viết thường, gộp khoảng trắng", () => {
@@ -23,12 +23,15 @@ test("lineKeywords: bỏ cụm 'khối lượng tịnh', đơn vị, số", () =
   assert.deepEqual(lineKeywords("Sản xuất tại Việt Nam"), []);
 });
 
-test("usableLine: đủ 3 chữ cái, độ tin (0–1 hoặc 0–100) ≥ 0,5", () => {
+// Vòng 2: thang độ tin truyền theo công cụ (CONF_SCALE), không đoán từ giá trị nữa.
+test("usableLine: đủ 3 chữ cái, độ tin ≥ 0,5 theo thang của công cụ", () => {
   assert.equal(usableLine({ text: "ab" }), false);
   assert.equal(usableLine({ text: "abc" }), true);
-  assert.equal(usableLine({ text: "omachi", conf: 0.4 }), false);
-  assert.equal(usableLine({ text: "omachi", conf: 40 }), false);
-  assert.equal(usableLine({ text: "omachi", conf: 91 }), true);
+  assert.equal(usableLine({ text: "omachi", conf: 0.4 }, CONF_SCALE.paddlejs), false);
+  assert.equal(usableLine({ text: "omachi", conf: 40 }, CONF_SCALE.tesseractjs), false);
+  assert.equal(usableLine({ text: "omachi", conf: 91 }, CONF_SCALE.tesseractjs), true);
+  assert.ok(Math.abs(confOf({ conf: 0.9 }, 100) - 0.009) < 1e-12, "thang 0–100 không đoán theo giá trị");
+  assert.equal(confOf({ text: "x" }), null);
 });
 
 const LINES = [

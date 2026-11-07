@@ -32,9 +32,11 @@ export function words(s) {
 // Chiến lược từ khóa S1 / S2 / S3
 // ---------------------------------------------------------------------------
 
-/** Số từ tối đa của một câu tìm (cả S1, S2, S3). CHỐT trước khi chạy đủ bộ ảnh, không chỉnh theo ảnh.
- *  Lý do chọn 3: kiểu tìm mặc định (cgi/search.pl, xem cors-check.mjs) đòi MỌI từ đều khớp: khi kiểm CORS,
- *  "omachi" ra 18 kết quả ở VN, "omachi mi khoai tay" ra 0. Chữ OCR có lẫn từ thừa, nên câu dài hay ra 0. */
+/** Số từ tối đa của một câu tìm (cả S1, S2, S3). CHỐT trước khi chạy đủ 31 ảnh ở vòng 1, giữ nguyên (không chỉnh
+ *  theo kết quả). Lý do chọn 3: kiểu tìm mặc định (cgi/search.pl, xem cors-check.mjs) đòi MỌI từ đều khớp: khi kiểm
+ *  CORS, "omachi" ra 18 kết quả ở VN, "omachi mi khoai tay" ra 0. Lưu ý (sửa vòng 2): câu "omachi mi khoai tay" là
+ *  tên một sản phẩm CÓ trong truth.csv (8936017368111), nên phép thử này có dính đáp án; từ vòng 2 câu thử nghiệm /
+ *  đối chứng phải là sản phẩm KHÔNG có trong truth.csv. */
 export const MAX_WORDS = 3;
 /** Dòng có độ tin thấp hơn mức này bị bỏ (chỉ khi OCR có trả độ tin). */
 export const MIN_CONF = 0.5;
@@ -75,11 +77,14 @@ export function isNoiseWord(w) {
   return false;
 }
 
-/** Độ tin về khoảng 0–1 (tesseract trả 0–100). Không có -> null. */
-export function confOf(line) {
+/** Thang độ tin theo từng công cụ OCR (không đoán theo giá trị): PaddleOCR.js 0–1, tesseract.js 0–100. */
+export const CONF_SCALE = { paddlejs: 1, tesseractjs: 100, vietocr: 1, ocrspace: 1 };
+
+/** Độ tin về khoảng 0–1. scale = thang của công cụ (1 hoặc 100, xem CONF_SCALE). Không có -> null. */
+export function confOf(line, scale = 1) {
   const c = Number(line?.conf);
-  if (!Number.isFinite(c)) return null;
-  return c > 1 ? c / 100 : c;
+  if (line?.conf == null || !Number.isFinite(c)) return null;
+  return c / scale;
 }
 
 /** Bỏ các cụm STOP_PHRASES (khớp nguyên từ) khỏi chuỗi đã chuẩn hóa. */
@@ -96,11 +101,12 @@ export function lineKeywords(text) {
   return stripPhrases(normalizeText(text)).split(" ").filter((w) => w && !isNoiseWord(w));
 }
 
-/** Dòng dùng được: đủ MIN_LETTERS ký tự chữ, độ tin (nếu có) ≥ MIN_CONF. */
-export function usableLine(line) {
+/** Dòng dùng được: đủ MIN_LETTERS ký tự chữ, độ tin (nếu có) ≥ MIN_CONF. confScale: thang độ tin của công cụ.
+ *  Các chiến lược S1 / S2 / S3 nhận dòng đã đổi độ tin về 0–1 (run-ocr-off.mjs chia theo CONF_SCALE trước). */
+export function usableLine(line, confScale = 1) {
   const letters = normalizeText(line?.text).replace(/[^a-z]/g, "");
   if (letters.length < MIN_LETTERS) return false;
-  const c = confOf(line);
+  const c = confOf(line, confScale);
   if (c != null && c < MIN_CONF) return false;
   return true;
 }
@@ -120,7 +126,7 @@ function collect(lines, max) {
 /** S1: các dòng có chữ cao nhất trước (h lớn -> nhỏ, bằng nhau giữ thứ tự đọc).
  *  OCR không có h (vd không có khung) thì giữ thứ tự đọc và ghi note. */
 export function strategyS1(lines, max = MAX_WORDS) {
-  const usable = lines.map((l, i) => ({ ...l, i })).filter(usableLine);
+  const usable = lines.map((l, i) => ({ ...l, i })).filter((l) => usableLine(l));
   const hasH = usable.some((l) => Number.isFinite(Number(l.h)) && Number(l.h) > 0);
   const sorted = hasH
     ? [...usable].sort((a, b) => (Number(b.h) || 0) - (Number(a.h) || 0) || a.i - b.i)
@@ -130,14 +136,14 @@ export function strategyS1(lines, max = MAX_WORDS) {
 
 /** S2 (MẶC ĐỊNH): dòng dùng được theo thứ tự đọc, lọc nhiễu, tối đa max từ. */
 export function strategyS2(lines, max = MAX_WORDS) {
-  return { words: collect(lines.filter(usableLine), max), note: "" };
+  return { words: collect(lines.filter((l) => usableLine(l)), max), note: "" };
 }
 
 /** Thương hiệu nào (trong danh sách lấy từ Open Food Facts) xuất hiện nguyên từ trong chữ OCR.
  *  brands: mảng tên thương hiệu (chưa chuẩn hóa). Bỏ thương hiệu sau chuẩn hóa ngắn hơn 3 ký tự chữ
  *  hoặc chỉ gồm từ nhiễu. Trả danh sách đã chuẩn hóa, thương hiệu dài (nhiều ký tự) trước. */
 export function findBrands(lines, brands) {
-  const text = ` ${lines.filter(usableLine).map((l) => normalizeText(l.text)).join(" ")} `;
+  const text = ` ${lines.filter((l) => usableLine(l)).map((l) => normalizeText(l.text)).join(" ")} `;
   const found = [];
   for (const b of brands || []) {
     const nb = normalizeText(b);

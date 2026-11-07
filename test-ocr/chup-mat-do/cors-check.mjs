@@ -14,7 +14,9 @@ import { searchUrl, parseHits, SEARCH_GAP_MS } from "./off-search.mjs";
 
 const args = process.argv.slice(2);
 const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : "D:\\tmp\\chup-mat-do\\ket-qua\\cors.json";
-// Câu tìm thử: chữ thường thấy trên một gói mì (không lấy từ đáp án theo ảnh nào cụ thể)
+// Câu tìm thử (vòng 1). SỬA LẠI CHO ĐÚNG (vòng 2): "omachi mi khoai tay" là tên một sản phẩm CÓ trong truth.csv
+// (8936017368111 "Mì khoai tây Omachi xốt Bò hầm"), không phải câu trung lập như comment cũ ghi. Giữ nguyên để kết
+// quả cors.json cũ so được; từ vòng 2, câu thử / đối chứng phải là sản phẩm KHÔNG có trong truth.csv.
 const TERMS = "omachi mi khoai tay";
 const KINDS = ["searchpl", "apiv2", "searchalicious"];
 

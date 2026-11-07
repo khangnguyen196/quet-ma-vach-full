@@ -25,7 +25,7 @@ import {
 } from "./lib.mjs";
 
 function parseArgs(argv) {
-  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: "photos", timeout: 300, report: false, join: "", only: "", lines: false };
+  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: process.env.PHOTOS_DIR || "photos", timeout: 300, report: false, join: "", only: "", lines: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
