@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   normalizeText, isNoiseWord, lineKeywords, usableLine, strategyS1, strategyS2, strategyS3, findBrands,
   allStrategies, DEFAULT_STRATEGY, MAX_WORDS, sameCode, rankOf, textMatch, brandMatch, scoreHits, summarize, rrf,
-  median, maxOf, imgidFromUrl, frontImages, dHashFromGray, hamming, chooseIndexImage, DHASH_NEAR,
+  median, maxOf, imgidFromUrl, frontImages, dHashFromGray, hamming, chooseIndexImage, DHASH_NEAR, parseCsv,
 } from "../lib.mjs";
 
 test("normalizeText: bỏ dấu, đ -> d, viết thường, gộp khoảng trắng", () => {
@@ -167,4 +167,13 @@ test("chooseIndexImage: bỏ cùng imgid, bỏ gần trùng (≤ ngưỡng), l�
   assert.deepEqual(r.rejected.map((x) => x.reason), ["cùng imgid với front.jpg", "gần trùng front.jpg"]);
   assert.equal(chooseIndexImage([{ key: "front_vi", imgid: "3" }], "3", {}, test0).chosen, null);
   assert.equal(chooseIndexImage([{ key: "front_vi", imgid: "8" }], "3", {}, test0).rejected[0].reason, "không có mã băm");
+});
+
+test("parseCsv: nháy kép, dấu phẩy trong ô, CRLF, BOM", () => {
+  const rows = parseCsv('\uFEFFcode,ten,bao_quan\r\n1,"Mì ""A""","khô, mát"\r\n\r\n2,B,\n');
+  assert.deepEqual(rows, [
+    { code: "1", ten: 'Mì "A"', bao_quan: "khô, mát" },
+    { code: "2", ten: "B", bao_quan: "" },
+  ]);
+  assert.deepEqual(parseCsv(""), []);
 });

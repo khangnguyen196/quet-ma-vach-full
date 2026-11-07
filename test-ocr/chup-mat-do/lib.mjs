@@ -351,3 +351,35 @@ export function chooseIndexImage(fronts, testImgid, hashes, testHash, threshold 
   }
   return { chosen: null, rejected };
 }
+
+// ---------------------------------------------------------------------------
+// CSV (đọc truth.csv, NGUON.csv)
+// ---------------------------------------------------------------------------
+
+/** Đọc CSV kiểu module csv của Python (ô có dấu phẩy / xuống dòng bọc nháy kép, "" là 1 nháy).
+ *  Trả mảng object theo dòng tiêu đề. Bỏ BOM đầu file và dòng trống. */
+export function parseCsv(text) {
+  const s = String(text ?? "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let row = [];
+  let cur = "";
+  let q = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === '"' && s[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && s[i + 1] === "\n") i++;
+      row.push(cur); cur = "";
+      if (row.some((x) => x !== "")) rows.push(row);
+      row = [];
+    } else cur += c;
+  }
+  row.push(cur);
+  if (row.some((x) => x !== "")) rows.push(row);
+  const [head, ...body] = rows;
+  if (!head) return [];
+  return body.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+}
