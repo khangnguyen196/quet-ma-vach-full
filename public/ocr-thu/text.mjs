@@ -98,11 +98,12 @@ export function makeTar(files) {
   return out;
 }
 
-/** Lỗi có phải do thiếu bộ nhớ không: RangeError (cấp phát ArrayBuffer / WebAssembly.Memory), hoặc câu lỗi có
- *  "memory", "OOM", "allocate"/"allocation", "bad_alloc" (onnxruntime, Emscripten, tesseract gửi lỗi dạng chuỗi). */
+/** Lỗi có phải do thiếu bộ nhớ không: RangeError khi câu lỗi có "alloc" / "memory" / "buffer" (cấp phát ArrayBuffer /
+ *  WebAssembly.Memory; RangeError khác như "Maximum call stack size exceeded", "Invalid array length" thì không), hoặc
+ *  câu lỗi có "memory", "OOM", "allocate"/"allocation", "bad_alloc" (onnxruntime, Emscripten, tesseract gửi lỗi dạng chuỗi). */
 export function isMemoryError(err) {
   if (err == null) return false;
-  if (typeof RangeError !== "undefined" && err instanceof RangeError) return true;
+  if (typeof RangeError !== "undefined" && err instanceof RangeError) return /alloc|memory|buffer/i.test(err.message || "");
   const text = typeof err === "string" ? err : `${err.name || ""} ${err.message || ""} ${String(err)}`;
   return /memory|\boom\b|allocat|bad_alloc/i.test(text);
 }
@@ -128,7 +129,7 @@ export function sumResourceBytes(entries) {
 /** Tên tiếng Việt của 11 ô (thứ tự FIELDS của regex.mjs). */
 export const FIELD_LABELS = {
   ten: "Tên sản phẩm",
-  thuong_hieu: "Thương hiệu",
+  thuong_hieu: "Thương hiệu (luật regex không rút ô này)",
   khoi_luong: "Khối lượng",
   thanh_phan_dau: "3 thành phần đầu",
   nang_luong_kcal: "Năng lượng (kcal)",

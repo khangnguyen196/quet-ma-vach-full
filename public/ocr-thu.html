@@ -57,8 +57,8 @@
   <p id="env" class="small">Đang dò WebGPU…</p>
 
   <div class="row">
-    <label class="btn">Chụp ảnh<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden></label>
-    <label class="btn secondary">Chọn từ thư viện<input type="file" id="pickLibrary" accept="image/*" hidden></label>
+    <label class="btn">Chụp ảnh<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden disabled></label>
+    <label class="btn secondary">Chọn từ thư viện<input type="file" id="pickLibrary" accept="image/*" hidden disabled></label>
   </div>
   <p id="imgInfo" class="small">Chưa chọn ảnh. Nên chụp thẳng, gần, đủ sáng một mặt bao bì (bảng dinh dưỡng, thành phần…).</p>
 
@@ -136,8 +136,17 @@
   });
 
   // 3. Dò WebGPU: chỉ dùng khi có navigator.gpu VÀ requestAdapter() trả adapter trong 3 giây.
+  //    SDK của PaddleOCR lúc khởi tạo LUÔN gọi navigator.gpu.requestAdapter() (không giới hạn giờ), kể cả backend "wasm".
+  //    Nên khi trang chọn wasm thì giấu navigator.gpu (đè thành undefined, chỉ trong trang này) TRƯỚC khi nạp SDK:
+  //    SDK thấy "không có WebGPU" và đi thẳng wasm, không treo, không bật GPU (số bộ nhớ "chỉ wasm" không lẫn GPU).
+  function hideGpu() {
+    try { Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true }); } catch (e) { /* bỏ qua */ }
+  }
   async function detectGpu() {
-    if (wasmOnly) return { use: "wasm", reason: "đã chọn Chỉ dùng wasm" };
+    if (wasmOnly) {
+      hideGpu();
+      return { use: "wasm", reason: "đã chọn Chỉ dùng wasm" };
+    }
     if (!navigator.gpu || !navigator.gpu.requestAdapter) return { use: "wasm", reason: "trình duyệt không có WebGPU" };
     var timedOut = false;
     try {
@@ -145,14 +154,16 @@
         navigator.gpu.requestAdapter(),
         new Promise(function (r) { setTimeout(function () { timedOut = true; r(null); }, GPU_TIMEOUT_MS); })
       ]);
-      if (adapter) return { use: "webgpu", reason: "" };
+      if (adapter) return { use: "webgpu", reason: "" }; // chỉ nhánh này để nguyên navigator.gpu
       if (timedOut) {
-        // SDK của PaddleOCR cũng gọi requestAdapter() (không giới hạn giờ): giấu navigator.gpu để nó không treo
-        try { Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true }); } catch (e) { /* bỏ qua */ }
+        // lần gọi của SDK cũng sẽ treo như vậy
+        hideGpu();
         return { use: "wasm", reason: "requestAdapter() quá 3 giây" };
       }
+      hideGpu(); // không có adapter: SDK gọi lại cũng vô ích
       return { use: "wasm", reason: "requestAdapter() không trả adapter" };
     } catch (e) {
+      hideGpu(); // lỗi: không để SDK gọi lại
       return { use: "wasm", reason: "requestAdapter() lỗi: " + msg(e) };
     }
   }
