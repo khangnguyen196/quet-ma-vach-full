@@ -162,12 +162,16 @@ if (steps.includes("loo")) {
   const distances = {};
   const usedCands = [];
   let kept = 0;
+  let queryDownloads = 0; // lượt tải ảnh truy vấn (ghi riêng, tổng hợp không trừ chon − loo)
   for (const c of cands) {
     if (kept >= LOO_LIMIT) break;
     const a = imageFile(c.code, c.indexImgid);
     if (!fs.existsSync(a)) continue; // ảnh chỉ mục chưa tải được
     usedCands.push(c);
-    if (!(await download(c.code, c.queryImgid))) { distances[c.code] = null; continue; }
+    const before = dl.downloads;
+    const okQ = await download(c.code, c.queryImgid);
+    queryDownloads += dl.downloads - before;
+    if (!okQ) { distances[c.code] = null; continue; }
     try {
       const cmp = compareHashSets(await hashSet(T, a), await hashSet(T, imageFile(c.code, c.queryImgid)));
       distances[c.code] = cmp.distance;
@@ -179,7 +183,7 @@ if (steps.includes("loo")) {
   }
   const { pairs, dropped } = filterLooPairs(usedCands, distances, { maxDup: HASH_SUSPECT, limit: LOO_LIMIT });
   const index = chon.selected.map((s) => ({ code: s.code, imgid: s.imgid }));
-  const loo = { candidates: cands.length, checked: usedCands.length, pairs, dropped, queryNotInIndex: queryNotInIndex(pairs, index), downloadStats: { ...dl } };
+  const loo = { candidates: cands.length, checked: usedCands.length, pairs, dropped, queryNotInIndex: queryNotInIndex(pairs, index), queryDownloads, downloadStats: { ...dl } };
   writeJson(path.join(outDir, "loo.json"), loo);
   log(`bộ phụ: ${pairs.length} cặp (loại ${dropped.length}); ảnh truy vấn không nằm trong chỉ mục: ${loo.queryNotInIndex}`);
 }
