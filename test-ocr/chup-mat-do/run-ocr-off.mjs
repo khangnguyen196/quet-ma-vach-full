@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { allStrategies, DEFAULT_STRATEGY, scoreHits, parseCsv } from "./lib.mjs";
 import { createOffClient, DEFAULT_KIND } from "./off-search.mjs";
+import { createBrowserFetch } from "./browser-fetch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TOOLS = {
@@ -70,7 +71,10 @@ async function searchScored(off, words, truth, kind) {
 
 const args = parseArgs(process.argv.slice(2));
 const truthRows = parseCsv(fs.readFileSync(args.truth, "utf8"));
-const off = createOffClient({ log: (m) => console.log(m) });
+// Gọi OFF từ trang Chromium (xem browser-fetch.mjs: OFF trả 503 cho User-Agent "node").
+const bf = await createBrowserFetch();
+console.log(`Gọi OFF từ trình duyệt: ${bf.userAgent}`);
+const off = createOffClient({ fetchImpl: bf.fetchImpl, log: (m) => console.log(m) });
 fs.mkdirSync(args.out, { recursive: true });
 
 let brands = [];
@@ -140,6 +144,7 @@ for (const name of args.tools) {
   console.log(`Ghi: ${file}`);
 }
 
+await bf.close();
 const statsFile = path.join(args.out, "off-stats-v1.json");
 const prev = readJson(statsFile);
 fs.writeFileSync(statsFile, JSON.stringify({ lastRun: { at: new Date().toISOString(), tools: args.tools, ...off.stats }, previous: prev }, null, 2), "utf8");
