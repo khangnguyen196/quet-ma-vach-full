@@ -8,6 +8,8 @@
 // là có danh sách VN. File đã tải đủ thì chỉ đọc lại từ đĩa, không tải lại.
 // Cầu dao như createOffClient: tải hỏng thì thử lại 1 lần (nối tiếp từ byte đã có, Range) sau 30 giây; hỏng lần 2 thì dừng.
 // Vòng 4: tải nối phải nhận 206 (không thì tải lại từ đầu), số byte cuối phải bằng Content-Length, ghi chờ 'drain'.
+// Vòng 5: trước khi nối thăm dò 1 byte (tai-noi.mjs probeArgs); resumePlan: chỉ nối khi ra 206, không thì xóa file dở,
+// tải lại từ đầu (gunzip mới). Chưa chạy thật (không tải lại 13 GB).
 // Ra: <dir>\vn-products.json (bản ghi gọn, xem vn-data.mjs vnRecord) + <dir>\vn-stats.json.
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +17,7 @@ import zlib from "node:zlib";
 import { spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { filterVnStream } from "./vn-data.mjs";
-import { parseHttpCode, resumeOk, isComplete, pipeWithBackpressure } from "./tai-noi.mjs";
+import { parseHttpCode, resumeOk, isComplete, pipeWithBackpressure, probeArgs, resumePlan } from "./tai-noi.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -54,6 +56,17 @@ function curlOnce(from, dests, onChunk) {
   });
 }
 
+/** Thăm dò 1 byte ở vị trí `n` (curl -s -o NUL -r n-n -w "%{http_code}"), trả mã HTTP (số) hoặc null. */
+function probeOnce(n) {
+  return new Promise((resolve) => {
+    const p = spawn("curl", probeArgs(URL, n, process.platform === "win32" ? "NUL" : "/dev/null"));
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => { const m = /(\d{3})\s*$/.exec(out); resolve(m ? Number(m[1]) : null); });
+    p.on("error", () => resolve(null));
+  });
+}
+
 /** Tải từ đầu + lọc cùng lúc. Tải hỏng thì thử nối 1 lần (Range) sau 30 giây; server không trả 206 khi nối -> trả
  *  { restart: true } để tải lại từ đầu (luồng giải nén mới). */
 async function downloadAndFilter() {
@@ -71,8 +84,20 @@ async function downloadAndFilter() {
       console.log("  tải hỏng, thử lại sau 30 giây (nối tiếp)");
       await new Promise((res) => setTimeout(res, 30000));
     }
-    stats.attempts++;
     const from = stats.bytes;
+    if (from > 0) {
+      // Vòng 5: thăm dò 1 byte TRƯỚC khi nối; resumePlan quyết nối hay tải lại từ đầu.
+      const probe = await probeOnce(from);
+      const plan = resumePlan(probe, from);
+      stats.notes = [...(stats.notes || []), `thăm dò 1 byte ở ${from}: HTTP ${probe} -> ${plan}`];
+      if (plan === "tu-dau") {
+        stats.failures++;
+        pass.destroy(); gunzip.destroy();
+        await new Promise((res) => out.end(res));
+        return { restart: true };
+      }
+    }
+    stats.attempts++;
     r = await curlOnce(from, [out, pass], (d) => { stats.bytes += d.length; });
     if (!resumeOk(from, r.http)) {
       stats.failures++;

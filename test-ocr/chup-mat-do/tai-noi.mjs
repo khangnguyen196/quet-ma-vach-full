@@ -13,6 +13,19 @@ export function resumeOk(from, httpCode) {
   return from > 0 ? httpCode === 206 : httpCode === 200;
 }
 
+/** Tham số curl thăm dò 1 byte ở vị trí `n` trước khi nối (không lưu dữ liệu, chỉ in mã HTTP ra stdout).
+ *  `nullDevice`: "NUL" trên Windows, "/dev/null" nơi khác. */
+export function probeArgs(url, n, nullDevice = "NUL") {
+  return ["-s", "-o", nullDevice, "-r", `${n}-${n}`, "-w", "%{http_code}", url];
+}
+
+/** Quyết định tải nối hay tải lại từ đầu, từ mã HTTP thăm dò 1 byte (probeArgs) và số byte đã có.
+ *  "noi" = nối tiếp từ byte đã có; "tu-dau" = xóa file dở, tải lại từ đầu (luồng giải nén mới). */
+export function resumePlan(probeCode, partialBytes) {
+  if (!(partialBytes > 0)) return "tu-dau";
+  return "noi";
+}
+
 /** Đủ byte: số byte cuối bằng Content-Length. Không biết Content-Length thì không kết luận được là đủ. */
 export function isComplete(bytes, expected) {
   return Number.isFinite(expected) && expected > 0 && bytes === expected;
