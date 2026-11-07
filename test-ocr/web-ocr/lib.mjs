@@ -202,7 +202,7 @@ export function timeStats(rows) {
  *  bằng `l.data` thay vì `l.code`, nên truyền thẳng thì Tesseract đi tìm file "./31,139,8,…" và lỗi.
  *  createWorker gửi CÙNG mảng này sang worker 2 lần (nạp ngôn ngữ, rồi khởi tạo); mỗi lần gửi, trình duyệt sao chép
  *  object (structured clone) và đọc `data` đúng 1 lần. Nên `data` là getter: lần đọc đầu trả byte, các lần sau trả
- *  tên ngôn ngữ. Đã thử: tesseract.js 7.0.0, vie+eng, trong Node. */
+ *  tên ngôn ngữ. Đã thử: tesseract.js 7.0.0, vie+eng, trong Node, Chromium và WebKit (đo cdn, ocr-thu.html). */
 export function tessLangObjects(langs) {
   return langs.map(({ code, data }) => {
     let reads = 0;
