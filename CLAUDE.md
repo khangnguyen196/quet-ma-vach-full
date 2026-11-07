@@ -27,6 +27,8 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `src/pwa.js` – đăng ký service worker (chỉ ở bản build) + thanh "Đã có bản mới".
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
 - `public/` – `manifest.webmanifest` + `icons/` (PNG), Vite chép nguyên vào `dist/`.
+- `public/ocr-thu.html` (+ `public/ocr-thu/regex.mjs`, `text.mjs`) – trang THỬ OCR riêng (đợt ocr-c), không có link từ app, noindex; PaddleOCR.js + tesseract.js và model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định của `test-ocr/web-ocr/assets.js`, không vào bundle / package.json của app. `regex.mjs` là bản JS của `extract_regex` (Python là chuẩn; sửa luật thì chạy `test-ocr/web-ocr/regex-parity.mjs`).
+- `test-ocr/` – so sánh OCR (Python, `test-ocr/README.md`); `test-ocr/web-ocr/` đo OCR trong trình duyệt bằng Playwright (package.json riêng), `test-ocr/vietocr/` PP-OCRv5 det + VietOCR (venv riêng, chỉ để so mức máy chủ). Không thuộc app.
 - `tools/` – `make-icons.mjs` (vẽ icon, chạy một lần: `node tools/make-icons.mjs`), `sw-build.mjs` (ghép mã sw.js). `sw.js` sinh lúc build bằng plugin trong `vite.config.js`; không sửa tay trong `dist/`.
 
 ## Quy ước

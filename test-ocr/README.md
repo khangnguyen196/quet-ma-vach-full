@@ -306,17 +306,18 @@ Nhận xét: `tesseract.js` chỉ đọc được chữ nét liền; 5 ô in ch�
 
 ---
 
-# Phần D – OCR trong trình duyệt (đợt `ocr-c`, bản nháp vòng 1)
+# Phần D – OCR trong trình duyệt (đợt `ocr-c`)
 
-Mục tiêu: tìm OCR đọc chữ bao bì tốt hơn mà **chạy được trong trình duyệt điện thoại** (Safari iOS, Chrome Android), để sau này làm tính năng "chụp bao bì điền nháp". Chỉ đo, chưa sửa app. Đo trên máy tính bằng Playwright: WebKit (đại diện Safari iOS) và Chromium (đại diện Chrome Android), khổ điện thoại 390×844, deviceScaleFactor 3.
+Mục tiêu: tìm OCR đọc chữ bao bì tốt hơn mà **chạy được trong trình duyệt điện thoại** (Safari iOS, Chrome Android), để sau này làm tính năng "chụp bao bì điền nháp". Chỉ đo, chưa sửa app. Đo trên máy tính bằng Playwright: WebKit (đại diện Safari iOS) và Chromium (đại diện Chrome Android), khổ điện thoại 390×844, deviceScaleFactor 3. Trang thử trên điện thoại thật: `public/ocr-thu.html` (mục cuối).
 
 | Công cụ (tên trong `outputs/`) | Chạy ở đâu | Gói / model |
 |---|---|---|
-| `paddlejs-chromium`, `paddlejs-webkit` | trong trình duyệt | `@paddleocr/paddleocr-js` 0.4.2 (SDK chính thức của PaddlePaddle, kiểm `npm view` 07/11/2026), onnxruntime-web 1.24.3 (wasm), OpenCV.js 4.10; model ONNX chính thức trên HuggingFace: `PaddlePaddle/PP-OCRv5_mobile_det_onnx` + `PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx` (cố định theo mã commit trong `web-ocr/assets.js`) |
-| `tesseractjs-chromium`, `tesseractjs-webkit` | trong trình duyệt | `tesseract.js` 7.0.0, `vie+eng` (giống `run_ocr.py`), PSM 3 |
+| `paddlejs-rows-chromium`, `paddlejs-rows-webkit` (**cách chính**) | trong trình duyệt | `@paddleocr/paddleocr-js` 0.4.2 (SDK chính thức của PaddlePaddle, kiểm `npm view` 07/11/2026), onnxruntime-web 1.24.3 (wasm), OpenCV.js 4.10; model ONNX chính thức trên HuggingFace: `PaddlePaddle/PP-OCRv5_mobile_det_onnx` + `PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx` (cố định theo mã commit trong `web-ocr/assets.js`). Các khung chữ cùng hàng nối thành 1 dòng (`rowLines`). |
+| `paddlejs-chromium`, `paddlejs-webkit` (để so) | trong trình duyệt | như trên, nhưng mỗi khung chữ 1 dòng (`orderLines`, cách của vòng 1) |
+| `tesseractjs-chromium`, `tesseractjs-webkit` | trong trình duyệt | `tesseract.js` 7.0.0, `vie+eng` (giống `run_ocr.py`), PSM 3; dữ liệu ngôn ngữ `@tesseract.js-data/vie@1.0.0`, `@tesseract.js-data/eng@1.0.0` (`4.0.0_best_int`) |
 | `paddle-vietocr` | máy chủ (Python), KHÔNG chạy trong trình duyệt | cùng file ONNX PP-OCRv5 mobile det (onnxruntime CPU) + VietOCR `vgg_transformer` 0.3.13 (PyTorch CPU) |
 
-Lưu ý model latin của PaddleOCR: bảng chữ của `latin_PP-OCRv5_mobile_rec` có 836 ký tự nhưng **thiếu 45/71 chữ có dấu tiếng Việt** (mọi chữ ở khối Unicode "Latin Extended Additional": ả ạ ầ ẩ ậ ề ế ệ ỉ ị ọ ộ ờ ợ ủ ụ ừ ữ ự ỳ…; có ă â đ ê ô ơ ư à á ã è é ì í ò ó õ ù ú ý). Chữ thiếu bị bỏ hẳn khi đọc ("Thành phần" ra "Thành phn", "Nạc" ra "Nc"). PP-OCRv6 (small / tiny) cũng thiếu 44–48/71. VietOCR có đủ.
+Lưu ý model latin của PaddleOCR: bảng chữ của `latin_PP-OCRv5_mobile_rec` có 836 ký tự nhưng **thiếu 45/71 chữ có dấu tiếng Việt** (mọi chữ ở khối Unicode "Latin Extended Additional": ả ạ ầ ẩ ậ ề ế ệ ỉ ị ọ ộ ờ ợ ủ ụ ừ ữ ự ỳ…; có ă â đ ê ô ơ ư à á ã è é ì í ò ó õ ù ú ý). Chữ thiếu bị bỏ hẳn khi đọc ("Thành phần" ra "Thành phn", "Nạc" ra "Nc"): ô tên / thành phần mất dấu, số không ảnh hưởng. PP-OCRv6 (small / tiny) cũng thiếu 44–48/71. VietOCR có đủ.
 
 ## Cài
 
@@ -329,7 +330,7 @@ Trong `test-ocr/web-ocr` (cache npm ở ổ D):
 
 File tải về một lần (không commit; `.gitignore` bỏ `*.onnx`, `*.traineddata*`):
 - `D:\cache\paddle-onnx\PP-OCRv5_mobile_det_onnx\inference.onnx` + `inference.yml` (4,8 MB) và `D:\cache\paddle-onnx\latin_PP-OCRv5_mobile_rec_onnx\inference.onnx` + `inference.yml` (8,0 MB): tải ở `https://huggingface.co/<repo>/resolve/<mã commit>/<file>` (repo, mã commit, sha256 ở `web-ocr/assets.js`).
-- `D:\cache\web-ocr\tessdata\vie.traineddata.gz`, `eng.traineddata.gz` (4,2 MB): tải ở `https://cdn.jsdelivr.net/npm/@tesseract.js-data/<vie|eng>@1.0.0/4.0.0_best_int/<lang>.traineddata.gz`.
+- `D:\cache\web-ocr\tessdata\vie.traineddata.gz`, `eng.traineddata.gz` (4,2 MB): tải ở `https://cdn.jsdelivr.net/npm/@tesseract.js-data/<vie|eng>@1.0.0/4.0.0_best_int/<lang>.traineddata.gz` (sha256 giống hệt bản jsDelivr).
 
 VietOCR: venv riêng ở thư mục chính `test-ocr/vietocr/.venv` (khoảng 925 MB vì có torch CPU), trong `test-ocr`:
 
@@ -348,18 +349,21 @@ vietocr\.venv\Scripts\python -m pip install --no-deps vietocr==0.3.13
 Thư mục hiện tại là `test-ocr` (nơi có `photos/`, `outputs/`), giống `run_ocr.py`:
 
 ```
-node web-ocr/run-browser.mjs --engine paddlejs --browser chromium        # 96 ảnh, file từ máy
-node web-ocr/run-browser.mjs --engine paddlejs --browser webkit
+node web-ocr/run-browser.mjs --engine paddlejs --join rows --browser chromium   # 96 ảnh -> outputs/paddlejs-rows-chromium
+node web-ocr/run-browser.mjs --engine paddlejs --join rows --browser webkit
+node web-ocr/run-browser.mjs --engine paddlejs --browser chromium               # cách cũ mỗi khung 1 dòng (để so)
 node web-ocr/run-browser.mjs --engine tesseractjs --browser chromium
-node web-ocr/run-browser.mjs --engine tesseractjs --browser webkit
-node web-ocr/run-browser.mjs --engine paddlejs --browser chromium --mode cdn --limit 1   # byte tải lần đầu (4 tổ hợp)
+node web-ocr/run-browser.mjs --engine paddlejs --join rows --browser chromium --mode cdn --limit 1   # byte tải lần đầu
 node web-ocr/run-browser.mjs --report        # outputs/web-ocr/metrics.csv + tai-lan-dau.md
 vietocr\.venv\Scripts\python vietocr\run_vietocr.py
 python score.py
-python run_extract.py --ocr paddlejs-chromium,paddlejs-webkit,tesseractjs-chromium,tesseractjs-webkit,paddle-vietocr --extractors regex,dict
+python run_extract.py --ocr paddlejs-rows-chromium,paddlejs-rows-webkit --extractors regex,dict
 python score_combo.py
-node web-ocr/so-sanh.mjs                     # outputs/web-ocr/so-sanh.md
+node web-ocr/so-sanh.mjs                     # outputs/web-ocr/so-sanh.md (sinh hoàn toàn bằng script)
+node web-ocr/regex-parity.mjs                # luật regex bản JS của trang thử khớp bản Python
 ```
+
+`--join rows` chỉ dùng cho `paddlejs`, ghi vào thư mục / tên công cụ riêng (`paddlejs-rows-<trình duyệt>`); không bao giờ ghi lẫn vào thư mục của cách không nối.
 
 Biến môi trường:
 - `PLAYWRIGHT_BROWSERS_PATH=D:\cache\ms-playwright` (WebKit 26.0, bản 2215 của Playwright 1.56.1).
@@ -368,38 +372,57 @@ Biến môi trường:
 - Tuỳ chọn: `PHOTOS_DIR`, `PADDLE_ONNX_DIR`, `TESSDATA_DIR` (cho `serve.mjs`); `PADDLE_DET_ONNX`, `VIETOCR_DIR` (cho `run_vietocr.py`).
 - `TEMP` = `TMP` = `D:\tmp` (ổ C ít chỗ).
 
-Kết quả ghi giống phần A: `outputs/<công cụ>/<mã>__<ảnh>.txt` + dòng `outputs/times.csv`; chạy lại thì ảnh đã có file kết quả được bỏ qua. Mode `cdn` chỉ ghi `outputs/web-ocr/runs/<công cụ>-cdn.json`. `score.py` không coi `outputs/hsd-js`, `outputs/web-ocr` (và `extract`) là công cụ OCR (hằng `NOT_OCR_DIRS`). Test (không cần trình duyệt): trong `web-ocr` chạy `npm test` (19 test `node:test`).
+Kết quả ghi giống phần A: `outputs/<công cụ>/<mã>__<ảnh>.txt` + dòng `outputs/times.csv`; chạy lại thì ảnh đã có file kết quả được bỏ qua. Mỗi lần chạy ghi `outputs/web-ocr/runs/<công cụ>-<mode>.json` (giây nạp, backend, bộ nhớ, byte tải); lần chạy không đọc ảnh nào vì ảnh đã có hết thì KHÔNG ghi đè file này (in cảnh báo), lần có ảnh bỏ qua thì cột `note` của `metrics.csv` ghi rõ. Mode `cdn` chỉ ghi file json. `score.py` và `run_extract.py` (khi không truyền `--ocr`) không coi `outputs/hsd-js`, `outputs/web-ocr`, `extract` là công cụ OCR (hằng `NOT_OCR_DIRS` của `score.py`). Test (không cần trình duyệt): trong `web-ocr` chạy `npm test` (43 test `node:test`); VietOCR: trong `vietocr` chạy `.venv\Scripts\python -B -m unittest -v test_run_vietocr` (venv ở thư mục chính).
 
 ## Cách làm và cách đo
 
 - `serve.mjs`: server tĩnh ở 127.0.0.1, **không gửi COOP / COEP** (như GitHub Pages), nên `crossOriginIsolated = false`, không có SharedArrayBuffer, wasm chạy **1 luồng** (`numThreads: 1`). Đã kiểm trong trang: `crossOriginIsolated` = false ở cả 2 trình duyệt.
-- WebGPU: `harness.html` gọi `navigator.gpu.requestAdapter()` trước; chỉ khi trả adapter mới dùng onnxruntime-web bản có WebGPU (`ort.min.mjs`, backend "auto", có đường lùi wasm), không thì bản chỉ wasm (`ort.wasm.min.mjs`, nhẹ hơn). Đo được: Chromium headless có `navigator.gpu` nhưng `requestAdapter()` trả null; WebKit Windows không có `navigator.gpu`. **Backend thật: wasm ở cả 2.** Safari iOS 26 có WebGPU, nên trên iPhone thật trang sẽ tải bản WebGPU (wasm JSEP 25 MB, jsDelivr nén còn khoảng 3,4 MB) và có thể nhanh hơn; chưa đo.
+- WebGPU: `harness.html` gọi `navigator.gpu.requestAdapter()` trước; chỉ khi trả adapter mới dùng onnxruntime-web bản có WebGPU (`ort.min.mjs`, backend "auto", có đường lùi wasm), không thì bản chỉ wasm (`ort.wasm.min.mjs`, nhẹ hơn). Đo được: Chromium headless có `navigator.gpu` nhưng `requestAdapter()` trả null (cả khi bật cờ SwiftShader); WebKit Windows không có `navigator.gpu`. **Backend thật: wasm ở cả 2.** Safari iOS 26 có WebGPU, nên trên iPhone thật trang sẽ tải bản WebGPU: wasm JSEP 25 MB, jsDelivr nén còn khoảng 3,4 MB thay cho 2,0–2,6 MB của bản chỉ wasm, **tổng tải lần đầu khoảng 19 MB, sát ngưỡng 20 MB**; tốc độ có thể khác, chưa đo. Đã thử đường này bằng một WebGPU giả trong Chromium: trang tải `ort.min.mjs` + `ort-wasm-simd-threaded.jsep.wasm`, tạo phiên WebGPU lỗi thì tự lùi về wasm và đọc được.
 - PaddleOCR.js chạy ở luồng chính (không bật `worker`), tham số mặc định của SDK (det: limit_side_len 64 kiểu min, max 4000, thresh 0,3, box_thresh 0,6, unclip 1,5). SDK chỉ nhận model dạng 1 file `.tar`; HuggingFace có 2 file rời, nên `harness.mjs` truyền `fetch` riêng: tải `inference.onnx` + `inference.yml` rồi gói tar ngay trong trình duyệt (`makeTar` trong `lib.mjs`). Gói `@techstark/opencv-js` và `clipper-lib` không có bản ES module, nên import map trỏ tới 2 file nhỏ trong `web-ocr/shims/` (nạp bằng thẻ `<script>`).
-- Tiền xử lý giống `run_ocr.py`: ảnh vẽ ra canvas như trình duyệt hiển thị (đã xoay theo EXIF; bộ ảnh hiện tại không ảnh nào có EXIF xoay), thu cạnh dài về 1600 px. Cách thu nhỏ của canvas khác PIL và khác nhau giữa 2 trình duyệt, nên chữ đọc ra không giống hệt: Paddle giống hệt 19/96 file giữa Chromium và WebKit, tesseract.js 37/96 (tesseract.js còn dùng bản core khác: Chromium `relaxedsimd`, WebKit `simd`).
-- Giây/ảnh: chỉ bước đọc (`predict` / `recognize`), không tính nạp model và chuẩn bị ảnh, giống `times.csv` của phần A.
-- **Chữ Paddle**: mỗi khung chữ (text box) 1 dòng, theo thứ tự đọc: sắp khung theo cạnh trên, gom thành hàng khi khung chồng chiều dọc với hàng đang xét ≥ 50% chiều cao nhỏ hơn, trong hàng trái sang phải (`orderLines` trong `web-ocr/lib.mjs`; `run_vietocr.py` dùng bản Python giống hệt).
-- **Bộ nhớ** (ước lượng trên Windows, iPhone có thể khác nhiều): mỗi (công cụ × trình duyệt) mở một trình duyệt MỚI (`launchServer` để biết số tiến trình); MỘT tiến trình PowerShell chạy suốt lần đo, mỗi 250 ms lấy `PrivateMemorySize64` (bộ nhớ đã cam kết riêng) và `WorkingSet64` (đang nằm trong RAM) của cả cây tiến trình con (cây tính lại mỗi 2 giây bằng `Win32_Process`). Ghi: mức nền (trung vị tổng private khi mở trang trống 3 giây), đỉnh của 1 tiến trình, đỉnh tổng. Chromium ghi thêm JS heap (CDP `Performance.getMetrics`, không tính bộ nhớ wasm). Private của WebKit rất lớn (5–7 GB) vì JavaScriptCore giữ sẵn vùng nhớ ảo cho wasm, nên so working set. Mức nền của WebKit (858 MB private) chủ yếu là tiến trình `Playwright.exe` của bản WebKit Windows.
-- **Byte tải lần đầu**: mode `cdn`, trình duyệt mới (cache trống), 1 ảnh; cộng `request.sizes().responseBodySize` (byte qua mạng, đã nén) và độ dài body sau giải nén của mọi request ra mạng (kể cả request của worker), không tính file của máy (trang đo, ảnh thử). jsDelivr vẫn phục vụ được file lớn nhất của onnxruntime-web (wasm JSEP 25 MB, asyncify 27 MB: đã tải thử, HTTP 200, nén còn 3,4–3,8 MB); bản đang dùng (wasm 12,4 MB) nén còn 2,0–2,6 MB.
+- **Dữ liệu ngôn ngữ tesseract.js ghim `@1.0.0`** (từ vòng 2): chế độ `cdn` không dùng `langPath` (để trống thì tesseract.js tự lấy `@tesseract.js-data/<lang>/4.0.0_best_int` = bản mới nhất; một đường dẫn chung thì không ghim được bản cho 2 gói `vie`, `eng`). Trang tự tải 2 file `…/vie@1.0.0/4.0.0_best_int/vie.traineddata.gz`, `…/eng@1.0.0/…` rồi đưa byte cho `createWorker([{ code, data }])`. tesseract.js 7.0.0 có lỗi: bước khởi tạo ghép tên ngôn ngữ bằng `l.data` thay vì `l.code` (`src/worker-script/index.js`, hàm `initialize`), nên `tessLangObjects` (`lib.mjs`) cho `data` là getter: lần sao chép đầu (nạp ngôn ngữ) trả byte, lần sau (khởi tạo) trả tên. Chế độ `local` giữ `langPath` = `D:\cache\web-ocr\tessdata`.
+- Tiền xử lý: ảnh vẽ ra canvas như trình duyệt hiển thị (đã xoay theo EXIF; bộ ảnh hiện tại không ảnh nào có EXIF xoay), thu cạnh dài về 1600 px. Khác `run_ocr.py` một chút: `run_ocr.py` lưu ảnh đã thu nhỏ ra JPEG chất lượng 90 rồi mới đọc, còn web-ocr và VietOCR đọc thẳng ảnh đã thu nhỏ trong bộ nhớ (không nén lại). Cách thu nhỏ của canvas khác PIL và khác nhau giữa 2 trình duyệt, nên chữ đọc ra không giống hệt: Paddle giống hệt 19/96 file giữa Chromium và WebKit, tesseract.js 37/96 (tesseract.js còn dùng bản core khác: Chromium `relaxedsimd`, WebKit `simd`).
+- Giây/ảnh: chỉ bước đọc (`predict` / `recognize`), không tính nạp model và chuẩn bị ảnh, giống `times.csv` của phần A. Ghi trung bình (TB), **trung vị** và **p90** (90% số ảnh đọc nhanh hơn số này; nội suy như `numpy.percentile`): vài ảnh chữ dày rất chậm kéo trung bình lên, và 2 lần chạy cùng cách trên máy này có thể lệch khoảng 30% (máy làm việc khác cùng lúc).
+- **Chữ Paddle**: sắp khung theo cạnh trên, gom thành hàng khi khung chồng chiều dọc với hàng đang xét ≥ 50% chiều cao nhỏ hơn, trong hàng trái sang phải (`groupRows` trong `web-ocr/lib.mjs`). Cách chính `rowLines`: các khung cùng hàng nối thành 1 dòng (cách nhau 1 dấu cách), để nhãn và số bảng dinh dưỡng ("Protein" / "17,14g") nằm cùng dòng cho luật regex. Cách cũ `orderLines`: mỗi khung 1 dòng (`run_vietocr.py` dùng bản Python giống hệt).
+- **Bộ nhớ** (ước lượng trên Windows, iPhone có thể khác nhiều): mỗi (công cụ × trình duyệt) mở một trình duyệt MỚI (`launchServer` để biết số tiến trình); MỘT tiến trình PowerShell chạy suốt lần đo, mỗi 250 ms lấy `PrivateMemorySize64` (bộ nhớ đã cam kết riêng) và `WorkingSet64` (đang nằm trong RAM) của cả cây tiến trình con (cây tính lại mỗi 2 giây bằng `Win32_Process`). Mức nền: trung vị tổng private khi mở trang trống 3 giây, **đếm từ khi có mẫu đầu tiên** (PowerShell khởi động mất khoảng 0,7–4 giây; json ghi `firstSampleMs`, `baselineSamples`, thường 9–10 mẫu). Ghi thêm đỉnh của 1 tiến trình, đỉnh tổng; Chromium ghi JS heap (CDP `Performance.getMetrics`, không tính bộ nhớ wasm). Private của WebKit rất lớn (5–7 GB) vì JavaScriptCore giữ sẵn vùng nhớ ảo cho wasm, nên so working set. Mức nền của WebKit (858 MB private) chủ yếu là tiến trình `Playwright.exe` của bản WebKit Windows. Lấy mẫu bằng `Get-CimInstance` / `Process` cũng tốn một chút CPU, nên giây/ảnh đo được có thể chậm hơn thật một ít.
+- **Byte tải lần đầu**: mode `cdn`, trình duyệt mới (cache trống), 1 ảnh; cộng `request.sizes().responseBodySize` (byte qua mạng, đã nén) và độ dài body sau giải nén của mọi request ra mạng (kể cả request của worker), không tính file của máy (trang đo, ảnh thử). Từ vòng 2: chờ mọi bộ xử lý `requestfinished` lấy cỡ xong (`Promise.allSettled`) rồi mới đóng trình duyệt; mục nào vẫn không đo được thì liệt kê ở `unmeasured` và cột `note` (vòng 2: 0 mục). jsDelivr phục vụ được file lớn nhất của onnxruntime-web (wasm JSEP 25 MB, asyncify 27 MB: HTTP 200, nén còn 3,4–3,8 MB); bản đang dùng (wasm 12,4 MB) nén còn 2,0–2,6 MB tùy lần (jsDelivr lúc nén brotli, lúc gzip).
 
-## Kết quả (07/11/2026, vòng 1; máy Intel Core i7-6820HQ 4 nhân 8 luồng, RAM 7,8 GB, Windows 10)
+## Kết quả (07/11/2026, vòng 2; máy Intel Core i7-6820HQ 4 nhân 8 luồng, RAM 7,8 GB, Windows 10)
 
-96 ảnh / 31 mã / 239 điểm. Không công cụ nào lỗi hay sập: 96/96 ảnh ok ở cả 5 công cụ mới.
+96 ảnh / 31 mã / 239 điểm. Không công cụ nào lỗi hay sập: 96/96 ảnh ok ở cả 7 công cụ mới (`paddlejs-rows-*` đo ở vòng 2, còn lại ở vòng 1). Bảng đầy đủ do script sinh: `outputs/web-ocr/so-sanh.md`; số đo chi tiết: `outputs/web-ocr/metrics.csv`; từng file tải lần đầu: `outputs/web-ocr/tai-lan-dau.md`.
 
-| Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium | giây/ảnh WebKit | bộ nhớ đỉnh 1 tiến trình, working set (MB) Chromium / WebKit | MB tải lần đầu (qua mạng) | chạy được cả 2 trình duyệt? |
+| Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium: TB (trung vị, p90) | giây/ảnh WebKit: TB (trung vị, p90) | bộ nhớ đỉnh 1 tiến trình, working set (MB) Chromium / WebKit | MB tải lần đầu (qua mạng) | chạy được cả 2 trình duyệt? |
 |---|---|---|---|---|---|---|---|---|
-| PaddleOCR.js (PP-OCRv5 mobile det + latin rec) | **62%** | 19% / 20% | 25% | 6,9 (lớn nhất 20,3) | 11,7 (lớn nhất 49,2) | 1.099 / 1.190 | **18,1** (Chromium) / 17,4 (WebKit) | có |
-| tesseract.js 7 (vie+eng) | 25% / 20% | 10% | 12% | 1,5 | 2,5 | 1.004 / 694 | 5,8 | có |
+| **PaddleOCR.js nối khung cùng hàng** (`paddlejs-rows`, cách chính) | **62%** | **36% / 37%** | **42%** | 5,7 (4,9; 10,4) | 7,8 (6,7; 13,2) | 1.439 / 1.299 | 18,1 | có |
+| PaddleOCR.js mỗi khung 1 dòng (`paddlejs`, để so) | 62% | 19% / 20% | 25% | 6,9 (5,8; 12,5) | 11,7 (10,6; 20,1) | 1.099 / 1.190 | 18,1 / 17,4 | có |
+| tesseract.js 7 (vie+eng) | 25% / 20% | 10% | 12% | 1,5 (1,0; 3,4) | 2,5 (1,6; 5,2) | 1.004 / 694 | 5,8 | có |
 | PP-OCRv5 det + VietOCR (Python) | **74%** | 25% | 28% | 9,3 trên CPU máy tính | không chạy trong trình duyệt | – | – (model khoảng 157 MB) | không chạy trong trình duyệt |
 | EasyOCR (ocr-a, số cũ) | 45% | 31% | 22% | 13,7 trên CPU máy tính | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
 | Tesseract (ocr-a, số cũ) | 20% | 12% | 12% | 1,3 trên CPU máy tính | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
 
-Ô có "a / b" là Chromium / WebKit. Số đầy đủ (private, đỉnh tổng, JS heap, giây nạp) ở `outputs/web-ocr/metrics.csv`; từng file tải lần đầu ở `outputs/web-ocr/tai-lan-dau.md`.
+Ô có "a / b" là Chromium / WebKit. Lớn nhất: `paddlejs-rows` 14,6 giây (Chromium) / 19,5 giây (WebKit). Giây nạp từ CDN (vòng 2, mạng nhanh): `paddlejs-rows` 11,1 s (Chromium) / 6,6 s (WebKit), tesseract.js 2,3 / 4,5 s; vòng 1 cùng file mất 27–149 s (mạng chậm), nên chỉ coi là ví dụ. Nạp từ máy (không qua mạng): Paddle 2–3 s, tesseract.js 1 s.
 
-Tải lần đầu của PaddleOCR.js (qua mạng / sau giải nén, kB, Chromium): `ort-wasm-simd-threaded.wasm` 2.627 / 12.362 (jsDelivr), `opencv.js` 2.448 / 10.378 (jsDelivr), rec ONNX 8.047 / 8.042 và det ONNX 4.830 / 4.827 (HuggingFace, không nén), `clipper.js` 47 / 204, `js-yaml.mjs` 18 / 104. tesseract.js: `tesseract-core-*-lstm.wasm.js` 1.375 / 3.906, `eng.traineddata.gz` 2.955, `vie.traineddata.gz` 1.424, `worker.min.js` 33 / 111. Giây nạp từ CDN phụ thuộc mạng: Paddle 40,6 s (Chromium) / 26,9 s (WebKit) lần 1 và 148,8 / 100,8 s lần 2; tesseract.js 12–16 s; nạp từ máy (không qua mạng) Paddle 2–3 s, tesseract.js 1 s.
+Tải lần đầu của PaddleOCR.js (qua mạng / sau giải nén, kB): `ort-wasm-simd-threaded.wasm` 2.624–2.627 / 12.362 (jsDelivr; vòng 1 WebKit 2.016), `opencv.js` 2.448 / 10.378, rec ONNX 8.047 / 8.042 và det ONNX 4.830 / 4.827 (HuggingFace, không nén), `clipper.js` 47 / 204, `js-yaml.mjs` 18 / 104. tesseract.js (dữ liệu `@1.0.0`): `tesseract-core-*-lstm.wasm.js` 1.374–1.376 / 3.899–3.906, `eng.traineddata.gz` 2.953–2.957, `vie.traineddata.gz` 1.423–1.425, `worker.min.js` 32–33 / 111.
+
+Đánh giá theo ngưỡng (do `so-sanh.mjs` sinh, ngưỡng: trên cả 2 trình duyệt ≥ 30% B regex, ≤ 10 giây/ảnh TB, ≤ 20 MB tải lần đầu; "sát ngưỡng" = cách ngưỡng ≤ 15%):
+- PaddleOCR.js nối khung cùng hàng: **đạt cả 3** (B regex 36% / 37%, 5,7 / 7,8 giây, 18,1 MB), tải lần đầu sát ngưỡng (18,1 MB; trên máy có WebGPU khoảng 19 MB).
+- PaddleOCR.js mỗi khung 1 dòng: không đạt (B regex 19–20%, WebKit 11,7 giây).
+- tesseract.js: không đạt B regex (10%), đạt tốc độ và tải.
 
 Nhận xét:
-- PaddleOCR.js **chứa** nhiều thông tin nhất trong các công cụ chạy được trong trình duyệt (62%, hơn EasyOCR 45%), mạnh ở số dinh dưỡng (kcal 88–92%, đạm 96%, béo 88–92%, carb 92–96%) và thương hiệu (83%), yếu ở thành phần (15–16%: thiếu chữ có dấu, xem trên).
-- Nhưng **phần B regex chỉ 19–20%** (dưới ngưỡng ~30%): mỗi khung chữ thành 1 dòng nên nhãn và số của bảng dinh dưỡng nằm ở 2 dòng ("Protein" / "17,14g"), còn luật regex cần nhãn và số cùng dòng (đạm / béo / carb: A 96% nhưng B regex 0–8%). Thử thêm (chỉ để tham khảo, không vào bảng chính, kết quả ở `D:\tmp\ocr-c\variant`): nối các khung cùng hàng thành 1 dòng (`run-browser.mjs --join rows --out <thư mục khác>`, `rowLines` trong `lib.mjs`) thì A vẫn 62%, **B regex 36% (Chromium) / 37% (WebKit), B dict 42% / 42%** (Chromium: kcal 85%, đạm 46%, béo 54%, carb 65%; WebKit: 88%, 50%, 54%, 69%).
-- WebKit chậm hơn Chromium khoảng 1,5–1,7 lần. Giây/ảnh dao động giữa các lần chạy vì máy còn làm việc khác (tải file, cài thư viện): lần chạy chính Chromium 6,9 / WebKit 11,7; lần chạy thử nối hàng (cùng model, cùng ảnh) Chromium 5,8 / WebKit 8,6. Ảnh chữ dày nhất 49 giây trên WebKit. Bộ nhớ: tiến trình trang dùng khoảng 1,1–1,2 GB working set khi đọc ảnh 1600 px (bộ nhớ wasm không trả lại sau khi phình), rủi ro Safari iOS đóng trang trên iPhone ít RAM; phải thử iPhone thật.
+- Nối khung cùng hàng không đổi % A (cùng chữ, chỉ khác cách xuống dòng) nhưng nâng B regex từ 19–20% lên 36–37% (hơn EasyOCR + regex 31%) và B dict lên 42% (tổ hợp tốt nhất phần B, hơn EasyOCR + llm 37%). Theo trường (regex, Chromium / WebKit): đạm 0–4% lên 46–50%, béo 8% lên 54%, carb 8% lên 65–69%, kcal 69–73% lên 85–88%; nhà sản xuất giảm 42% xuống 17–25% (dòng nối thêm chữ của khung bên cạnh), tên 21% xuống 17%; thành phần 11–13% (thiếu chữ có dấu).
+- WebKit lần này 7,8 giây/ảnh (vòng 1 cùng model: 8,6 khi thử nối hàng, 11,7 khi mỗi khung 1 dòng): số giây/ảnh trên máy này dao động khoảng 30% giữa các lần chạy; WebKit Windows cũng không phải Safari iOS. Kết luận về tốc độ trên iPhone phải thử máy thật (trang `ocr-thu.html`).
+- Bộ nhớ: tiến trình trang dùng khoảng 1,3–1,4 GB working set khi đọc ảnh 1600 px (bộ nhớ wasm không trả lại sau khi phình), rủi ro Safari iOS đóng trang trên iPhone ít RAM; phải thử iPhone thật.
 - tesseract.js nhanh và nhẹ (5,8 MB) nhưng chỉ ngang Tesseract Python (20–25%).
 - VietOCR (máy chủ) cao nhất phần A (74%): phần nhận dạng tiếng Việt còn nhiều chỗ để lên nếu có model đủ dấu; không dùng được trong app tĩnh (không có máy chủ).
+
+## Trang thử `ocr-thu.html` (điện thoại thật)
+
+`public/ocr-thu.html` (+ `public/ocr-thu/regex.mjs`, `text.mjs`) là trang riêng, **không có link nào từ app**, có `noindex`. Vite chép nguyên vào `dist/` (không vào bundle, không thêm gì vào `package.json` của app); trên Pages ở `https://khangnguyen196.github.io/quet-ma-vach-full/ocr-thu.html`. Ảnh chỉ xử lý trong trình duyệt, không gửi đi đâu.
+
+- Thư viện + model tải từ CDN, đúng bản cố định của `web-ocr/assets.js` chế độ `cdn` (jsDelivr theo số bản, HuggingFace theo mã commit, dữ liệu tesseract `@1.0.0`; test `ocr-thu.test.mjs` kiểm mọi URL của trang). wasm 1 luồng. WebGPU chỉ khi có `navigator.gpu` VÀ `requestAdapter()` trả adapter trong 3 giây; lỗi khi khởi tạo / đọc bằng WebGPU thì tự lùi về wasm; ô "Chỉ dùng wasm" (trang tải lại với `?wasm=1`, bản `ort.wasm.min.mjs` như lúc đo). Hiện backend thật đã dùng.
+- 2 nút "Chụp ảnh" (camera sau) và "Chọn từ thư viện"; ảnh xoay theo EXIF, thu cạnh dài về 1600 px. Nút "Đọc bằng PaddleOCR" (nối khung cùng hàng như `paddlejs-rows`) và "Đọc bằng tesseract.js (để so)" (chỉ tải khi bấm; đọc xong tắt worker để trả bộ nhớ).
+- Hiện: chữ đọc được, 11 ô regex (trống ghi "chưa đọc được"), giây tải model, giây đọc, backend, cỡ ảnh sau thu nhỏ, crossOriginIsolated, byte đã tải (từ Resource Timing; CDN không gửi `Timing-Allow-Origin` thì ghi "không đo được"; file do worker tự tải không tính), trình duyệt. Nút "Chép kết quả" chép một đoạn tóm tắt để dán lại.
+- Thiếu bộ nhớ: lỗi `RangeError` / có chữ "memory", "OOM", "allocate"… thì báo "Trang thiếu bộ nhớ khi đọc ảnh…". Trước khi đọc đặt cờ `sessionStorage` `ocr-thu-dang-doc`, đọc xong thì xóa; mở lại trang mà còn cờ thì báo "Trang vừa bị đóng giữa chừng, có thể do thiếu bộ nhớ". Không dùng `localStorage`.
+- Luật regex: `regex.mjs` là bản JS của `extract_regex` (Python là chuẩn). Regex JS khác Python ở `\d`, `\w`, `\b`, `\s` (JS chỉ hiểu ASCII), `.`, `$`, `(?P<…>)`, nên `pyRegex` đổi các chỗ đó theo nghĩa Python và giữ nguyên chuỗi mẫu. `node web-ocr/regex-parity.mjs` so bản JS với mọi `outputs/extract/<ocr>__regex/<mã>.json`: vòng 2 khớp 100% (9 OCR × 31 sản phẩm = 279 lượt, 3.069 ô, lệch 0). Sửa luật regex thì sửa `run_extract.py` trước, chép sang `regex.mjs`, chạy lại script này. Cần Safari 16.4+ / Chrome 89+ (import map, lookbehind).
+- Service worker của app lưu sẵn cả `ocr-thu.html`, `ocr-thu/*.mjs` (vô hại) nhưng không bao giờ lưu file CDN. Mở trang thì mạng trước; chỉ khi mất mạng hoặc mạng chậm quá 3 giây mà đã có bản lưu thì service worker trả `index.html` (giới hạn đã biết, quyết định vòng 0).
+- Kiểm trên máy (bản build, server tĩnh giả đường dẫn `/quet-ma-vach-full/`): `node web-ocr/ocr-thu-check.mjs --base <link> --browser chromium|webkit --shots <thư mục>` chạy các bước (a)–(g) và chụp màn hình; vòng 2 qua hết trên Chromium và WebKit (chữ giống 100% với `outputs/paddlejs-rows-<trình duyệt>` trên 2 ảnh thử).
