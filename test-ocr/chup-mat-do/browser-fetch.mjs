@@ -34,8 +34,27 @@ export async function createBrowserFetch() {
     return { status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => JSON.parse(r.text) };
   }
 
+  /** Tải file nhị phân (ảnh) từ trang. Trả { status, ok, bytes: Buffer } hoặc ném lỗi mạng / CORS. */
+  async function fetchBytes(url) {
+    const r = await page.evaluate(async (u) => {
+      try {
+        const res = await fetch(u);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        let s = "";
+        for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        return { status: res.status, b64: btoa(s) };
+      } catch (e) {
+        return { error: String((e && e.message) || e) };
+      }
+    }, url);
+    if (r.error) throw new Error(`tải trong trình duyệt lỗi: ${r.error}`);
+    return { status: r.status, ok: r.status >= 200 && r.status < 300, bytes: Buffer.from(r.b64, "base64") };
+  }
+
   return {
     fetchImpl,
+    fetchBytes,
+    page,
     userAgent: await page.evaluate(() => navigator.userAgent),
     async close() {
       await browser.close().catch(() => {});
