@@ -366,3 +366,27 @@ describe("precacheList: danh sách lưu sẵn không có file .wasm (sua-cuoi)",
     assert.ok(log.fetched.every((f) => !String(f.url).toLowerCase().includes(".wasm")), log.fetched.map((f) => f.url).join(", "));
   });
 });
+
+describe("precacheList: không lưu sẵn trang thử ocr-thu* / chup-mat-do* (chup-mat-do vòng 5)", () => {
+  // Trang thử nằm trong public/ nên plugin gom vào danh sách; routeFor bỏ qua chúng ("skip") nên lưu sẵn là phí.
+  const NAMES = [
+    "index.html", "manifest.webmanifest", "icons/icon-192.png", "assets/index-abc.js",
+    "assets/chup-mat-do-x.js", "assets/ocr-thu-y.js",
+    "ocr-thu.html", "chup-mat-do.html", "ocr-thu/regex.mjs", "ocr-thu/text.mjs",
+    "chup-mat-do/t1.mjs", "chup-mat-do/danh-muc-vn.json"
+  ];
+
+  test("bỏ ocr-thu.html, chup-mat-do.html, ocr-thu/…, chup-mat-do/… ở gốc; giữ assets/… có chữ giống", () => {
+    assert.deepEqual(swBuild.precacheList(NAMES), [
+      "./", "./assets/chup-mat-do-x.js", "./assets/index-abc.js", "./assets/ocr-thu-y.js",
+      "./icons/icon-192.png", "./index.html", "./manifest.webmanifest"
+    ]);
+  });
+
+  test("sw.js sinh từ danh sách đó không nhắc 'ocr-thu' / 'chup-mat-do' (trừ assets/ giữ lại)", () => {
+    const names = NAMES.filter((n) => !n.startsWith("assets/chup-mat-do") && !n.startsWith("assets/ocr-thu"));
+    const code = buildServiceWorker({ version: "v5", files: swBuild.precacheList(names) });
+    assert.ok(!code.includes("ocr-thu"), "sw.js không được có 'ocr-thu'");
+    assert.ok(!code.includes("chup-mat-do"), "sw.js không được có 'chup-mat-do'");
+  });
+});
