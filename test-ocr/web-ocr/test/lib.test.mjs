@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar,
+  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar, tessLangObjects,
 } from "../lib.mjs";
 
 test("tên file kết quả và tên công cụ giống run_ocr.py", () => {
@@ -115,4 +115,16 @@ test("makeTar: tar ustar đọc lại được tên, cỡ, nội dung; checksum 
   assert.equal(f2.size, 1000);
   assert.deepEqual(f2.data, b);
   assert.ok(tar.subarray(tar.length - 1024).every((v) => v === 0));
+});
+
+test("tessLangObjects: lần sao chép đầu (nạp ngôn ngữ) mang byte, lần sau (khởi tạo) mang tên ngôn ngữ", () => {
+  const vie = new Uint8Array([31, 139, 1]);
+  const eng = new Uint8Array([31, 139, 2]);
+  const langs = tessLangObjects([{ code: "vie", data: vie }, { code: "eng", data: eng }]);
+  const load = structuredClone(langs); // createWorker gửi việc loadLanguage
+  assert.deepEqual(load.map((l) => l.code), ["vie", "eng"]);
+  assert.deepEqual(load[0].data, vie);
+  assert.deepEqual(load[1].data, eng);
+  const init = structuredClone(langs); // rồi gửi việc initialize: tesseract.js 7.0.0 ghép tên bằng l.data
+  assert.equal(init.map((l) => l.data).join("+"), "vie+eng");
 });

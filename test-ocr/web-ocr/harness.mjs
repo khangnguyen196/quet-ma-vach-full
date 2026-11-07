@@ -2,7 +2,7 @@
 //   await harness.init()          -> nạp thư viện + model, trả số giây nạp, backend, tính năng trình duyệt
 //   await harness.run(url)        -> đọc 1 ảnh, trả { text, seconds, ... }
 // Tham số và đường dẫn do harness.html đặt sẵn ở window.__OCR_PARAMS / window.__OCR_ASSETS.
-import { orderLines, rowLines, makeTar } from "./lib.mjs";
+import { orderLines, rowLines, makeTar, tessLangObjects } from "./lib.mjs";
 
 const P = window.__OCR_PARAMS;
 const A = window.__OCR_ASSETS;
@@ -106,8 +106,15 @@ async function initTesseract() {
   const mod = await import(A.tesseract);
   const Tesseract = mod.default || mod;
   const opts = { workerPath: A.tesseractWorker, corePath: A.tesseractCore };
-  if (A.tessLangPath) opts.langPath = A.tessLangPath;
-  const worker = await Tesseract.createWorker(window.OcrAssets.TESS_LANGS, 1, opts); // OEM 1 = LSTM
+  let langs = window.OcrAssets.TESS_LANGS;
+  if (A.tessLangs) {
+    // cdn: tự tải dữ liệu ngôn ngữ đã ghim bản (@1.0.0), đưa byte cho tesseract.js
+    const datas = await Promise.all(A.tessLangs.map((l) => fetchBytes(l.url)));
+    langs = tessLangObjects(A.tessLangs.map((l, i) => ({ code: l.code, data: datas[i] })));
+  } else if (A.tessLangPath) {
+    opts.langPath = A.tessLangPath;
+  }
+  const worker = await Tesseract.createWorker(langs, 1, opts); // OEM 1 = LSTM
   // PSM 3 (tự chia trang) giống lệnh tesseract / pytesseract mặc định trong run_ocr.py
   await worker.setParameters({ tessedit_pageseg_mode: "3" });
   return {

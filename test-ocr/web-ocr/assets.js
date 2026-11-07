@@ -71,11 +71,19 @@
       tesseractCore: mode === "cdn"
         ? "https://cdn.jsdelivr.net/npm/tesseract.js-core@" + VERSIONS["tesseract.js-core"]
         : "/node_modules/tesseract.js-core",
-      // tesseract.js nối thêm "/<lang>.traineddata.gz" vào langPath (một đường dẫn cho mọi ngôn ngữ).
-      // cdn: để trống -> tesseract.js tự lấy https://cdn.jsdelivr.net/npm/@tesseract.js-data/<lang>/4.0.0_best_int
-      // (vie và eng ở 2 gói khác nhau nên không cố định được bản; hiện là 1.0.0 = VERSIONS ở trên).
-      // local: D:\cache\web-ocr\tessdata (chép đúng 2 file đó từ jsDelivr @1.0.0).
+      // Dữ liệu ngôn ngữ tesseract.js (vie, eng ở 2 gói npm khác nhau).
+      // local: langPath = D:\cache\web-ocr\tessdata (tesseract.js nối "/<lang>.traineddata.gz"; 2 file chép từ
+      //   jsDelivr @1.0.0, sha256 giống hệt).
+      // cdn: KHÔNG dùng langPath: một đường dẫn chung cho mọi ngôn ngữ thì không ghim được bản cho 2 gói, còn để
+      //   trống thì tesseract.js tự lấy @tesseract.js-data/<lang>/4.0.0_best_int (bản mới nhất). Trang tự tải từng
+      //   file ở tessLangs (ghim @1.0.0) rồi đưa byte cho createWorker (xem tessLangObjects trong lib.mjs).
       tessLangPath: mode === "cdn" ? null : "/cache/tessdata",
+      tessLangs: mode === "cdn"
+        ? TESS_LANGS.split("+").map(function (code) {
+          var pkg = "@tesseract.js-data/" + code;
+          return { code: code, url: "https://cdn.jsdelivr.net/npm/" + pkg + "@" + VERSIONS[pkg] + "/4.0.0_best_int/" + code + ".traineddata.gz" };
+        })
+        : null,
     };
   }
 

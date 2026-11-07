@@ -154,6 +154,28 @@ export function timeStats(rows) {
   return { ok: ok.length, errors, mean, max };
 }
 
+/** Danh sách ngôn ngữ cho tesseract.createWorker khi trang tự tải dữ liệu (để ghim bản @1.0.0).
+ *  langs: [{ code: "vie", data: Uint8Array (.traineddata.gz) }]. Trả mảng object { code, data } cho createWorker.
+ *
+ *  Vì sao cần hàm này: tesseract.js 7.0.0 nhận [{ code, data }] ở bước nạp ngôn ngữ (loadLanguage dùng `data` là
+ *  byte, tự giải nén gzip) NHƯNG bước khởi tạo (initialize trong src/worker-script/index.js) lại ghép tên ngôn ngữ
+ *  bằng `l.data` thay vì `l.code`, nên truyền thẳng thì Tesseract đi tìm file "./31,139,8,…" và lỗi.
+ *  createWorker gửi CÙNG mảng này sang worker 2 lần (nạp ngôn ngữ, rồi khởi tạo); mỗi lần gửi, trình duyệt sao chép
+ *  object (structured clone) và đọc `data` đúng 1 lần. Nên `data` là getter: lần đọc đầu trả byte, các lần sau trả
+ *  tên ngôn ngữ. Đã thử: tesseract.js 7.0.0, vie+eng, trong Node. */
+export function tessLangObjects(langs) {
+  return langs.map(({ code, data }) => {
+    let reads = 0;
+    return {
+      code,
+      get data() {
+        reads += 1;
+        return reads === 1 ? data : code;
+      },
+    };
+  });
+}
+
 /** Gói các file thành 1 file tar (ustar, không nén) mà PaddleOCR.js đọc được (cần inference.onnx + inference.yml).
  *  files: [{ name, data: Uint8Array }]. Trả Uint8Array. */
 export function makeTar(files) {
