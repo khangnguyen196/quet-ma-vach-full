@@ -75,6 +75,9 @@ const truthRows = parseCsv(fs.readFileSync(args.truth, "utf8"));
 const bf = await createBrowserFetch();
 console.log(`Gọi OFF từ trình duyệt: ${bf.userAgent}`);
 const off = createOffClient({ fetchImpl: bf.fetchImpl, log: (m) => console.log(m) });
+// search-a-licious (chỉ tham khảo) không có CORS nên không gọi từ trang được: gọi bằng fetch của Node
+// (máy chủ này trả 200 cho User-Agent "node"), dùng chung bộ giãn cách + bộ đếm với client trên.
+const offNode = createOffClient({ log: (m) => console.log(m), shareWith: off });
 fs.mkdirSync(args.out, { recursive: true });
 
 let brands = [];
@@ -110,7 +113,7 @@ for (const name of args.tools) {
       strategies[k] = { words: s.words, note: s.note, ...(await searchScored(off, s.words, truth, DEFAULT_KIND)) };
     }
     const reference = args.reference
-      ? { kind: "searchalicious", strategy: DEFAULT_STRATEGY, ...(await searchScored(off, strat[DEFAULT_STRATEGY].words, truth, "searchalicious")) }
+      ? { kind: "searchalicious", strategy: DEFAULT_STRATEGY, ...(await searchScored(offNode, strat[DEFAULT_STRATEGY].words, truth, "searchalicious")) }
       : null;
     const d = strategies[DEFAULT_STRATEGY];
     const item = {
@@ -126,7 +129,7 @@ for (const name of args.tools) {
       reference,
     };
     items.push(item);
-    console.log(`${truth.code}: S1 ${strategies.S1.rank ?? "-"} | S2 ${d.rank ?? "-"} [${d.terms}]${d.error ? " LỖI " + d.error : ""} | S3 ${strategies.S3.rank ?? "-"} | tham khảo ${reference?.rank ?? "-"}`);
+    console.log(`${truth.code}: S1 ${strategies.S1.rank ?? "-"} | S2 ${d.rank ?? "-"} [${d.terms}]${d.error ? " LỖI " + d.error : ""} | S3 ${strategies.S3.rank ?? "-"} | tham khảo ${reference?.rank ?? "-"}${reference?.error ? " LỖI " + reference.error : ""}`);
   }
   const runLocal = readJson(path.join(args.ocrDir, "web-ocr", "runs", `${tool}-local.json`));
   const runCdn = readJson(path.join(args.ocrDir, "web-ocr", "runs", `${tool}-cdn.json`));

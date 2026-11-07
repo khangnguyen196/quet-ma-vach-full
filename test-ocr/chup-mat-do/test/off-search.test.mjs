@@ -164,3 +164,14 @@ test("vnBrands: facet được thì dùng facet", async () => {
   const off = createOffClient({ fetchImpl: f, cacheDir: tmpDir(), ...fakeClock() });
   assert.deepEqual(await off.vnBrands(), { brands: ["Vifon"], source: "facet brands" });
 });
+
+test("shareWith: 2 client dùng chung bộ giãn cách + bộ đếm", async () => {
+  const c = fakeClock();
+  const dir = tmpDir();
+  const a = createOffClient({ fetchImpl: fakeFetch([]), cacheDir: dir, ...c });
+  const b = createOffClient({ fetchImpl: fakeFetch([]), cacheDir: dir, ...c, shareWith: a });
+  await a.search("x");
+  await b.search("y", { kind: "searchalicious" });
+  assert.ok(c.sleeps.includes(6000), "lượt của client thứ 2 vẫn phải chờ 6 giây");
+  assert.equal(a.stats, b.stats);
+});

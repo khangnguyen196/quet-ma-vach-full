@@ -105,13 +105,16 @@ export function createOffClient({
   productGapMs = PRODUCT_GAP_MS,
   retryWaitMs = RETRY_WAIT_MS,
   log = () => {},
+  // dùng chung bộ giãn cách + bộ đếm với client khác (vd 1 client gọi từ trình duyệt, 1 client gọi từ Node):
+  // tổng lượt tìm của cả 2 vẫn ≤ 10 / phút
+  shareWith = null,
 } = {}) {
   fs.mkdirSync(cacheDir, { recursive: true });
-  const limiters = {
+  const limiters = shareWith ? shareWith.limiters : {
     search: makeLimiter(searchGapMs, { now, sleep }),
     product: makeLimiter(productGapMs, { now, sleep }),
   };
-  const stats = { search: 0, product: 0, other: 0, cacheHits: 0, http429or5xx: 0, retries: 0, failures: 0, vnFallback: 0 };
+  const stats = shareWith ? shareWith.stats : { search: 0, product: 0, other: 0, cacheHits: 0, http429or5xx: 0, retries: 0, failures: 0, vnFallback: 0 };
 
   /** GET có cache. cls: "search" | "product" | "other" (other dùng bộ giãn của search). */
   async function cachedGet(url, cls) {
@@ -210,5 +213,5 @@ export function createOffClient({
     return { brands: [...set], source: `/api/v2/search lọc VN, ${pages} trang × 100` };
   }
 
-  return { search, product, vnBrands, cachedGet, stats };
+  return { search, product, vnBrands, cachedGet, stats, limiters };
 }
