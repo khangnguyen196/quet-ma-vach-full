@@ -37,3 +37,33 @@ test("imageDownloadCounts: loo.json cũ không có queryDownloads -> null (khôn
   const r = imageDownloadCounts({ downloadStats: { downloads: 982 } }, { downloadStats: { downloads: 1037 } });
   assert.equal(r.query, null);
 });
+
+// ---- vòng 5 (g1, g2, NÊN SỬA 1, g4) ----
+import { downloadErrorsByStep, rankCell, nameBrandCell, bitRange, runTimeText } from "../tong-hop-lib.mjs";
+
+test("downloadErrorsByStep: ghi số lỗi riêng từng bước (không lấy số lớn nhất), bỏ bước không có số", () => {
+  const r = downloadErrorsByStep({ chon: { http429or5xx: 2, networkErrors: 0 }, loo: { http429or5xx: 1, breakerTrips: 1 }, cap: null });
+  assert.deepEqual(r, [
+    { step: "chon", http429or5xx: 2, networkErrors: 0, breakerTrips: 0 },
+    { step: "loo", http429or5xx: 1, networkErrors: 0, breakerTrips: 1 },
+  ]);
+});
+
+test("rankCell / nameBrandCell: lượt chưa chạy được ảnh nào in '–' (không in 0/1)", () => {
+  assert.equal(rankCell({ n: 1, ok: 0, top1: 0, top5: 0 }), "–");
+  assert.equal(rankCell(null), "–");
+  assert.equal(rankCell({ n: 30, ok: 30, top1: 4, top5: 7 }), "vị trí 1: 4/30 · 5 đầu: 7/30");
+  assert.equal(nameBrandCell({ n: 1, ok: 0, nameOk: 0, brandOk: 0 }), "–");
+  assert.equal(nameBrandCell({ n: 5, ok: 5, nameOk: 3, brandOk: 4 }), "tên 3/5 · thương hiệu 4/5");
+});
+
+test("bitRange: khoảng bit min–max và số cặp ≤ 30 bit", () => {
+  assert.deepEqual(bitRange([{ distance: 26 }, { distance: 31 }, { distance: 30 }, { distance: null }]), { min: 26, max: 31, le30: 2, n: 3 });
+  assert.equal(bitRange([]), null);
+});
+
+test("runTimeText: giờ bắt đầu / kết thúc từ startedAt + wallSeconds; không có giờ thì ghi rõ", () => {
+  assert.equal(runTimeText({ startedAt: "2026-11-07T21:53:25.304Z", wallSeconds: 152 }), "2026-11-07T21:53:25Z → 2026-11-07T21:55:57Z");
+  assert.equal(runTimeText({ startedAt: "2026-11-07T21:53:25.304Z" }), "2026-11-07T21:53:25Z → (không có giờ kết thúc)");
+  assert.equal(runTimeText({}), "(không có giờ, chạy trước khi thêm trường)");
+});
