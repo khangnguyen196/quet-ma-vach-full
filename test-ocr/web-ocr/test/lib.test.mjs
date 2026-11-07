@@ -157,7 +157,10 @@ test("tessLangObjects: lần sao chép đầu (nạp ngôn ngữ) mang byte, l�
 
 test("chặn nâng bản tesseract.js: node_modules và URL CDN của trang thử đều là 7.0.0 (cách lách tessLangObjects dựa vào bản này)", () => {
   const hint = "nâng bản thì kiểm lại cách lách tessLangObjects (README Phần D)";
-  const pkg = JSON.parse(fs.readFileSync(new URL("../node_modules/tesseract.js/package.json", import.meta.url), "utf8"));
+  const pkgUrl = new URL("../node_modules/tesseract.js/package.json", import.meta.url);
+  // thiếu node_modules thì báo rõ cách sửa (vẫn FAIL, không skip)
+  if (!fs.existsSync(pkgUrl)) assert.fail("thiếu node_modules/tesseract.js: chạy npm ci trong test-ocr/web-ocr trước");
+  const pkg = JSON.parse(fs.readFileSync(pkgUrl, "utf8"));
   assert.equal(pkg.version, "7.0.0", `node_modules/tesseract.js là ${pkg.version}: ${hint}`);
   const html = fs.readFileSync(new URL("../../../public/ocr-thu.html", import.meta.url), "utf8");
   const m = html.match(/tesseract: "(https:[^"]+)"/);
