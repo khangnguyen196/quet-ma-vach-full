@@ -47,19 +47,23 @@ def read_skipped(path):
             skipped[r["tool"]] += 1
     return skipped
 
+# Thư mục con của outputs/ KHÔNG phải công cụ OCR: extract (run_extract.py, phần B), hsd-js (phần C),
+# web-ocr (số đo OCR trong trình duyệt, đợt ocr-c).
+NOT_OCR_DIRS = {"extract", "hsd-js", "web-ocr"}
+
 def list_tools(out):
-    """Tên các công cụ OCR có kết quả = thư mục con của outputs, trừ "extract" (do run_extract.py tạo)
+    """Tên các công cụ OCR có kết quả = thư mục con của outputs, trừ NOT_OCR_DIRS
     và thư mục có tên bắt đầu bằng dấu chấm."""
     return sorted(d.name for d in out.iterdir()
-                  if d.is_dir() and d.name != "extract" and not d.name.startswith("."))
+                  if d.is_dir() and d.name not in NOT_OCR_DIRS and not d.name.startswith("."))
 
 def all_tools(out):
     """Mọi công cụ cần có trong summary = thư mục con của outputs (list_tools) + tên công cụ có ít nhất 1 dòng
     trong outputs/times.csv. run_ocr.py chỉ tạo outputs/<công cụ>/ khi có ảnh ok, nên công cụ bị bỏ qua hết
-    (vd Google chạm trần tháng) hoặc lỗi hết chỉ có dòng trong times.csv. Vẫn bỏ "extract" và tên bắt đầu bằng dấu chấm."""
+    (vd Google chạm trần tháng) hoặc lỗi hết chỉ có dòng trong times.csv. Vẫn bỏ NOT_OCR_DIRS và tên bắt đầu bằng dấu chấm."""
     names = set(list_tools(out)) if out.is_dir() else set()
     names |= {r["tool"] for r in last_rows(out / "times.csv")
-              if r["tool"] and r["tool"] != "extract" and not r["tool"].startswith(".")}
+              if r["tool"] and r["tool"] not in NOT_OCR_DIRS and not r["tool"].startswith(".")}
     return sorted(names)
 
 def has_txt(out, tool):
