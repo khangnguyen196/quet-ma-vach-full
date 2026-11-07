@@ -105,6 +105,12 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
   color: #D8D8D0;
 }
 .viewfinder video { width: 100% !important; height: 100% !important; object-fit: cover; display: block; }
+/* Khung đúng vùng giải mã của "Bật camera" (cameraCrop trong src/camera.js: 92% × 60% giữa khung) */
+.scan-guide {
+  position: absolute; left: 4%; top: 20%; width: 92%; height: 60%;
+  border: 2px solid rgba(255, 255, 255, .9); border-radius: 6px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .28); pointer-events: none;
+}
 .idle {
   position: absolute; inset: 0;
   display: grid; place-items: center; text-align: center;
@@ -132,6 +138,8 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
 /* Nút bị khóa trong lúc đang đọc ảnh / mở camera.
    Tách 2 rule: trình duyệt cũ không hiểu :has() sẽ bỏ cả rule chứa nó, rule :disabled vẫn còn. */
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Nút đèn pin / phóng to: chỉ hiện khi camera đang bật và máy hỗ trợ */
+.cam-tools[hidden], .cam-tools .btn[hidden] { display: none; }
 .btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 form.manual { display: flex; gap: 8px; margin-top: 14px; }

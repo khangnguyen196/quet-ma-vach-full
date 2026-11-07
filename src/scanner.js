@@ -1,7 +1,18 @@
-// Bật/tắt camera (html5-qrcode) và đọc mã từ ảnh ("Chụp ảnh mã": zxing-wasm trước, html5-qrcode dự phòng).
+// Bật/tắt camera và đọc mã từ ảnh. Cả 2 đọc bằng zxing-wasm trước, html5-qrcode dự phòng:
+// - "Bật camera" (từ đợt nhay-hon): tự mở camera (getUserMedia) + <video>, mỗi ~120 ms cắt vùng giữa khung hình
+//   ở độ phân giải thật của camera rồi giải mã bằng BarcodeDetector (nếu trình duyệt có) và zxing-wasm;
+//   không tải được zxing-wasm trong ZXING_LOAD_TIMEOUT_MS thì bật camera bằng html5-qrcode như cũ.
+// - "Chụp ảnh mã": zxing-wasm trước, html5-qrcode dự phòng (đợt sua-cuoi).
 import { Html5Qrcode, Html5QrcodeSupportedFormats as F } from "html5-qrcode";
 import { errorText } from "./render.js";
-import { pickCode, scanFailureText, isZxingTimeout } from "./barcode.js";
+import {
+  pickCode, scanFailureText, isZxingTimeout, raceTimeout, ZXING_LOAD_TIMEOUT_MS, makeZxingTimeoutError
+} from "./barcode.js";
+import { cameraConstraints, cameraCrop, detectorCode, pickCameraCode, confirmCode, DETECTOR_FORMATS } from "./camera.js";
+
+// "Bật camera" bằng zxing-wasm: nghỉ chừng này mili giây giữa 2 lượt giải mã (mỗi lượt chạy trên luồng chính,
+// nghỉ để trang vẫn mượt trên điện thoại).
+const FRAME_GAP_MS = 120;
 
 // "Chụp ảnh mã" đọc bằng zxing-wasm trước (đọc được bao bì thật nhăn / xoay dọc mà html5-qrcode trượt).
 // zxing-wasm chỉ được tải khi chọn ảnh (import động); tải không được, ném lỗi hoặc không thấy mã thì
@@ -107,6 +118,35 @@ async function readWithZxing(img, angle = 0) {
   return pickCode(await mod.readCodes(imageData));
 }
 
+/** Dừng mọi track của luồng camera (đèn camera tắt, trình duyệt thôi báo đang dùng camera). */
+function stopTracks(stream) {
+  for (const t of stream?.getTracks?.() || []) {
+    try { t.stop(); } catch { /* đã dừng */ }
+  }
+}
+
+/** BarcodeDetector có sẵn của trình duyệt (Chrome Android) nếu đọc được EAN-13; không có thì null. */
+async function makeDetector() {
+  if (typeof BarcodeDetector === "undefined") return null;
+  try {
+    const supported = await BarcodeDetector.getSupportedFormats();
+    if (!supported.includes("ean_13")) return null;
+    return new BarcodeDetector({ formats: DETECTOR_FORMATS.filter((f) => supported.includes(f)) });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tải zxing-reader.js + file wasm cho "Bật camera", chờ tối đa ZXING_LOAD_TIMEOUT_MS (tính cả lúc tải file JS).
+ * Trả module, hoặc ném lỗi (scanner bật camera bằng html5-qrcode). Hết giờ thì lần tải dở vẫn chạy tiếp.
+ */
+function loadCameraReader() {
+  const load = import("./zxing-reader.js").then(async (mod) => { await mod.prepareReader(); return mod; });
+  load.catch(() => {}); // lỗi xử lý ở nơi chờ; tránh "unhandled rejection" khi đã hết giờ
+  return raceTimeout(load, ZXING_LOAD_TIMEOUT_MS, makeZxingTimeoutError);
+}
+
 export function createScanner(elementId) {
   const scanner = new Html5Qrcode(elementId, {
     formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E],
@@ -114,30 +154,158 @@ export function createScanner(elementId) {
     experimentalFeatures: { useBarCodeDetectorIfSupported: true }
   });
   let running = false;
+  // Đếm lượt bật camera: tắt camera (hoặc bật lượt mới) thì tăng; lượt cũ đang chờ / đang giải mã thấy số khác
+  // thì tự dừng, KHÔNG gọi onCode. Ví dụ: tắt camera đúng lúc zxing-wasm đang đọc 1 khung → kết quả bị bỏ.
+  let session = 0;
+  let mode = null; // "zxing" (tự giải mã) | "html5" (html5-qrcode) | null (đang tắt)
+  let cam = null; // { stream, video, guide, timer } khi mode === "zxing"
+
+  /** Dọn camera tự mở: dừng vòng lặp, dừng mọi track, gỡ video. */
+  function closeOwnCamera() {
+    if (!cam) return;
+    clearTimeout(cam.timer);
+    stopTracks(cam.stream);
+    try { cam.video.pause(); } catch { /* bỏ qua */ }
+    cam.video.srcObject = null;
+    cam.video.remove();
+    cam.guide.remove();
+    cam = null;
+  }
+
+  /** Bật camera bằng html5-qrcode (cách cũ, dùng khi không có zxing-wasm). */
+  async function startHtml5(onCode, my) {
+    await scanner.start(
+      { facingMode: "environment" }, // html5-qrcode bỏ qua tham số này khi có videoConstraints (camera sau nằm trong đó)
+      {
+        // fps 15 (trước là 10): đo 07/11/2026 (nhay-hon) cùng tỷ lệ ra mã, trung vị thời gian ra mã giảm 38%.
+        fps: 15,
+        aspectRatio: 4 / 3,
+        videoConstraints: cameraConstraints(),
+        qrbox: (w, h) => ({ width: Math.min(Math.round(w * 0.82), 340), height: Math.min(Math.round(h * 0.45), 170) })
+      },
+      (text) => { if (my === session) onCode(text); },
+      () => {} // mỗi khung hình chưa thấy mã thì bỏ qua
+    );
+    if (my !== session) { // đã tắt trong lúc đang mở
+      try { await scanner.stop(); } catch { /* đã dừng */ }
+      return;
+    }
+    mode = "html5";
+    running = true;
+  }
+
+  /** Vòng giải mã khung hình camera tự mở (BarcodeDetector trước nếu có, rồi zxing-wasm). */
+  async function decodeLoop(onCode, my, mod) {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const detector = await makeDetector();
+    let warned = false;
+    let pending = null; // mã 8 số đang chờ đọc lần 2 (confirmCode)
+    const tick = async () => {
+      if (my !== session || !cam) return;
+      const { video } = cam;
+      let code = null;
+      try {
+        const r = video.readyState >= 2
+          ? cameraCrop(video.videoWidth, video.videoHeight, video.clientWidth, video.clientHeight) : null;
+        if (r) {
+          if (canvas.width !== r.dw || canvas.height !== r.dh) { canvas.width = r.dw; canvas.height = r.dh; }
+          ctx.drawImage(video, r.sx, r.sy, r.sw, r.sh, 0, 0, r.dw, r.dh);
+          if (detector) code = detectorCode(await detector.detect(canvas));
+          if (!code && my === session) code = pickCameraCode(await mod.readCameraCodes(ctx.getImageData(0, 0, r.dw, r.dh)));
+        }
+      } catch (e) {
+        if (!warned) { console.warn("Lỗi khi giải mã khung hình camera:", e); warned = true; }
+      }
+      if (my !== session || !cam) return; // đã tắt trong lúc giải mã: bỏ kết quả, không gọi onCode
+      const c = confirmCode(pending, code); // mã 8 số phải đọc ra 2 lần mới nhận (tránh mảnh đọc nhầm)
+      pending = c.state;
+      if (c.accept) { onCode(c.accept); return; }
+      cam.timer = setTimeout(tick, FRAME_GAP_MS);
+    };
+    if (my === session && cam) tick();
+  }
 
   return {
     get running() { return running; },
 
-    /** Bật camera sau; gọi onCode(text) khi đọc được mã. Ném lỗi nếu không mở được camera. */
+    /**
+     * Bật camera sau; gọi onCode(text) khi đọc được mã. Ném lỗi nếu không mở được camera.
+     * Tải zxing-wasm cùng lúc với mở camera; không có zxing-wasm (mất mạng, hết giờ) thì dùng html5-qrcode.
+     */
     async start(onCode) {
       if (running) return;
-      await scanner.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          aspectRatio: 4 / 3,
-          qrbox: (w, h) => ({ width: Math.min(Math.round(w * 0.82), 340), height: Math.min(Math.round(h * 0.45), 170) })
-        },
-        (text) => onCode(text),
-        () => {} // mỗi khung hình chưa thấy mã thì bỏ qua
-      );
+      const my = ++session;
+      const el = document.getElementById(elementId);
+      if (!navigator.mediaDevices?.getUserMedia || !el) return startHtml5(onCode, my);
+      const reader = loadCameraReader();
+      reader.catch(() => {}); // lỗi xử lý bên dưới (kể cả khi getUserMedia ném trước)
+      const stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(), audio: false });
+      if (my !== session) { stopTracks(stream); return; }
+      let mod;
+      try {
+        mod = await reader;
+      } catch (e) {
+        console.warn("Không có zxing-wasm cho camera, dùng html5-qrcode:", e);
+        stopTracks(stream);
+        if (my !== session) return;
+        return startHtml5(onCode, my);
+      }
+      if (my !== session) { stopTracks(stream); return; }
+      const video = document.createElement("video");
+      video.setAttribute("playsinline", ""); // iPhone: phát ngay trong trang, không bật toàn màn hình
+      video.setAttribute("muted", "");
+      video.muted = true;
+      video.autoplay = true;
+      video.srcObject = stream;
+      const guide = document.createElement("div");
+      guide.className = "scan-guide"; // khung vẽ đúng vùng giải mã (cameraCrop: 92% × 60% giữa khung)
+      guide.setAttribute("aria-hidden", "true");
+      el.replaceChildren(video, guide);
+      cam = { stream, video, guide, timer: 0 };
+      mode = "zxing";
       running = true;
+      try {
+        await video.play();
+      } catch (e) {
+        // Tắt ngay sau khi bật: play() bị ngắt (AbortError), không phải lỗi.
+        if (my !== session) return;
+        if (e?.name !== "AbortError") { closeOwnCamera(); running = false; mode = null; throw e; }
+      }
+      if (my !== session) return;
+      decodeLoop(onCode, my, mod);
     },
 
     async stop() {
+      session++; // lượt đang chạy (đang mở camera / đang giải mã) không gọi onCode nữa
       if (!running) return;
-      try { await scanner.stop(); } catch { /* đã dừng */ }
+      if (mode === "zxing") closeOwnCamera();
+      else {
+        try { await scanner.stop(); } catch { /* đã dừng */ }
+      }
       running = false;
+      mode = null;
+    },
+
+    /** Khả năng + cài đặt của camera đang chạy ({ caps, settings }; null nếu không đọc được) cho nút đèn / phóng to. */
+    trackInfo() {
+      try {
+        if (mode === "zxing" && cam) {
+          const t = cam.stream.getVideoTracks()[0];
+          return { caps: t?.getCapabilities?.() ?? null, settings: t?.getSettings?.() ?? null };
+        }
+        if (mode === "html5") {
+          return { caps: scanner.getRunningTrackCapabilities(), settings: scanner.getRunningTrackSettings() };
+        }
+      } catch { /* trình duyệt không có getCapabilities (Safari cũ) */ }
+      return { caps: null, settings: null };
+    },
+
+    /** Đổi 1 cài đặt của camera đang chạy, ví dụ { torch: true } hoặc { zoom: 2 }. Ném lỗi nếu máy không nhận. */
+    async applyTrack(setting) {
+      if (mode === "zxing" && cam) return cam.stream.getVideoTracks()[0].applyConstraints({ advanced: [setting] });
+      if (mode === "html5") return scanner.applyVideoConstraints({ advanced: [setting] });
+      throw new Error("Camera chưa bật");
     },
 
     /**

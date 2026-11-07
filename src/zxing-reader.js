@@ -1,6 +1,6 @@
-// Bọc zxing-wasm (bản WebAssembly của zxing-cpp) cho nút "Chụp ảnh mã".
-// CHỈ được import động (await import("./zxing-reader.js")) khi người dùng chọn ảnh: mở trang không tải file này
-// và không tải file wasm (khoảng 0,9 MB).
+// Bọc zxing-wasm (bản WebAssembly của zxing-cpp) cho nút "Chụp ảnh mã" và "Bật camera" (từ đợt nhay-hon).
+// CHỈ được import động (await import("./zxing-reader.js")) khi người dùng chọn ảnh hoặc bấm "Bật camera": mở trang
+// không tải file này và không tải file wasm (khoảng 0,9 MB).
 // File wasm do Vite chép vào dist/assets (đuôi "?url" trả địa chỉ file của app). Thư viện mặc định tải wasm từ
 // CDN jsDelivr nên PHẢI ghi đè locateFile: wasm luôn lấy từ chính app (cùng tên miền, không CDN).
 import { prepareZXingModule, purgeZXingModule, readBarcodes } from "zxing-wasm/reader";
@@ -63,4 +63,24 @@ async function ready() {
 export async function readCodes(imageData) {
   await ready();
   return readBarcodes(imageData, READER_OPTIONS);
+}
+
+// "Bật camera" (đợt nhay-hon): mỗi khung hình chỉ là vùng giữa khung nhìn, đọc lại liên tục nên bỏ tryInvert
+// (mã in ngược màu rất hiếm trên bao bì) để mỗi lượt nhanh hơn; vẫn dò kỹ, thử xoay (mã dọc) và thu nhỏ.
+// maxNumberOfSymbols 4: lấy mọi mã trong khung để scanner.js chọn mã dài trước (pickCameraCode), vì mã ngắn
+// (UPC-E, EAN-8) đọc cùng lúc với mã dài thường là mảnh đọc nhầm của chính mã dài.
+const CAMERA_OPTIONS = { ...READER_OPTIONS, tryInvert: false, maxNumberOfSymbols: 4 };
+
+/**
+ * Nạp wasm trước cho "Bật camera" (cùng giới hạn ZXING_LOAD_TIMEOUT_MS và cùng cách xử lý lỗi như readCodes).
+ * Ném ZxingLoadError nếu không tải được / hết giờ để scanner.js bật camera bằng html5-qrcode.
+ */
+export async function prepareReader() {
+  await ready();
+}
+
+/** Đọc mã từ 1 khung hình camera (ImageData vùng giữa). Trả mảng kết quả của zxing-wasm (có thể rỗng). */
+export async function readCameraCodes(imageData) {
+  await ready();
+  return readBarcodes(imageData, CAMERA_OPTIONS);
 }
