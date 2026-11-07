@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Thử nhận ra sản phẩm</title>
+<!--
+  Trang THỬ riêng (đợt chup-mat-do), KHÔNG thuộc app và không có link nào từ app. Chụp mặt trước sản phẩm ->
+  PaddleOCR.js đọc chữ (PP-OCRv5 mobile det + latin rec, nối khung cùng hàng như 1a "paddlejs-rows") -> T1 (BM25 trên
+  danh mục chữ VN tĩnh chup-mat-do/danh-muc-vn.json, dữ liệu Open Food Facts, ODbL) -> tối đa 5 gợi ý.
+  Thư viện + model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định như test-ocr/web-ocr/assets.js chế độ cdn (như
+  ocr-thu.html); chỉ dùng wasm (như lúc đo 1a). Ảnh chỉ xử lý trong trình duyệt; trang KHÔNG gọi openfoodfacts.org.
+  Luật T1: chup-mat-do/t1.mjs (bản JS của test-ocr/chup-mat-do/lib.mjs + vn-data.mjs).
+-->
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d2329; --muted: #5d6873; --line: #d9dee3; --card: #f4f6f8;
+    --accent: #1f6feb; --accent-fg: #ffffff; --err: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121417; --fg: #e6e9ec; --muted: #9aa4ae; --line: #2c3238; --card: #1b1f24;
+      --accent: #4c8dff; --accent-fg: #0b0d10; --err: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 8px; }
+  h2 { font-size: 1.1rem; margin: 20px 0 8px; }
+  .small { color: var(--muted); font-size: 0.9rem; margin: 6px 0; }
+  .err { color: var(--err); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; align-items: center; }
+  .btn, button { appearance: none; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
+    border-radius: 8px; padding: 10px 14px; font: inherit; cursor: pointer; display: inline-block; }
+  .btn.secondary, button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .btn:has(input:disabled) { opacity: 0.5; cursor: default; }
+  ol.hits { padding-left: 1.4rem; }
+  ol.hits li { background: var(--card); border-radius: 8px; padding: 10px 12px; margin: 8px 0; overflow-wrap: anywhere; }
+  .name { font-weight: 600; }
+  .code { font-family: ui-monospace, Consolas, monospace; }
+  a { color: var(--accent); }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--card); padding: 10px; border-radius: 8px; font-size: 0.9rem; }
+  footer { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Thử nhận ra sản phẩm từ ảnh mặt trước</h1>
+  <p class="small">Trang thử riêng, không thuộc app. Ảnh chỉ xử lý trong máy, không gửi đi đâu. Lần đầu bấm
+    "Nhận ra sản phẩm" sẽ tải khoảng 18–20 MB thư viện và model (jsDelivr, HuggingFace), nên dùng Wi-Fi.</p>
+
+  <div class="row">
+    <label class="btn">Chụp ảnh<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden disabled></label>
+    <label class="btn secondary">Chọn từ thư viện<input type="file" id="pickLibrary" accept="image/*" hidden disabled></label>
+  </div>
+  <p id="imgInfo" class="small">Chưa chọn ảnh. Chụp thẳng, gần, đủ sáng mặt trước bao bì (chỗ có tên sản phẩm).</p>
+
+  <div class="row">
+    <button id="run" disabled>Nhận ra sản phẩm</button>
+  </div>
+  <p id="status" role="status" aria-live="polite">Đang mở trang…</p>
+
+  <section id="result" hidden>
+    <h2>Gợi ý (tối đa 5)</h2>
+    <p id="timing" class="small"></p>
+    <ol id="hits" class="hits"></ol>
+    <p id="noHit" class="small" hidden>Không tìm được sản phẩm nào khớp chữ đọc được. Thử chụp gần hơn, thẳng hơn.</p>
+    <h2>Chữ đọc được</h2>
+    <pre id="ocrText"></pre>
+    <p id="query" class="small"></p>
+  </section>
+
+  <footer class="small">
+    <p>Dữ liệu sản phẩm: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>,
+      giấy phép ODbL 1.0 (dữ liệu) – © Open Food Facts contributors. Danh mục tĩnh <span id="catInfo">…</span>.</p>
+    <p>Đọc chữ: PaddleOCR.js 0.4.2 (Apache-2.0), model PP-OCRv5_mobile_det và latin_PP-OCRv5_mobile_rec của
+      PaddlePaddle trên HuggingFace (Apache-2.0); onnxruntime-web 1.24.3 (MIT), OpenCV.js 4.10.0 (Apache-2.0),
+      clipper-lib 6.4.2 (Boost Software License), js-yaml 4.3.2 (MIT).</p>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // Thư viện + model: đúng bản cố định của test-ocr/web-ocr/assets.js chế độ cdn (test trang-thu.test.mjs kiểm).
+  var CDN = {
+    paddleSdk: "https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/dist/index.mjs",
+    ortWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.wasm.min.mjs",
+    ortWasmDir: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/",
+    opencv: "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
+    clipper: "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js",
+    jsYaml: "https://cdn.jsdelivr.net/npm/js-yaml@4.3.2/dist/js-yaml.mjs",
+    detOnnx: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
+    detYml: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.yml",
+    recOnnx: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.onnx",
+    recYml: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.yml"
+  };
+  var PRODUCT_PAGE = "https://world.openfoodfacts.org/product/"; // chỉ là link cho người dùng bấm, trang không gọi
+  var MAX_SIDE = 1600; // giống lúc đo 1a: thu cạnh dài về 1600 px
+
+  var $ = function (id) { return document.getElementById(id); };
+  var msg = function (e) { return e && e.message ? e.message : String(e); };
+  function status(t, isErr) {
+    $("status").textContent = t;
+    $("status").className = isErr ? "err" : "";
+  }
+
+  // Chỉ dùng wasm: SDK của PaddleOCR lúc khởi tạo luôn gọi navigator.gpu.requestAdapter() (có thể treo) -> giấu
+  // navigator.gpu trong trang này trước khi nạp SDK (như ocr-thu.html chế độ "Chỉ dùng wasm").
+  try { Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true }); } catch (e) { /* bỏ qua */ }
+
+  // Import map: SDK import tên gói trần -> URL CDN; opencv.js / clipper.js không có bản ES module -> 2 module nhỏ (blob)
+  // nạp bằng thẻ <script>. Thêm ngay khi mở trang, trước mọi lần import.
+  function moduleUrl(code) { return URL.createObjectURL(new Blob([code], { type: "text/javascript" })); }
+  var loadScript = "function loadScript(src) { return new Promise(function (ok, fail) {" +
+    " var s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous';" +
+    " s.onload = function () { ok(); }; s.onerror = function () { fail(new Error('Không tải được ' + src)); };" +
+    " document.head.appendChild(s); }); }\n";
+  var opencvShim = loadScript + "await loadScript(" + JSON.stringify(CDN.opencv) + ");\n" +
+    "const started = Date.now();\n" +
+    "while (!(globalThis.cv && globalThis.cv.Mat)) {\n" +
+    "  if (Date.now() - started > 120000) throw new Error('opencv.js không khởi động sau 120 giây');\n" +
+    "  await new Promise(function (r) { setTimeout(r, 20); });\n}\n" +
+    "export default globalThis.cv;\n";
+  var clipperShim = loadScript + "await loadScript(" + JSON.stringify(CDN.clipper) + ");\nexport default globalThis.ClipperLib;\n";
+  var map = document.createElement("script");
+  map.type = "importmap";
+  map.textContent = JSON.stringify({
+    imports: {
+      "@paddleocr/paddleocr-js": CDN.paddleSdk,
+      "onnxruntime-web": CDN.ortWasm,
+      "js-yaml": CDN.jsYaml,
+      "@techstark/opencv-js": moduleUrl(opencvShim),
+      "clipper-lib": moduleUrl(clipperShim)
+    }
+  });
+  document.head.appendChild(map);
+
+  async function fetchBytes(url) {
+    var r = await fetch(url);
+    if (!r.ok) throw new Error("Tải " + url + " lỗi HTTP " + r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  async function main() {
+    if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports("importmap"))) {
+      throw new Error("Trình duyệt này chưa hỗ trợ import map (cần Safari 16.4+ / Chrome 89+).");
+    }
+    var t1 = await import("./chup-mat-do/t1.mjs");
+    var tar = await import("./chup-mat-do/tar.mjs");
+    status("Đang tải danh mục sản phẩm…");
+    var cat = await (await fetch("./chup-mat-do/danh-muc-vn.json")).json();
+    var products = cat.products;
+    var index = t1.buildBm25(products);
+    $("catInfo").textContent = products.length + " sản phẩm, xuất ngày " + cat.meta.ngayXuat;
+
+    var canvas = null;
+    var paddle = null; // { ocr, loadSeconds }
+    var busy = false;
+    var state = { ready: true, runs: [] };
+    window.__chupMatDo = state;
+
+    function setBusy(b) {
+      busy = b;
+      $("run").disabled = b || !canvas;
+      $("pickCamera").disabled = b;
+      $("pickLibrary").disabled = b;
+    }
+
+    async function loadImage(file) {
+      var url = URL.createObjectURL(file);
+      try {
+        var img = new Image();
+        img.src = url;
+        await img.decode();
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(w * scale));
+        c.height = Math.max(1, Math.round(h * scale));
+        var ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        return { canvas: c, size: w + "×" + h, scaled: c.width + "×" + c.height };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    async function onPick(ev) {
+      var file = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!file || busy) return;
+      setBusy(true);
+      status("Đang chuẩn bị ảnh…");
+      try {
+        if (canvas) canvas.width = 0;
+        canvas = null;
+        var r = await loadImage(file);
+        canvas = r.canvas;
+        $("imgInfo").textContent = "Ảnh: " + (file.name || "ảnh") + ", gốc " + r.size + ", sau thu nhỏ " + r.scaled + " px.";
+        status("Ảnh sẵn sàng. Bấm \"Nhận ra sản phẩm\".");
+      } catch (e) {
+        status("Không mở được ảnh này: " + msg(e), true);
+      } finally {
+        setBusy(false);
+      }
+    }
+    $("pickCamera").addEventListener("change", onPick);
+    $("pickLibrary").addEventListener("change", onPick);
+
+    async function loadPaddle() {
+      var t0 = performance.now();
+      var mod = await import("@paddleocr/paddleocr-js");
+      var tarFetch = async function (url) {
+        if (url === "tar:det" || url === "tar:rec") {
+          var k = url.slice(4);
+          var parts = await Promise.all([fetchBytes(CDN[k + "Onnx"]), fetchBytes(CDN[k + "Yml"])]);
+          return new Response(tar.makeTar([{ name: "inference.onnx", data: parts[0] }, { name: "inference.yml", data: parts[1] }]));
+        }
+        return fetch(url);
+      };
+      var ocr = await mod.PaddleOCR.create({
+        textDetectionModelName: "PP-OCRv5_mobile_det",
+        textDetectionModelAsset: { url: "tar:det" },
+        textRecognitionModelName: "latin_PP-OCRv5_mobile_rec",
+        textRecognitionModelAsset: { url: "tar:rec" },
+        ortOptions: { backend: "wasm", wasmPaths: CDN.ortWasmDir, numThreads: 1, proxy: false },
+        fetch: tarFetch
+      });
+      return { ocr: ocr, loadSeconds: (performance.now() - t0) / 1000 };
+    }
+
+    function renderHits(hits, info) {
+      var ol = $("hits");
+      ol.textContent = "";
+      hits.forEach(function (h) {
+        var p = products[h.i];
+        var li = document.createElement("li");
+        var name = document.createElement("div");
+        name.className = "name";
+        name.textContent = p.name || p.text;
+        var brand = document.createElement("div");
+        brand.className = "small";
+        brand.textContent = "Thương hiệu: " + (p.brand || "chưa có dữ liệu");
+        var code = document.createElement("div");
+        code.append("Mã: ");
+        var cs = document.createElement("span");
+        cs.className = "code";
+        cs.textContent = p.code;
+        code.appendChild(cs);
+        var row = document.createElement("div");
+        row.className = "row";
+        var copy = document.createElement("button");
+        copy.className = "secondary";
+        copy.type = "button";
+        copy.textContent = "Chép mã";
+        copy.addEventListener("click", async function () {
+          try { await navigator.clipboard.writeText(p.code); copy.textContent = "Đã chép"; }
+          catch (e) { copy.textContent = "Không chép được, chép tay: " + p.code; }
+        });
+        var a = document.createElement("a");
+        a.href = PRODUCT_PAGE + encodeURIComponent(p.code);
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = "Trang sản phẩm trên Open Food Facts";
+        row.appendChild(copy);
+        row.appendChild(a);
+        var note = document.createElement("div");
+        note.className = "small";
+        note.textContent = "App sẽ mở theo mã này (như khi quét mã vạch).";
+        li.appendChild(name);
+        li.appendChild(brand);
+        li.appendChild(code);
+        li.appendChild(row);
+        li.appendChild(note);
+        ol.appendChild(li);
+      });
+      $("noHit").hidden = hits.length > 0;
+      $("timing").textContent = "Đọc chữ " + info.ocrSeconds.toFixed(1) + " giây" +
+        (info.loadSeconds != null ? " (tải PaddleOCR lần đầu " + info.loadSeconds.toFixed(1) + " giây)" : "") +
+        ", tìm " + info.searchMs.toFixed(1) + " ms, " + info.lines + " dòng chữ (" + info.boxes + " khung).";
+      $("ocrText").textContent = info.text || "(không đọc được chữ nào)";
+      $("query").textContent = "Từ dùng để tìm: " + (info.query || "(không có)");
+      $("result").hidden = false;
+    }
+
+    async function run() {
+      if (busy || !canvas) return;
+      setBusy(true);
+      try {
+        var fresh = false;
+        if (!paddle) {
+          status("Đang tải PaddleOCR (thư viện + model, lần đầu ~18–20 MB)…");
+          paddle = await loadPaddle();
+          fresh = true;
+        }
+        status("Đang đọc chữ…");
+        var t0 = performance.now();
+        var res = (await paddle.ocr.predict(canvas))[0];
+        var ocrSeconds = (performance.now() - t0) / 1000;
+        var lines = t1.rowLineInfo(res.items);
+        var t2 = performance.now();
+        var q = t1.t1QueryFromLines(lines);
+        var hits = q.length ? t1.bm25Search(index, q, 5) : [];
+        var searchMs = performance.now() - t2;
+        var info = {
+          ocrSeconds: ocrSeconds, loadSeconds: fresh ? paddle.loadSeconds : null, searchMs: searchMs,
+          lines: lines.length, boxes: res.items.length, text: lines.map(function (l) { return l.text; }).join("\n"),
+          query: q.join(" "), top5: hits.map(function (h) { return h.code; })
+        };
+        state.runs.push(info);
+        renderHits(hits, info);
+        status("Xong. Chọn đúng sản phẩm trong danh sách (nếu có).");
+      } catch (e) {
+        status("Lỗi: " + msg(e), true);
+        state.runs.push({ error: msg(e) });
+      } finally {
+        setBusy(false);
+      }
+    }
+    $("run").addEventListener("click", run);
+
+    setBusy(false);
+    status("Sẵn sàng. Chụp hoặc chọn 1 ảnh mặt trước sản phẩm.");
+  }
+
+  main().catch(function (e) {
+    status("Không mở được trang thử: " + msg(e), true);
+    window.__chupMatDo = { ready: false, error: msg(e) };
+  });
+})();
+</script>
+</body>
+</html>
