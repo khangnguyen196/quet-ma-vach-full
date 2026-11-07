@@ -145,23 +145,24 @@ describe("pickCameraCode / confirmCode: tránh đọc nhầm mã ngắn khi qué
   test("BarcodeDetector cũng ưu tiên mã dài", () => {
     assert.equal(detectorCode([{ format: "upc_e", rawValue: "01234565" }, { format: "ean_13", rawValue: "8934563163150" }]), "8934563163150");
   });
+  // Tham số thứ 4 (frame) = số thứ tự khung đã giải mã trong decodeLoop (tăng 1 mỗi khung, kể cả khung không ra mã).
   test("mã 12–13 số nhận ngay; mã 8 số phải đọc ra 2 lần (không cần liền nhau) trong 1 giây mới nhận", () => {
-    let s = confirmCode(null, "8934563163150", 0);
+    let s = confirmCode(null, "8934563163150", 0, 1);
     assert.equal(s.accept, "8934563163150");
-    s = confirmCode(null, "96385074", 0);
+    s = confirmCode(null, "96385074", 0, 1);
     assert.equal(s.accept, null); // mã 8 số đọc 1 lần: chưa nhận
-    s = confirmCode(s.state, null, 120); // khung không thấy mã: giữ mã chờ
+    s = confirmCode(s.state, null, 120, 2); // khung không thấy mã: giữ mã chờ
     assert.equal(s.accept, null);
-    s = confirmCode(s.state, "96385074", 240);
+    s = confirmCode(s.state, "96385074", 240, 3);
     assert.equal(s.accept, "96385074");
   });
   test("mã 8 số khác lần trước → chờ lại từ đầu; mã dài tới thì nhận mã dài", () => {
-    let s = confirmCode(null, "96385074", 0);
-    s = confirmCode(s.state, "19345888", 120);
+    let s = confirmCode(null, "96385074", 0, 1);
+    s = confirmCode(s.state, "19345888", 120, 2);
     assert.equal(s.accept, null);
-    s = confirmCode(s.state, "96385074", 240);
+    s = confirmCode(s.state, "96385074", 240, 3);
     assert.equal(s.accept, null);
-    assert.equal(confirmCode(s.state, "8934588022111", 360).accept, "8934588022111");
+    assert.equal(confirmCode(s.state, "8934588022111", 360, 4).accept, "8934588022111");
   });
 });
 
@@ -172,42 +173,70 @@ describe("confirmCode: mã 8 số đang chờ hết hạn sau CONFIRM_WINDOW_MS 
     assert.equal(CONFIRM_WINDOW_MS, 1000);
   });
   test("(a) đọc lần 2 sau 500 ms → nhận", () => {
-    const s = confirmCode(null, "19345888", 10000);
+    const s = confirmCode(null, "19345888", 10000, 1);
     assert.equal(s.accept, null);
-    assert.equal(confirmCode(s.state, "19345888", 10500).accept, "19345888");
+    assert.equal(confirmCode(s.state, "19345888", 10500, 5).accept, "19345888");
   });
-  test("(b) đọc lần 2 sau 1500 ms → không nhận, mã chờ mới là lần này", () => {
-    const s1 = confirmCode(null, "19345888", 10000);
-    const s2 = confirmCode(s1.state, "19345888", 11500);
+  test("(b) đọc lần 2 sau 1500 ms (cách 12 khung) → không nhận, mã chờ mới là lần này", () => {
+    const s1 = confirmCode(null, "19345888", 10000, 1);
+    const s2 = confirmCode(s1.state, "19345888", 11500, 13);
     assert.equal(s2.accept, null);
-    assert.deepEqual(s2.state, { code: "19345888", at: 11500 });
+    assert.deepEqual(s2.state, { code: "19345888", at: 11500, frame: 13 });
   });
   test("(c) lần 3 trong 1 giây sau (b) → nhận", () => {
-    const s1 = confirmCode(null, "19345888", 10000);
-    const s2 = confirmCode(s1.state, "19345888", 11500);
-    const s3 = confirmCode(s2.state, "19345888", 12300);
+    const s1 = confirmCode(null, "19345888", 10000, 1);
+    const s2 = confirmCode(s1.state, "19345888", 11500, 13);
+    const s3 = confirmCode(s2.state, "19345888", 12300, 20);
     assert.equal(s3.accept, "19345888");
     assert.equal(s3.state, null);
   });
   test("(d) khung trống ở giữa không xóa mã chờ nhưng vẫn hết hạn theo giờ", () => {
-    const s1 = confirmCode(null, "19345888", 0);
-    const blank = confirmCode(s1.state, null, 900);
+    const s1 = confirmCode(null, "19345888", 0, 0);
+    const blank = confirmCode(s1.state, null, 900, 8);
     assert.equal(blank.accept, null);
-    assert.deepEqual(blank.state, { code: "19345888", at: 0 }); // giữ nguyên, không dời mốc giờ
-    assert.equal(confirmCode(blank.state, "19345888", 950).accept, "19345888"); // còn trong 1 giây kể từ lần đầu
-    const late = confirmCode(confirmCode(s1.state, null, 900).state, "19345888", 15000); // 15 giây sau
+    assert.deepEqual(blank.state, { code: "19345888", at: 0, frame: 0 }); // giữ nguyên, không dời mốc giờ / khung
+    assert.equal(confirmCode(blank.state, "19345888", 950, 9).accept, "19345888"); // còn trong 1 giây kể từ lần đầu
+    const late = confirmCode(confirmCode(s1.state, null, 900, 8).state, "19345888", 15000, 120); // 15 giây sau
     assert.equal(late.accept, null);
-    assert.deepEqual(late.state, { code: "19345888", at: 15000 });
+    assert.deepEqual(late.state, { code: "19345888", at: 15000, frame: 120 });
   });
   test("(e) mã 13 số nhận ngay và xóa mã chờ", () => {
-    const s1 = confirmCode(null, "19345888", 0);
-    const s2 = confirmCode(s1.state, "8934588022111", 100);
+    const s1 = confirmCode(null, "19345888", 0, 1);
+    const s2 = confirmCode(s1.state, "8934588022111", 100, 2);
     assert.equal(s2.accept, "8934588022111");
     assert.equal(s2.state, null);
   });
-  test("(f) đúng biên 1000 ms → nhận; 1001 ms → không", () => {
-    const s1 = confirmCode(null, "96385074", 2000);
-    assert.equal(confirmCode(s1.state, "96385074", 3000).accept, "96385074");
-    assert.equal(confirmCode(s1.state, "96385074", 3001).accept, null);
+  test("(f) đúng biên 1000 ms → nhận; 1001 ms → không (cách 8 khung)", () => {
+    const s1 = confirmCode(null, "96385074", 2000, 1);
+    assert.equal(confirmCode(s1.state, "96385074", 3000, 9).accept, "96385074");
+    assert.equal(confirmCode(s1.state, "96385074", 3001, 9).accept, null);
+  });
+});
+
+describe("confirmCode: mã 8 số ở 2 khung giải mã liền nhau được nhận (máy chậm)", () => {
+  // Lý do (code-reviewer, nhay-hon vòng 2): giờ lấy SAU khi giải mã xong + nghỉ 120 ms; máy chậm giải mã 1 khung
+  // hơn ~880 ms thì 2 lần đọc luôn cách nhau quá 1 giây → mã EAN-8 không bao giờ được nhận.
+  test("(g) frame 5 lúc 0 ms, đúng mã đó ở frame 6 lúc 1500 ms → nhận", () => {
+    const s1 = confirmCode(null, "96385074", 0, 5);
+    assert.equal(s1.accept, null);
+    assert.deepEqual(s1.state, { code: "96385074", at: 0, frame: 5 });
+    const s2 = confirmCode(s1.state, "96385074", 1500, 6);
+    assert.equal(s2.accept, "96385074");
+    assert.equal(s2.state, null);
+  });
+  test("(h) frame 5, frame 6 không có mã, frame 7 đúng mã lúc 1500 ms → không nhận, mã chờ mới là lần này", () => {
+    const s1 = confirmCode(null, "96385074", 0, 5);
+    const blank = confirmCode(s1.state, null, 750, 6);
+    assert.equal(blank.accept, null);
+    assert.deepEqual(blank.state, { code: "96385074", at: 0, frame: 5 });
+    const s3 = confirmCode(blank.state, "96385074", 1500, 7);
+    assert.equal(s3.accept, null);
+    assert.deepEqual(s3.state, { code: "96385074", at: 1500, frame: 7 });
+  });
+  test("(i) frame 5 mã \"19345888\", frame 6 mã 8 số khác lúc 1500 ms → không nhận", () => {
+    const s1 = confirmCode(null, "19345888", 0, 5);
+    const s2 = confirmCode(s1.state, "96385074", 1500, 6);
+    assert.equal(s2.accept, null);
+    assert.deepEqual(s2.state, { code: "96385074", at: 1500, frame: 6 });
   });
 });
