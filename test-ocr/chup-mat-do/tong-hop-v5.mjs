@@ -93,6 +93,14 @@ if (tc) {
     const q = o.requests;
     p(`- ${b}: ${q ? `${q.total} request, host: ${q.hosts.join(", ")}; POST: ${q.post.length}; tới openfoodfacts.org: ${q.openfoodfacts.length}; host ngoài cùng tên miền + jsDelivr / HuggingFace: ${q.foreign.length ? q.foreign.join(", ") : "không"}` : "không có số request"}; index.html của app: ${o.app ? `HTTP ${o.app.status}, tiêu đề "${o.app.title}", ${o.app.hasBody ? "có nội dung" : "TRỐNG"}, lỗi trang ${o.app.pageErrors.length}` : "–"}${o.error ? `; LỖI: ${o.error}` : ""}${o.consoleErrors?.length ? `; lỗi console trang thử: ${o.consoleErrors.slice(0, 3).join(" | ")}` : ""}.`);
   }
+  const t1 = rj(path.join(K, "t1.json"));
+  if (t1) {
+    for (const [b, o] of Object.entries(tc.browsers)) {
+      const ref = t1.tools[`1a-${b}`]?.items || [];
+      const same = o.runs.filter((r) => { const i = ref.find((x) => x.ma === r.code); return i && !r.error && i.top5.join(",") === (r.top5 || []).join(","); }).length;
+      p(`- ${b}: top5 của trang trùng top5 T1 của 1a-${b} đã đo (t1.json) ở ${same}/${o.runs.length} ảnh.`);
+    }
+  }
   p("- WebKit = Playwright WebKit trên Windows, không lớp thay; Safari iPhone thật cần thử tay (vòng 6–7 trên Pages).");
 } else p("- Chưa chạy trang-thu-check.");
 p();
