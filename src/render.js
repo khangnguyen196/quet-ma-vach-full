@@ -104,9 +104,64 @@ const metaRow = (label, value) =>
 const infoRow = (label, value) =>
   value ? `<tr><td>${esc(label)}</td><td>${esc(value)}</td></tr>` : "";
 
+// ---- Khi Open Food Facts thiếu thông tin (đợt nhay-hon) ----
+
+/** Tên miền ảnh của Open Food Facts được hiện ảnh nhãn. */
+const LABEL_IMAGE_HOSTS = ["images.openfoodfacts.org", "static.openfoodfacts.org"];
+
+/**
+ * Địa chỉ ảnh nhãn (thành phần, bảng dinh dưỡng) dùng được, hoặc "" nếu không dùng được.
+ * Chỉ nhận: new URL() đọc được, https:, tên miền đúng images.openfoodfacts.org hoặc static.openfoodfacts.org
+ * (không nhận tên miền con lạ, không tên đăng nhập, không cổng riêng). Trả địa chỉ đã chuẩn hóa (url.href).
+ * Ví dụ: labelImageUrl("https://images.openfoodfacts.org/a.jpg") → "https://images.openfoodfacts.org/a.jpg";
+ * labelImageUrl("http://images.openfoodfacts.org/a.jpg") → "".
+ */
+export function labelImageUrl(value) {
+  if (typeof value !== "string" || !value) return "";
+  let url;
+  try { url = new URL(value); } catch { return ""; }
+  if (url.protocol !== "https:" || !LABEL_IMAGE_HOSTS.includes(url.hostname)) return "";
+  if (url.username || url.password || url.port) return "";
+  return url.href;
+}
+
+/**
+ * Ảnh nhãn khi chưa có chữ: câu "Chưa ai nhập chữ, xem ảnh nhãn" + ảnh bấm mở tab mới (để phóng to).
+ * Ảnh tải lỗi: ẩn cả khối, hiện câu thiếu dữ liệu cũ (fallbackHtml) ngay sau nó.
+ */
+function labelPhoto(url, alt, fallbackHtml) {
+  const u = esc(url);
+  return `<div class="label-photo"><p class="label-photo-note">Chưa ai nhập chữ, xem ảnh nhãn (bấm vào ảnh để phóng to).</p>
+<a href="${u}" target="_blank" rel="noopener"><img src="${u}" loading="lazy" alt="${esc(alt)}" onerror="var b=this.closest('.label-photo');b.hidden=true;b.nextElementSibling.hidden=false"></a></div>${fallbackHtml.replace(/^<p /, "<p hidden ")}`;
+}
+
+/**
+ * Khối "Bổ sung trên Open Food Facts" khi thiếu tên, số dinh dưỡng hoặc thành phần; đủ cả 3 thì "".
+ * Link mở trang sản phẩm trên Open Food Facts (người dùng đăng nhập ở đó để sửa) + nút Chép mã như khung
+ * không tìm thấy (cùng class copy-area để main.js tìm vùng báo .copy-msg).
+ */
+function renderContribute(p) {
+  const missing = [];
+  if (p.name === NO_NAME) missing.push("tên sản phẩm");
+  if (!p.hasNutriments) missing.push("số dinh dưỡng");
+  if (!p.ingredients) missing.push("thành phần");
+  if (!missing.length) return "";
+  const c = esc(p.code);
+  return `<div class="contribute-box copy-area"><h3>Bổ sung trên Open Food Facts</h3>
+<p>Open Food Facts còn thiếu ${esc(missing.join(", "))} của sản phẩm này. Bạn có thể tự bổ sung trên trang sản phẩm (cần tài khoản Open Food Facts).</p>
+<p class="contribute"><a class="btn" href="https://world.openfoodfacts.org/product/${esc(encodeURIComponent(p.code))}" target="_blank" rel="noopener">Bổ sung trên Open Food Facts</a>
+<button type="button" class="btn copy-code" data-code="${c}">Chép mã</button></p>
+<p class="copy-msg" role="status" aria-live="polite"></p></div>`;
+}
+
 export function renderProduct(p) {
   // Chỉ nhận ảnh https:// (chặn "javascript:", "http://"…); không đúng thì coi như không có ảnh.
   const hasImage = typeof p.image === "string" && p.image.startsWith("https://");
+  // Ảnh nhãn chỉ hiện khi chưa có chữ và địa chỉ hợp lệ (labelImageUrl)
+  const ingredientsPhoto = p.ingredients ? "" : labelImageUrl(p.imageIngredients);
+  const nutritionPhoto = p.hasNutriments ? "" : labelImageUrl(p.imageNutrition);
+  const noNutrition = '<p class="src">Sản phẩm này chưa được ai nhập bảng dinh dưỡng.</p>';
+  const noIngredients = '<p class="empty">Chưa có dữ liệu thành phần.</p>';
 
   const rows = NUTRIENT_ROWS.map(([key, label, unit, cls]) => {
     const v = p.nutriments[key];
@@ -151,8 +206,9 @@ export function renderProduct(p) {
     <div><span class="k">Mức chế biến (NOVA)</span><br><span class="nova-chip nova-${p.nova || 0}">${p.nova || "?"}</span><small>${esc(p.nova ? NOVA_VI[p.nova] : "Chưa có dữ liệu")}</small></div>
   </div>
   <table class="facts"><caption>Giá trị dinh dưỡng trên 100 g</caption><tbody>${rows}</tbody></table>
-  ${!p.hasNutriments ? '<p class="src">Sản phẩm này chưa được ai nhập bảng dinh dưỡng.</p>' : ""}
-  <section class="block"><h3>Thành phần</h3>${p.ingredients ? `<p>${esc(p.ingredients)}</p>` : '<p class="empty">Chưa có dữ liệu thành phần.</p>'}</section>
+  ${p.hasNutriments ? "" : nutritionPhoto ? labelPhoto(nutritionPhoto, "Ảnh bảng dinh dưỡng trên bao bì", noNutrition) : noNutrition}
+  <section class="block"><h3>Thành phần</h3>${p.ingredients ? `<p>${esc(p.ingredients)}</p>`
+    : ingredientsPhoto ? labelPhoto(ingredientsPhoto, "Ảnh thành phần trên bao bì", noIngredients) : noIngredients}</section>
   <section class="block"><h3>Chất gây dị ứng</h3>
     ${p.hasAllergenData ? `<div class="chips">${chips(p.allergens)}</div>` : `<p class="empty">${esc(ALLERGY_NO_DATA)}</p>`}
     ${p.traces.length ? `<p class="src">Có thể lẫn vết: ${esc(p.traces.join(", "))}</p>` : ""}
@@ -162,6 +218,7 @@ export function renderProduct(p) {
   </section>
   ${extra ? `<section class="block"><h3>Xuất xứ và bảo quản</h3><table class="info"><tbody>${extra}</tbody></table></section>` : ""}
   ${p.ecoscore ? `<p class="src">Green-Score (tác động môi trường): ${p.ecoscore.toUpperCase()}</p>` : ""}
+  ${renderContribute(p)}
 </article>`;
 }
 
@@ -176,7 +233,7 @@ export const OFF_ADD_URL = "https://world.openfoodfacts.org/cgi/product.pl?type=
 
 export function renderNotFound(code) {
   const c = esc(code);
-  return `<div class="notfound"><p class="big">Chưa có mã ${c} trong Open Food Facts</p>
+  return `<div class="notfound copy-area"><p class="big">Chưa có mã ${c} trong Open Food Facts</p>
 <p>Sản phẩm này chưa được ai thêm vào. Bạn có thể tự thêm (cần tài khoản Open Food Facts và chụp bao bì; trên trang thêm sản phẩm, nhập mã ${c}), hoặc thử mã khác.</p>
 <p class="contribute"><a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">Góp sản phẩm này lên Open Food Facts</a>
 <button type="button" class="btn copy-code" data-code="${c}">Chép mã</button></p>

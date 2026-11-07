@@ -14,7 +14,9 @@ const FIELDS = [
   "image_front_url", "nutriscore_grade", "nova_group", "ecoscore_grade",
   "ingredients_text", "ingredients_text_vi", "ingredients_text_en",
   "allergens_tags", "traces_tags", "additives_tags", "nutriments",
-  "origins", "manufacturing_places", "countries", "conservation_conditions", "preparation", "labels", "packaging"
+  "origins", "manufacturing_places", "countries", "conservation_conditions", "preparation", "labels", "packaging",
+  // Ảnh nhãn (thành phần, bảng dinh dưỡng): hiện khi Open Food Facts có ảnh mà chưa ai nhập chữ (đợt nhay-hon)
+  "image_ingredients_url", "image_nutrition_url"
 ].join(",");
 
 export const ALLERGEN_VI = {
@@ -267,6 +269,9 @@ export function normalize(p, code) {
     quantity: str(p.quantity),
     category: cats.length ? cats[cats.length - 1] : "",
     image: str(p.image_front_url),
+    // Ảnh nhãn chụp trên bao bì; render.js chỉ hiện khi địa chỉ hợp lệ (labelImageUrl) và chưa có chữ
+    imageIngredients: str(p.image_ingredients_url),
+    imageNutrition: str(p.image_nutrition_url),
     nutriscore: grade(p.nutriscore_grade),
     nova: num(p.nova_group),
     ecoscore: grade(p.ecoscore_grade),

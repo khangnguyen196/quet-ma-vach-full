@@ -122,7 +122,8 @@ fileInput.addEventListener("change", async (ev) => {
   }
 });
 
-// ---- Chép mã (nút cạnh "Góp sản phẩm này lên Open Food Facts", màn tra cứu và cột So sánh) ----
+// ---- Chép mã (nút cạnh "Góp sản phẩm này lên Open Food Facts" ở màn tra cứu và cột So sánh, nút cạnh
+// "Bổ sung trên Open Food Facts" dưới sản phẩm thiếu thông tin) ----
 // Trang thêm sản phẩm của Open Food Facts không điền sẵn mã, nên cho chép mã để dán vào đó.
 /** Chép bằng cách cũ: chọn chữ trong ô rồi execCommand("copy"). Trả true nếu trình duyệt báo đã chép. */
 function copyBySelection(input) {
@@ -137,7 +138,8 @@ document.querySelector("main").addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button.copy-code[data-code]");
   if (!btn) return;
   const code = btn.dataset.code;
-  const out = btn.closest(".notfound")?.querySelector(".copy-msg");
+  // .copy-area: khung không tìm thấy (renderNotFound) và khối Bổ sung (renderProduct) đều có class này
+  const out = btn.closest(".copy-area")?.querySelector(".copy-msg");
   if (!out) return;
   try {
     if (!navigator.clipboard?.writeText) throw new Error("Trình duyệt không có navigator.clipboard");
