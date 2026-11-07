@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Thử OCR bao bì</title>
+<!--
+  Trang THỬ riêng (đợt ocr-c), KHÔNG thuộc app và không có link nào từ app. Chỉ để chủ dự án thử trên điện thoại thật:
+  PaddleOCR.js (PP-OCRv5 mobile det + latin rec, nối khung cùng hàng như công cụ paddlejs-rows-* đã đo) và tesseract.js
+  (vie+eng, để so). Thư viện + model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định như test-ocr/web-ocr/assets.js
+  chế độ cdn; không vào bundle của app. Ảnh chỉ xử lý trong trình duyệt, không gửi đi đâu.
+  Luật regex: public/ocr-thu/regex.mjs (bản JS của extract_regex trong test-ocr/run_extract.py).
+-->
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d2329; --muted: #5d6873; --line: #d9dee3; --card: #f4f6f8;
+    --accent: #1f6feb; --accent-fg: #ffffff; --warn-bg: #fff4d6; --warn-fg: #6b4a00; --err: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121417; --fg: #e6e9ec; --muted: #9aa4ae; --line: #2c3238; --card: #1b1f24;
+      --accent: #4c8dff; --accent-fg: #0b0d10; --warn-bg: #3a2f10; --warn-fg: #ffd98a; --err: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 8px; }
+  h2 { font-size: 1.1rem; margin: 20px 0 8px; }
+  h3 { font-size: 1rem; margin: 16px 0 6px; }
+  .small { color: var(--muted); font-size: 0.9rem; margin: 6px 0; }
+  .warn { background: var(--warn-bg); color: var(--warn-fg); padding: 10px 12px; border-radius: 8px; margin: 12px 0; }
+  .err { color: var(--err); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .btn, button { appearance: none; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
+    border-radius: 8px; padding: 10px 14px; font: inherit; cursor: pointer; display: inline-block; }
+  .btn.secondary, button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  th { width: 42%; color: var(--muted); font-weight: 500; }
+  td.empty { color: var(--muted); font-style: italic; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--card); padding: 10px; border-radius: 8px; font-size: 0.9rem; }
+  section.result { border-top: 2px solid var(--line); margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Thử đọc chữ bao bì (OCR)</h1>
+  <p class="small">Trang thử riêng, không thuộc app. Ảnh chỉ xử lý trong máy, không gửi đi đâu. Lần đầu bấm "Đọc" sẽ tải
+    khoảng 18–20 MB thư viện và model (jsDelivr, HuggingFace), nên dùng Wi-Fi.</p>
+  <div id="warn" class="warn" hidden></div>
+
+  <label class="check"><input type="checkbox" id="wasmOnly"> Chỉ dùng wasm (không dùng WebGPU; đổi thì trang tải lại, chọn trước khi chọn ảnh)</label>
+  <p id="env" class="small">Đang dò WebGPU…</p>
+
+  <div class="row">
+    <label class="btn">Chụp ảnh<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden></label>
+    <label class="btn secondary">Chọn từ thư viện<input type="file" id="pickLibrary" accept="image/*" hidden></label>
+  </div>
+  <p id="imgInfo" class="small">Chưa chọn ảnh. Nên chụp thẳng, gần, đủ sáng một mặt bao bì (bảng dinh dưỡng, thành phần…).</p>
+
+  <div class="row">
+    <button id="runPaddle" disabled>Đọc bằng PaddleOCR</button>
+    <button id="runTess" class="secondary" disabled>Đọc bằng tesseract.js (để so)</button>
+  </div>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <div id="results"></div>
+
+  <div class="row">
+    <button id="copy" class="secondary" disabled>Chép kết quả</button>
+    <span id="copied" class="small"></span>
+  </div>
+  <textarea id="copyBox" rows="6" style="width:100%" hidden readonly></textarea>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // Thư viện + model: đúng bản cố định của test-ocr/web-ocr/assets.js chế độ cdn (test ocr-thu.test.mjs kiểm).
+  var CDN = {
+    paddleSdk: "https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/dist/index.mjs",
+    ortWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.wasm.min.mjs",
+    ortAll: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.min.mjs",
+    ortWasmDir: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/",
+    opencv: "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
+    clipper: "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js",
+    jsYaml: "https://cdn.jsdelivr.net/npm/js-yaml@4.3.2/dist/js-yaml.mjs",
+    detOnnx: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
+    detYml: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.yml",
+    recOnnx: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.onnx",
+    recYml: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.yml",
+    tesseract: "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.esm.min.js",
+    tesseractWorker: "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/worker.min.js",
+    tesseractCore: "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0",
+    tessLangs: [
+      { code: "vie", url: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/vie@1.0.0/4.0.0_best_int/vie.traineddata.gz" },
+      { code: "eng", url: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/eng.traineddata.gz" }
+    ]
+  };
+  var MAX_SIDE = 1600; // giống lúc đo: thu cạnh dài về 1600 px
+  var GPU_TIMEOUT_MS = 3000;
+  var FLAG = "ocr-thu-dang-doc"; // sessionStorage: đặt trước khi đọc, xóa khi xong; còn cờ khi mở lại = trang bị đóng giữa chừng
+
+  var $ = function (id) { return document.getElementById(id); };
+  var msg = function (e) { return e && e.message ? e.message : String(e); };
+
+  function warn(text) {
+    var w = $("warn");
+    w.textContent = text;
+    w.hidden = false;
+  }
+
+  // 1. Lần trước trang bị đóng khi đang đọc?
+  try {
+    var left = sessionStorage.getItem(FLAG);
+    if (left) {
+      warn("Trang vừa bị đóng giữa chừng, có thể do thiếu bộ nhớ (lần trước đang: " + left + "). " +
+        "Thử đóng bớt tab / ứng dụng khác, chọn \"Chỉ dùng wasm\", hoặc chụp ảnh gần hơn rồi đọc lại.");
+      sessionStorage.removeItem(FLAG);
+    }
+  } catch (e) { /* trình duyệt chặn sessionStorage: bỏ qua */ }
+
+  // 2. "Chỉ dùng wasm": ghi vào địa chỉ trang (?wasm=1) rồi tải lại, vì bản onnxruntime-web chọn lúc mở trang.
+  var params = new URLSearchParams(location.search);
+  var wasmOnly = params.get("wasm") === "1";
+  $("wasmOnly").checked = wasmOnly;
+  $("wasmOnly").addEventListener("change", function () {
+    if (this.checked) params.set("wasm", "1"); else params.delete("wasm");
+    var q = params.toString();
+    location.replace(location.pathname + (q ? "?" + q : ""));
+  });
+
+  // 3. Dò WebGPU: chỉ dùng khi có navigator.gpu VÀ requestAdapter() trả adapter trong 3 giây.
+  async function detectGpu() {
+    if (wasmOnly) return { use: "wasm", reason: "đã chọn Chỉ dùng wasm" };
+    if (!navigator.gpu || !navigator.gpu.requestAdapter) return { use: "wasm", reason: "trình duyệt không có WebGPU" };
+    var timedOut = false;
+    try {
+      var adapter = await Promise.race([
+        navigator.gpu.requestAdapter(),
+        new Promise(function (r) { setTimeout(function () { timedOut = true; r(null); }, GPU_TIMEOUT_MS); })
+      ]);
+      if (adapter) return { use: "webgpu", reason: "" };
+      if (timedOut) {
+        // SDK của PaddleOCR cũng gọi requestAdapter() (không giới hạn giờ): giấu navigator.gpu để nó không treo
+        try { Object.defineProperty(navigator, "gpu", { value: undefined, configurable: true }); } catch (e) { /* bỏ qua */ }
+        return { use: "wasm", reason: "requestAdapter() quá 3 giây" };
+      }
+      return { use: "wasm", reason: "requestAdapter() không trả adapter" };
+    } catch (e) {
+      return { use: "wasm", reason: "requestAdapter() lỗi: " + msg(e) };
+    }
+  }
+
+  // 4. Import map: SDK của PaddleOCR import tên gói trần ("onnxruntime-web"…) nên phải trỏ tên gói -> URL CDN.
+  //    opencv.js và clipper.js không có bản ES module: nạp bằng thẻ <script> qua 2 module nhỏ tạo tại chỗ (blob).
+  function moduleUrl(code) {
+    return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  }
+  function addImportMap(useGpu) {
+    var loadScript = "function loadScript(src) { return new Promise(function (ok, fail) {" +
+      " var s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous';" +
+      " s.onload = function () { ok(); }; s.onerror = function () { fail(new Error('Không tải được ' + src)); };" +
+      " document.head.appendChild(s); }); }\n";
+    var opencvShim = loadScript + "await loadScript(" + JSON.stringify(CDN.opencv) + ");\n" +
+      "const started = Date.now();\n" +
+      "while (!(globalThis.cv && globalThis.cv.Mat)) {\n" +
+      "  if (Date.now() - started > 120000) throw new Error('opencv.js không khởi động sau 120 giây');\n" +
+      "  await new Promise(function (r) { setTimeout(r, 20); });\n}\n" +
+      "export default globalThis.cv;\n";
+    var clipperShim = loadScript + "await loadScript(" + JSON.stringify(CDN.clipper) + ");\nexport default globalThis.ClipperLib;\n";
+    var map = document.createElement("script");
+    map.type = "importmap";
+    map.textContent = JSON.stringify({
+      imports: {
+        "@paddleocr/paddleocr-js": CDN.paddleSdk,
+        "onnxruntime-web": useGpu ? CDN.ortAll : CDN.ortWasm, // ort.min.mjs có WebGPU + wasm; ort.wasm.min.mjs chỉ wasm (nhẹ hơn)
+        "js-yaml": CDN.jsYaml,
+        "@techstark/opencv-js": moduleUrl(opencvShim),
+        "clipper-lib": moduleUrl(clipperShim)
+      }
+    });
+    document.head.appendChild(map);
+  }
+
+  async function fetchBytes(url) {
+    var r = await fetch(url);
+    if (!r.ok) throw new Error("Tải " + url + " lỗi HTTP " + r.status);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  async function main() {
+    if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports("importmap"))) {
+      throw new Error("Trình duyệt này chưa hỗ trợ import map (cần Safari 16.4+ / Chrome 89+).");
+    }
+    try { performance.setResourceTimingBufferSize(1000); } catch (e) { /* bỏ qua */ }
+    var gpu = await detectGpu();
+    addImportMap(gpu.use === "webgpu");
+    var text = await import("./ocr-thu/text.mjs");
+    var regex = await import("./ocr-thu/regex.mjs");
+    var info = {
+      userAgent: navigator.userAgent,
+      crossOriginIsolated: self.crossOriginIsolated === true,
+      gpu: gpu.use + (gpu.reason ? " (" + gpu.reason + ")" : ""),
+      wasmOnly: wasmOnly,
+      image: "",
+      scaled: "",
+      bytes: ""
+    };
+    $("env").textContent = "WebGPU: " + (gpu.use === "webgpu" ? "có, sẽ thử dùng" : "không dùng – " + gpu.reason) +
+      ". crossOriginIsolated: " + info.crossOriginIsolated + " (wasm chạy 1 luồng)." +
+      (navigator.deviceMemory ? " RAM máy (trình duyệt báo): ~" + navigator.deviceMemory + " GB." : "");
+
+    var canvas = null; // ảnh đã thu nhỏ
+    var paddle = null; // { ocr, loadSeconds, backend, note }
+    var runs = {}; // kết quả mới nhất theo công cụ
+    var busy = false;
+
+    function setBusy(b) {
+      busy = b;
+      $("runPaddle").disabled = b || !canvas;
+      $("runTess").disabled = b || !canvas;
+      $("pickCamera").disabled = b;
+      $("pickLibrary").disabled = b;
+    }
+    function status(t, isErr) {
+      $("status").textContent = t;
+      $("status").className = isErr ? "err" : "";
+    }
+
+    // Ảnh: vẽ ra canvas như trình duyệt hiển thị (đã xoay theo EXIF), thu cạnh dài về 1600 px (chỉ thu nhỏ).
+    async function loadImage(file) {
+      var url = URL.createObjectURL(file);
+      try {
+        var img = new Image();
+        img.src = url;
+        await img.decode();
+        var w = img.naturalWidth, h = img.naturalHeight;
+        var scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(w * scale));
+        c.height = Math.max(1, Math.round(h * scale));
+        var ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        info.image = w + "×" + h;
+        info.scaled = c.width + "×" + c.height;
+        return c;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    async function onPick(ev) {
+      var file = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!file || busy) return;
+      setBusy(true);
+      status("Đang chuẩn bị ảnh…");
+      try {
+        if (canvas) canvas.width = 0;
+        canvas = null;
+        canvas = await loadImage(file);
+        $("imgInfo").textContent = "Ảnh: " + (file.name || "ảnh") + ", gốc " + info.image + ", sau thu nhỏ " + info.scaled + " px.";
+        status("Ảnh sẵn sàng. Bấm \"Đọc bằng PaddleOCR\".");
+      } catch (e) {
+        status("Không mở được ảnh này: " + msg(e), true);
+      } finally {
+        setBusy(false);
+      }
+    }
+    $("pickCamera").addEventListener("change", onPick);
+    $("pickLibrary").addEventListener("change", onPick);
+
+    // ---- PaddleOCR.js ----
+    async function createPaddle(backend) {
+      var mod = await import("@paddleocr/paddleocr-js");
+      // SDK chỉ nhận model dạng 1 file .tar; HuggingFace có 2 file rời -> tải 2 file rồi gói tar ngay trong trình duyệt.
+      var tarFetch = async function (url) {
+        if (url === "tar:det" || url === "tar:rec") {
+          var k = url.slice(4);
+          var parts = await Promise.all([fetchBytes(CDN[k + "Onnx"]), fetchBytes(CDN[k + "Yml"])]);
+          return new Response(text.makeTar([{ name: "inference.onnx", data: parts[0] }, { name: "inference.yml", data: parts[1] }]));
+        }
+        return fetch(url);
+      };
+      return mod.PaddleOCR.create({
+        textDetectionModelName: "PP-OCRv5_mobile_det",
+        textDetectionModelAsset: { url: "tar:det" },
+        textRecognitionModelName: "latin_PP-OCRv5_mobile_rec",
+        textRecognitionModelAsset: { url: "tar:rec" },
+        ortOptions: { backend: backend, wasmPaths: CDN.ortWasmDir, numThreads: 1, proxy: false },
+        fetch: tarFetch
+      });
+    }
+    function backendOf(ocr) {
+      var s = ocr.getInitializationSummary && ocr.getInitializationSummary();
+      if (!s) return "?";
+      return s.detProvider === s.recProvider ? s.detProvider : s.detProvider + " / " + s.recProvider;
+    }
+    async function loadPaddle(backend, note) {
+      var t0 = performance.now();
+      var ocr = await createPaddle(backend);
+      return { ocr: ocr, loadSeconds: (performance.now() - t0) / 1000, backend: backendOf(ocr), note: note || "" };
+    }
+    async function disposePaddle() {
+      if (paddle && paddle.ocr && paddle.ocr.dispose) { try { await paddle.ocr.dispose(); } catch (e) { /* bỏ qua */ } }
+      paddle = null;
+    }
+
+    async function readPaddle() {
+      var fresh = !paddle;
+      if (!paddle) {
+        status("Đang tải PaddleOCR (thư viện + model, lần đầu ~18–20 MB)…");
+        var want = gpu.use === "webgpu" ? "auto" : "wasm"; // "auto": thử WebGPU, lỗi thì SDK tự lùi về wasm
+        try {
+          paddle = await loadPaddle(want);
+        } catch (e) {
+          if (want === "wasm" || text.isMemoryError(e)) throw e;
+          paddle = await loadPaddle("wasm", "khởi tạo WebGPU lỗi (" + msg(e) + "), đã lùi về wasm");
+        }
+      }
+      status("Đang đọc bằng PaddleOCR (" + paddle.backend + ")…");
+      var t0 = performance.now();
+      var res;
+      try {
+        res = (await paddle.ocr.predict(canvas))[0];
+      } catch (e) {
+        if (paddle.backend !== "webgpu" || text.isMemoryError(e)) throw e;
+        // đọc bằng WebGPU lỗi: tạo lại bằng wasm rồi đọc lại
+        var why = "đọc bằng WebGPU lỗi (" + msg(e) + "), đã lùi về wasm";
+        await disposePaddle();
+        status("WebGPU lỗi, đang tải lại bằng wasm…");
+        paddle = await loadPaddle("wasm", why);
+        fresh = true;
+        t0 = performance.now();
+        res = (await paddle.ocr.predict(canvas))[0];
+      }
+      var readSeconds = (performance.now() - t0) / 1000;
+      var out = text.rowLines(res.items).join("\n");
+      return {
+        engine: "PaddleOCR", backend: paddle.backend, note: paddle.note,
+        loadSeconds: fresh ? paddle.loadSeconds : null, loadNote: fresh ? "" : "đã tải sẵn (lần đầu " + paddle.loadSeconds.toFixed(1) + " s)",
+        readSeconds: readSeconds, text: out, boxes: res.items.length
+      };
+    }
+
+    // ---- tesseract.js (để so): chỉ tải khi bấm; đọc xong thì tắt worker để trả bộ nhớ ----
+    async function readTess() {
+      status("Đang tải tesseract.js (vie+eng, ~6 MB)…");
+      var t0 = performance.now();
+      var mod = await import(CDN.tesseract);
+      var T = mod.default || mod;
+      // dữ liệu ngôn ngữ ghim @1.0.0: trang tự tải rồi đưa byte (xem tessLangObjects trong ocr-thu/text.mjs)
+      var datas = await Promise.all(CDN.tessLangs.map(function (l) { return fetchBytes(l.url); }));
+      var langs = text.tessLangObjects(CDN.tessLangs.map(function (l, i) { return { code: l.code, data: datas[i] }; }));
+      var worker = await T.createWorker(langs, 1, { workerPath: CDN.tesseractWorker, corePath: CDN.tesseractCore, cacheMethod: "none" });
+      try {
+        await worker.setParameters({ tessedit_pageseg_mode: "3" });
+        var loadSeconds = (performance.now() - t0) / 1000;
+        status("Đang đọc bằng tesseract.js…");
+        var t1 = performance.now();
+        var r = await worker.recognize(canvas);
+        return {
+          engine: "tesseract.js", backend: "wasm (tesseract.js-core)", note: "", loadSeconds: loadSeconds, loadNote: "",
+          readSeconds: (performance.now() - t1) / 1000, text: (r.data && r.data.text) || ""
+        };
+      } finally {
+        await worker.terminate();
+      }
+    }
+
+    function cdnBytes() {
+      var entries = performance.getEntriesByType("resource").filter(function (e) {
+        try { return new URL(e.name).origin !== location.origin; } catch (x) { return false; }
+      });
+      var b = text.sumResourceBytes(entries);
+      var s = b.measured ? (b.transfer / 1e6).toFixed(1) + " MB qua mạng (" + b.measured + " file đo được)" : "không đo được";
+      if (b.unknown) s += "; " + b.unknown + " file không đo được (máy chủ không cho đo)";
+      if (b.cached) s += "; " + b.cached + " file lấy từ bộ nhớ đệm";
+      return s + ". Không tính file do worker tự tải (lõi tesseract.js).";
+    }
+
+    function row(table, label, value, empty) {
+      var tr = document.createElement("tr");
+      var th = document.createElement("th");
+      th.textContent = label;
+      var td = document.createElement("td");
+      td.textContent = value;
+      if (empty) td.className = "empty";
+      tr.appendChild(th);
+      tr.appendChild(td);
+      table.appendChild(tr);
+    }
+
+    function render(r) {
+      var id = r.engine === "PaddleOCR" ? "res-paddle" : "res-tess";
+      var sec = $(id);
+      if (!sec) {
+        sec = document.createElement("section");
+        sec.id = id;
+        sec.className = "result";
+        if (r.engine === "PaddleOCR") $("results").prepend(sec); else $("results").appendChild(sec);
+      }
+      sec.textContent = "";
+      var h = document.createElement("h2");
+      h.textContent = "Kết quả " + r.engine;
+      sec.appendChild(h);
+      var t = document.createElement("table");
+      if (r.error) row(t, "Lỗi", r.error);
+      row(t, "Backend", r.backend || "–");
+      if (r.note) row(t, "Ghi chú", r.note);
+      row(t, "Giây tải model", r.loadSeconds != null ? r.loadSeconds.toFixed(1) + " s" : (r.loadNote || "–"));
+      row(t, "Giây đọc", r.readSeconds != null ? r.readSeconds.toFixed(1) + " s" : "–");
+      row(t, "Cỡ ảnh sau thu nhỏ", info.scaled || "–");
+      row(t, "crossOriginIsolated", String(info.crossOriginIsolated));
+      row(t, "Byte đã tải (CDN)", info.bytes || "–");
+      row(t, "Trình duyệt", info.userAgent);
+      sec.appendChild(t);
+      if (r.fields) {
+        var h3 = document.createElement("h3");
+        h3.textContent = "Các ô rút ra (luật regex, chữ đã bỏ dấu)";
+        sec.appendChild(h3);
+        var f = document.createElement("table");
+        regex.FIELDS.forEach(function (k) {
+          var v = text.fieldText(r.fields[k]);
+          row(f, text.FIELD_LABELS[k], v, v === "chưa đọc được");
+        });
+        sec.appendChild(f);
+      }
+      if (r.text != null) {
+        var h4 = document.createElement("h3");
+        h4.textContent = "Chữ đọc được (" + r.text.length + " ký tự" + (r.boxes != null ? ", " + r.boxes + " khung chữ" : "") + ")";
+        sec.appendChild(h4);
+        var pre = document.createElement("pre");
+        pre.textContent = r.text || "(không đọc được chữ nào)";
+        sec.appendChild(pre);
+      }
+      $("copy").disabled = false;
+    }
+
+    async function run(kind) {
+      if (busy || !canvas) return;
+      setBusy(true);
+      var label = (kind === "paddle" ? "PaddleOCR" : "tesseract.js") + ", ảnh " + info.scaled + ", " + new Date().toLocaleTimeString("vi-VN");
+      try { sessionStorage.setItem(FLAG, label); } catch (e) { /* bỏ qua */ }
+      var r;
+      try {
+        r = kind === "paddle" ? await readPaddle() : await readTess();
+        r.fields = regex.extractRegex(r.text);
+        status("Xong: " + r.engine + " đọc trong " + r.readSeconds.toFixed(1) + " giây.");
+      } catch (e) {
+        var mem = text.isMemoryError(e);
+        r = {
+          engine: kind === "paddle" ? "PaddleOCR" : "tesseract.js",
+          backend: kind === "paddle" && paddle ? paddle.backend : "",
+          error: (mem ? "Trang thiếu bộ nhớ khi đọc ảnh. Thử đóng bớt tab / ứng dụng khác, chọn \"Chỉ dùng wasm\", hoặc chụp ảnh gần hơn. " : "") +
+            "Chi tiết: " + msg(e)
+        };
+        status(mem ? "Trang thiếu bộ nhớ khi đọc ảnh (xem chi tiết bên dưới)." : "Lỗi: " + msg(e), true);
+        if (kind === "paddle" && mem) await disposePaddle();
+      } finally {
+        try { sessionStorage.removeItem(FLAG); } catch (e) { /* bỏ qua */ }
+        info.bytes = cdnBytes();
+        setBusy(false);
+      }
+      runs[r.engine] = r;
+      render(r);
+    }
+    $("runPaddle").addEventListener("click", function () { run("paddle"); });
+    $("runTess").addEventListener("click", function () { run("tess"); });
+
+    // Lỗi không bắt được (vd trong worker / wasm): nếu là thiếu bộ nhớ thì báo rõ
+    window.addEventListener("unhandledrejection", function (ev) {
+      if (text.isMemoryError(ev.reason)) status("Trang thiếu bộ nhớ khi đọc ảnh: " + msg(ev.reason), true);
+    });
+    window.addEventListener("error", function (ev) {
+      if (text.isMemoryError(ev.error || ev.message)) status("Trang thiếu bộ nhớ khi đọc ảnh: " + (ev.message || ""), true);
+    });
+
+    $("copy").addEventListener("click", async function () {
+      info.time = new Date().toISOString();
+      var list = ["PaddleOCR", "tesseract.js"].filter(function (k) { return runs[k]; }).map(function (k) { return runs[k]; });
+      var s = text.buildSummary(info, list);
+      try {
+        await navigator.clipboard.writeText(s);
+        $("copied").textContent = "Đã chép. Dán lại cho Claude Code.";
+      } catch (e) {
+        var box = $("copyBox");
+        box.hidden = false;
+        box.value = s;
+        box.select();
+        $("copied").textContent = "Không chép tự động được: chọn hết chữ trong ô dưới rồi chép tay.";
+      }
+    });
+
+    window.__ocrThu = { ready: true, gpu: gpu, info: info, runs: runs };
+    setBusy(false);
+    status("Sẵn sàng. Chọn hoặc chụp 1 ảnh.");
+  }
+
+  main().catch(function (e) {
+    $("env").textContent = "";
+    $("status").textContent = "Không mở được trang thử: " + msg(e);
+    $("status").className = "err";
+    window.__ocrThu = { ready: false, error: msg(e) };
+  });
+})();
+</script>
+</body>
+</html>
