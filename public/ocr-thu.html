@@ -37,6 +37,7 @@
     border-radius: 8px; padding: 10px 14px; font: inherit; cursor: pointer; display: inline-block; }
   .btn.secondary, button.secondary { background: transparent; color: var(--accent); }
   button:disabled { opacity: 0.5; cursor: default; }
+  .btn:has(input:disabled) { opacity: 0.5; cursor: default; }
   .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
   table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
   th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

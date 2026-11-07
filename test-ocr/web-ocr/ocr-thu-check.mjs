@@ -17,6 +17,9 @@
 //  (g) app chính (trình duyệt mới, chưa có service worker): giao diện chính hiện, không lỗi console;
 //  (h) chỉ đọc, ngoài trình duyệt: Content-Type của ocr-thu.html (text/html), ocr-thu/regex.mjs, ocr-thu/text.mjs (có
 //      "javascript"; sai thì trình duyệt không chạy module); HTML có disabled sẵn ở 2 ô chọn ảnh (mở lại khi trang sẵn sàng).
+//      Lỗi mạng thì (h) = { ok: false, error }, script vẫn ghi ket-qua.json của (a)-(g).
+// Trước khi trang sẵn sàng: nếu kịp thì chụp <trình duyệt>-a0.png và ghi độ mờ (opacity) của 2 nút chọn ảnh
+// (report.beforeReady, chỉ để xem, không tính vào QUA).
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -50,12 +53,12 @@ export function inputDisabledInHtml(html, id) {
 }
 
 /** (h) Tải 3 file của trang thử từ base (GET, chỉ đọc), kiểm Content-Type và ô chọn ảnh khóa sẵn. */
-async function checkServed(base) {
+async function checkServed(base, fetchImpl) {
   const files = ["ocr-thu.html", "ocr-thu/regex.mjs", "ocr-thu/text.mjs"];
   const out = { contentTypes: {}, pickDisabledInHtml: null };
   let ok = true;
   for (const f of files) {
-    const r = await fetch(base + f, { cache: "no-store" });
+    const r = await fetchImpl(base + f, { cache: "no-store" });
     const type = r.headers.get("content-type");
     out.contentTypes[f] = `${r.status} ${type}`;
     ok = ok && r.ok && contentTypeOk(f, type);
@@ -68,6 +71,16 @@ async function checkServed(base) {
   }
   out.ok = ok && out.pickDisabledInHtml.pickCamera && out.pickDisabledInHtml.pickLibrary;
   return out;
+}
+
+/** (h) như checkServed nhưng không ném: lỗi mạng (fetch ném) thì trả { ok: false, error } để script vẫn ghi
+ *  ket-qua.json của (a)-(g) và kết luận CÓ BƯỚC KHÔNG QUA. fetchImpl: để test truyền fetch giả. */
+export async function checkServedSafe(base, fetchImpl = globalThis.fetch) {
+  try {
+    return await checkServed(base, fetchImpl);
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
 }
 
 function parseArgs(argv) {
@@ -109,6 +122,14 @@ async function main() {
     const swControlled = await page.waitForFunction(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller), null, { timeout: 60000 })
       .then(() => true, () => false);
     await page.goto(args.base + "ocr-thu.html");
+    // trước khi trang sẵn sàng (nếu kịp): 2 ô chọn ảnh khóa, nút chọn ảnh mờ (chỉ để xem, không tính vào QUA)
+    report.beforeReady = await page.evaluate(() => ({
+      readyAlready: !!(window.__ocrThu && "ready" in window.__ocrThu),
+      pickDisabled: ["pickCamera", "pickLibrary"].map((id) => document.getElementById(id)?.disabled ?? null),
+      labelOpacity: [...document.querySelectorAll("label.btn")].map((l) => getComputedStyle(l).opacity),
+    }));
+    if (!report.beforeReady.readyAlready) await shot(page, "a0");
+    console.log("(a0) trước khi sẵn sàng:", JSON.stringify(report.beforeReady), report.beforeReady.readyAlready ? "– trang đã sẵn sàng, chưa chụp" : "– đã chụp a0");
     const viaSw = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
     const title = await page.title();
     const isTestPage = (await page.locator("#runPaddle").count()) === 1;
@@ -243,7 +264,7 @@ async function main() {
   }
 
   // ---------- (h) Content-Type từ máy chủ + ô chọn ảnh khóa sẵn trong HTML (chỉ đọc) ----------
-  report.steps.h = await checkServed(args.base);
+  report.steps.h = await checkServedSafe(args.base);
   console.log("(h)", JSON.stringify(report.steps.h));
   const file = path.join(args.shots, `${args.browser}-ket-qua.json`);
   fs.writeFileSync(file, JSON.stringify(report, null, 2), "utf8");

@@ -100,10 +100,16 @@ export function makeTar(files) {
 
 /** Lỗi có phải do thiếu bộ nhớ không: RangeError khi câu lỗi có "alloc" / "memory" / "buffer" (cấp phát ArrayBuffer /
  *  WebAssembly.Memory; RangeError khác như "Maximum call stack size exceeded", "Invalid array length" thì không), hoặc
- *  câu lỗi có "memory", "OOM", "allocate"/"allocation", "bad_alloc" (onnxruntime, Emscripten, tesseract gửi lỗi dạng chuỗi). */
+ *  câu lỗi có "memory", "OOM", "allocate"/"allocation", "bad_alloc" (onnxruntime, Emscripten, tesseract gửi lỗi dạng chuỗi).
+ *  RangeError lỗi vị trí ("... outside the bounds of the buffer", "Length out of range of buffer") KHÔNG tính là thiếu bộ
+ *  nhớ: nếu tính, nhánh WebGPU của trang sẽ không lùi về wasm và báo sai là thiếu bộ nhớ. */
 export function isMemoryError(err) {
   if (err == null) return false;
-  if (typeof RangeError !== "undefined" && err instanceof RangeError) return /alloc|memory|buffer/i.test(err.message || "");
+  if (typeof RangeError !== "undefined" && err instanceof RangeError) {
+    const m = err.message || "";
+    if (/bounds|out of range/i.test(m)) return false;
+    return /alloc|memory|buffer/i.test(m);
+  }
   const text = typeof err === "string" ? err : `${err.name || ""} ${err.message || ""} ${String(err)}`;
   return /memory|\boom\b|allocat|bad_alloc/i.test(text);
 }
