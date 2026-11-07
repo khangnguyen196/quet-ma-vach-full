@@ -11,6 +11,8 @@ test("resolvePath: mount dài nhất thắng, chặn ../", () => {
   assert.equal(resolvePath("/harness.html?x=1", mounts), path.resolve("C:\\a", "harness.html"));
   assert.equal(resolvePath("/photos/../../secret", mounts), null);
   assert.equal(resolvePath("/%2e%2e/%2e%2e/x", mounts), null);
+  assert.equal(resolvePath("/photos/..%5C..%5Csecret", mounts), null); // dấu \ mã hóa (Windows)
+  assert.equal(resolvePath("/..%5Csecret", mounts), null);
 });
 
 test("server: phục vụ file, KHÔNG gửi COOP / COEP, 404 khi thiếu", async () => {

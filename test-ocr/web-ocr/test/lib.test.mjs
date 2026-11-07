@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar, tessLangObjects,
+  resultFileName, toolName, csvField, timesRow, pickPhotos, orderLines, rowLines, summarizeMemory, sumBytes, mb, timeStats, makeTar, tessLangObjects, quantile,
 } from "../lib.mjs";
 
 test("tên file kết quả và tên công cụ giống run_ocr.py", () => {
@@ -86,8 +86,33 @@ test("cộng byte tải: tổng qua mạng / giải nén, file > 100 kB sắp gi
 
 test("thống kê giây/ảnh chỉ tính ảnh ok", () => {
   assert.deepEqual(timeStats([{ status: "ok", seconds: "2" }, { status: "ok", seconds: "4" }, { status: "error: x", seconds: "9" }]),
-    { ok: 2, errors: 1, mean: 3, max: 4 });
-  assert.deepEqual(timeStats([]), { ok: 0, errors: 0, mean: null, max: null });
+    { ok: 2, errors: 1, mean: 3, max: 4, median: 3, p90: 3.8 });
+  assert.deepEqual(timeStats([]), { ok: 0, errors: 0, mean: null, max: null, median: null, p90: null });
+});
+
+test("trung vị và p90 (nội suy như numpy.percentile): số lẻ / chẵn ảnh, 1 ảnh, không sắp sẵn", () => {
+  assert.equal(quantile([5, 1, 3], 0.5), 3);
+  assert.equal(quantile([4, 1, 3, 2], 0.5), 2.5);
+  assert.equal(quantile([7], 0.9), 7);
+  // 10 số 1..10: vị trí 0,9 × 9 = 8,1 -> 9 + 0,1 × (10 - 9) = 9,1
+  assert.ok(Math.abs(quantile([10, 9, 8, 7, 6, 5, 4, 3, 2, 1], 0.9) - 9.1) < 1e-9);
+  assert.equal(quantile([], 0.5), null);
+  const st = timeStats([1, 2, 3, 4, 100].map((s) => ({ status: "ok", seconds: String(s) })));
+  assert.equal(st.mean, 22); // 1 ảnh rất chậm kéo trung bình lên
+  assert.equal(st.median, 3);
+});
+
+test("tên công cụ: join=rows -> <engine>-rows-<trình duyệt>; không join giữ tên cũ", () => {
+  assert.equal(toolName("paddlejs", "chromium", "rows"), "paddlejs-rows-chromium");
+  assert.equal(toolName("paddlejs", "webkit", "rows"), "paddlejs-rows-webkit");
+  assert.equal(toolName("paddlejs", "webkit", ""), "paddlejs-webkit");
+  assert.equal(toolName("tesseractjs", "chromium"), "tesseractjs-chromium");
+});
+
+test("cộng byte tải: mục chưa đo được byte qua mạng (null) được liệt kê, không tính thầm", () => {
+  const r = sumBytes([{ url: "a", transfer: 10, decoded: 10 }, { url: "b", transfer: null, decoded: null }, { url: "c", transfer: 0, decoded: 0 }]);
+  assert.equal(r.transfer, 10);
+  assert.deepEqual(r.unmeasured, ["b"]);
 });
 
 test("makeTar: tar ustar đọc lại được tên, cỡ, nội dung; checksum đúng", () => {

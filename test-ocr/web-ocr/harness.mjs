@@ -95,7 +95,8 @@ async function initPaddle() {
     },
     async recognize(canvas) {
       const [res] = await ocr.predict(canvas);
-      // join=rows (chỉ để thử): khung cùng hàng nối thành 1 dòng; mặc định mỗi khung 1 dòng
+      // join=rows (cách chính từ vòng 2, công cụ paddlejs-rows-*): khung cùng hàng nối thành 1 dòng;
+      // không join: mỗi khung 1 dòng (paddlejs-chromium / -webkit, giữ để so)
       const lines = P.join === "rows" ? rowLines(res.items) : orderLines(res.items);
       return { text: lines.join("\n"), boxes: res.items.length, metrics: res.metrics };
     },

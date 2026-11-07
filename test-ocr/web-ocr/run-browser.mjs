@@ -2,6 +2,7 @@
 // Thư mục hiện tại phải là test-ocr (nơi có photos/ và outputs/), giống run_ocr.py.
 //
 //   node web-ocr/run-browser.mjs --engine paddlejs --browser chromium            # 96 ảnh, file từ máy
+//   node web-ocr/run-browser.mjs --engine paddlejs --join rows --browser webkit  # khung cùng hàng nối 1 dòng -> paddlejs-rows-webkit
 //   node web-ocr/run-browser.mjs --engine tesseractjs --browser webkit --mode cdn --limit 1   # đo byte tải lần đầu
 //   node web-ocr/run-browser.mjs --report                                        # gom outputs/web-ocr/metrics.csv
 //
@@ -33,13 +34,18 @@ function parseArgs(argv) {
     else if (k === "--photos") a.photos = v();
     else if (k === "--timeout") a.timeout = Number(v());
     else if (k === "--report") a.report = true;
-    else if (k === "--join") a.join = v(); // "rows": chỉ để thử (khung cùng hàng nối 1 dòng), ghi vào --out riêng
+    else if (k === "--join") a.join = v(); // "rows": khung cùng hàng nối 1 dòng (công cụ paddlejs-rows-<trình duyệt>)
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
   if (!["chromium", "webkit"].includes(a.browser)) throw new Error("--browser phải là chromium hoặc webkit");
   if (!["local", "cdn"].includes(a.mode)) throw new Error("--mode phải là local hoặc cdn");
-  if (a.join && path.resolve(a.out) === path.resolve("outputs")) throw new Error("--join chỉ để thử: phải kèm --out thư mục khác outputs/");
+  if (!["", "rows"].includes(a.join)) throw new Error("--join chỉ nhận rows");
+  if (a.join && a.engine !== "paddlejs") throw new Error("--join rows chỉ dùng cho paddlejs");
+  // join phải ghi vào thư mục / tên công cụ riêng, không lẫn với kết quả của cách không join
+  if (a.join && toolName(a.engine, a.browser, a.join) === toolName(a.engine, a.browser)) {
+    throw new Error("--join ghi vào thư mục của công cụ không join");
+  }
   return a;
 }
 
@@ -116,7 +122,7 @@ async function loadPlaywright() {
 
 async function runOnce(args) {
   const pw = await loadPlaywright();
-  const tool = toolName(args.engine, args.browser);
+  const tool = toolName(args.engine, args.browser, args.join);
   const photos = listPhotos(args.photos);
   const todo = args.limit > 0 ? photos.slice(0, args.limit) : photos;
   const outDir = path.join(args.out, tool);
@@ -138,7 +144,10 @@ async function runOnce(args) {
   let phase = "baseline";
   let jsHeapPeak = 0;
   const net = [];
+  const netPending = []; // promise của bộ xử lý requestfinished (lấy cỡ là việc bất đồng bộ), chờ hết trước khi đóng
   const netFailed = [];
+  let firstSample = null; // resolve khi PowerShell gửi mẫu bộ nhớ đầu tiên
+  const firstSampleSeen = new Promise((r) => { firstSample = r; });
   let browser;
   let browserServer;
   let sampler;
@@ -150,11 +159,18 @@ async function runOnce(args) {
     run.browserVersion = browser.version();
     const rootPid = browserServer.process()?.pid;
     run.rootPid = rootPid;
-    if (rootPid) sampler = startSampler(rootPid, (procs) => samples.push({ phase, t: Date.now(), procs }));
+    const samplerStart = Date.now();
+    if (rootPid) {
+      sampler = startSampler(rootPid, (procs) => {
+        samples.push({ phase, t: Date.now(), procs });
+        firstSample();
+      });
+    }
     const ctxOpts = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 };
     if (args.browser === "chromium") ctxOpts.isMobile = true; // WebKit trên Windows: chỉ đặt khổ + DPR
     const context = await browser.newContext(ctxOpts);
-    context.on("requestfinished", async (req) => {
+    context.on("requestfinished", (req) => netPending.push(onRequestFinished(req)));
+    const onRequestFinished = async (req) => {
       // HuggingFace chuyển hướng (302) sang máy chủ xet: ghi URL gốc (request đầu chuỗi chuyển hướng) cho dễ đọc
       let first = req;
       while (first.redirectedFrom()) first = first.redirectedFrom();
@@ -170,7 +186,7 @@ async function runOnce(args) {
       } catch (e) {
         entry.note = String(e.message || e).slice(0, 200);
       }
-    });
+    };
     context.on("requestfailed", (req) => netFailed.push({ url: req.url(), error: req.failure()?.errorText }));
 
     let page = await context.newPage();
@@ -180,9 +196,15 @@ async function runOnce(args) {
       pg.on("pageerror", (e) => consoleErrors.push(`pageerror: ${String(e.message || e).slice(0, 300)}`));
     };
     hookPage(page);
-    // mức nền: trang trống 3 giây
+    // mức nền: trang trống 3 giây, đếm từ khi có mẫu bộ nhớ đầu tiên (PowerShell khởi động + Get-CimInstance lần đầu
+    // mất 1-2 giây; đếm từ lúc bật thì có khi chỉ được vài mẫu nền)
     await page.goto("about:blank");
+    if (sampler) {
+      const seen = await Promise.race([firstSampleSeen.then(() => true), new Promise((r) => setTimeout(() => r(false), 30000))]);
+      run.firstSampleMs = seen ? samples[0].t - samplerStart : null;
+    }
     await new Promise((r) => setTimeout(r, 3000));
+    run.baselineSamples = samples.filter((s) => s.phase === "baseline").length;
     phase = "run";
 
     let cdp = null;
@@ -266,6 +288,8 @@ async function runOnce(args) {
     run.consoleErrors = consoleErrors.slice(0, 20);
   } finally {
     if (heapTimer) clearInterval(heapTimer);
+    // chờ các bộ xử lý requestfinished lấy cỡ xong (tối đa 60 giây) rồi mới đóng trình duyệt
+    if (netPending.length) await withTimeout(Promise.allSettled(netPending), 60000, "chờ đo byte").catch(() => {});
     if (browser) await browser.close().catch(() => {});
     if (browserServer) await browserServer.close().catch(() => {});
     if (sampler) sampler.kill();
@@ -288,7 +312,8 @@ async function runOnce(args) {
     (run.initError ? `\nLỖI NẠP: ${run.initError}` : "") +
     `\nnạp ${run.loadSeconds?.toFixed?.(1) ?? "?"} s, backend ${run.init?.backend ?? "?"}, crossOriginIsolated ${run.init?.features?.crossOriginIsolated}` +
     `\nbộ nhớ: nền ${mb(run.memory.baseline)} MB, đỉnh 1 tiến trình ${mb(run.memory.peakProc)} MB, đỉnh tổng ${mb(run.memory.peakTotal)} MB` +
-    `\nmạng (không tính localhost): ${mb(bytes.transfer)} MB qua mạng, ${mb(bytes.decoded)} MB giải nén, ${bytes.count} request;` +
+    `\nmạng (không tính localhost): ${mb(bytes.transfer)} MB qua mạng, ${mb(bytes.decoded)} MB giải nén, ${bytes.count} request` +
+    `, ${bytes.unmeasured.length} request không đo được byte;` +
     ` localhost ${mb(local.transfer)} MB\n${write ? "Ghi" : "Không ghi"}: ${file}`);
   return run;
 }
@@ -328,7 +353,7 @@ function report(args) {
   const times = readTimes(path.join(args.out, "times.csv"));
   const head = ["tool", "browser", "backend", "crossOriginIsolated", "load_s_local", "load_s_cdn", "sec_per_image_mean", "sec_per_image_max",
     "mem_baseline_mb", "mem_peak_proc_mb", "mem_peak_total_mb", "ws_peak_proc_mb", "ws_peak_total_mb", "js_heap_peak_mb",
-    "net_mb_first_load", "decoded_mb_first_load", "images_ok", "images_error", "note"];
+    "net_mb_first_load", "decoded_mb_first_load", "images_ok", "images_error", "note", "sec_per_image_median", "sec_per_image_p90"];
   let csv = csvLine(head);
   const tools = [...new Set(runs.map((r) => r.tool))].sort();
   const dl = ["# Byte tải lần đầu (mode cdn, cache trống, 1 ảnh)", ""];
@@ -344,12 +369,16 @@ function report(args) {
       mb(local?.memory?.baseline), mb(local?.memory?.peakProc), mb(local?.memory?.peakTotal),
       mb(local?.memory?.peakProcWs), mb(local?.memory?.peakTotalWs), local?.jsHeapPeak ? mb(local.jsHeapPeak) : "",
       mb(cdn?.network?.transfer), mb(cdn?.network?.decoded), st.ok, st.errors, metricsNotes({ local, cdn }),
+      st.median == null ? "" : st.median.toFixed(2), st.p90 == null ? "" : st.p90.toFixed(2),
     ]);
     if (cdn) {
       dl.push(`## ${tool}`, "", `Tổng: ${mb(cdn.network.transfer)} MB qua mạng, ${mb(cdn.network.decoded)} MB sau giải nén, ${cdn.network.count} request.`, "",
         "| File (> 100 kB) | qua mạng (kB) | giải nén (kB) |", "|---|---|---|");
       for (const b of cdn.network.big) dl.push(`| ${b.url.split("?")[0]} | ${(b.transfer / 1000).toFixed(0)} | ${(b.decoded / 1000).toFixed(0)} |`);
       if (cdn.network.failed.length) dl.push("", "Request lỗi: " + cdn.network.failed.map((f) => `${f.url} (${f.error})`).join("; "));
+      if (cdn.network.unmeasured?.length) {
+        dl.push("", "Không đo được byte qua mạng (không cộng vào tổng): " + cdn.network.unmeasured.join("; "));
+      }
       dl.push("");
     }
   }

@@ -79,7 +79,8 @@ export function startServer({ port = 0, mounts = defaultMounts() } = {}) {
     // Không có Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy (xem đầu file).
     res.writeHead(200, { "Content-Type": type, "Content-Length": size, "Cache-Control": "no-cache" });
     if (req.method === "HEAD") return res.end();
-    fs.createReadStream(file).pipe(res);
+    // file bị khóa / xóa giữa chừng: hủy kết nối này thay vì làm sập server giữa lần đo
+    fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);

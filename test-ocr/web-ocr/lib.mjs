@@ -6,9 +6,11 @@ export function resultFileName(code, image) {
   return `${code}__${image}.txt`;
 }
 
-/** Tên công cụ trong outputs/ và times.csv, vd paddlejs + chromium -> "paddlejs-chromium". */
-export function toolName(engine, browser) {
-  return `${engine}-${browser}`;
+/** Tên công cụ trong outputs/ và times.csv, vd paddlejs + chromium -> "paddlejs-chromium".
+ *  join = "rows" (khung cùng hàng nối 1 dòng, cách chính của PaddleOCR.js từ vòng 2) -> "paddlejs-rows-chromium".
+ *  join trống giữ tên cũ (mỗi khung 1 dòng, để so). */
+export function toolName(engine, browser, join = "") {
+  return join === "rows" ? `${engine}-rows-${browser}` : `${engine}-${browser}`;
 }
 
 /** Một ô CSV theo kiểu module csv của Python: có dấu phẩy, nháy kép hoặc xuống dòng thì bọc nháy kép. */
@@ -82,12 +84,13 @@ export function groupRows(items, minOverlap = 0.5) {
   return rows.map((r) => r.boxes.sort((a, b) => a.minX - b.minX).map((b) => b.text));
 }
 
-/** Cách ghi chữ chính của Paddle (dùng cho chấm điểm): mỗi khung chữ 1 dòng, theo thứ tự của groupRows. */
+/** Cách ghi cũ của Paddle (paddlejs-chromium / -webkit, giữ để so): mỗi khung chữ 1 dòng, theo thứ tự của groupRows. */
 export function orderLines(items, minOverlap = 0.5) {
   return groupRows(items, minOverlap).flat();
 }
 
-/** Cách ghi phụ (chỉ để thử, không vào bảng chính): các khung cùng hàng nối thành 1 dòng, cách nhau 1 dấu cách. */
+/** Cách chính từ vòng 2 (công cụ paddlejs-rows-*): các khung cùng hàng nối thành 1 dòng, cách nhau 1 dấu cách,
+ *  để nhãn và số của bảng dinh dưỡng ("Protein" / "17,14g") nằm cùng dòng cho regex. */
 export function rowLines(items, minOverlap = 0.5) {
   return groupRows(items, minOverlap).map((r) => r.join(" "));
 }
@@ -122,13 +125,15 @@ export function summarizeMemory(samples) {
 }
 
 /** Cộng byte tải. entries: [{ url, transfer, decoded }] (transfer = byte qua mạng, decoded = byte sau giải nén;
- *  -1 / null / NaN tính là 0). Trả { transfer, decoded, count, big } với big = các file > `bigLimit` byte
- *  (theo transfer hoặc decoded), sắp giảm dần theo decoded. */
+ *  -1 / null / NaN tính là 0). Trả { transfer, decoded, count, big, unmeasured } với big = các file > `bigLimit`
+ *  byte (theo transfer hoặc decoded), sắp giảm dần theo decoded; unmeasured = URL các mục chưa đo được byte qua mạng
+ *  (transfer null / undefined: lấy cỡ chưa xong hoặc lỗi), để ghi chú thay vì tính thầm là 0. */
 export function sumBytes(entries, bigLimit = 100 * 1024) {
   const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
   let transfer = 0;
   let decoded = 0;
   const big = [];
+  const unmeasured = entries.filter((e) => e.transfer == null).map((e) => e.url);
   for (const e of entries) {
     const t = num(e.transfer);
     const d = num(e.decoded);
@@ -137,7 +142,7 @@ export function sumBytes(entries, bigLimit = 100 * 1024) {
     if (t > bigLimit || d > bigLimit) big.push({ url: e.url, transfer: t, decoded: d });
   }
   big.sort((a, b) => b.decoded - a.decoded || b.transfer - a.transfer);
-  return { transfer, decoded, count: entries.length, big };
+  return { transfer, decoded, count: entries.length, big, unmeasured };
 }
 
 /** Byte -> MB (1 MB = 1.000.000 byte), 1 chữ số thập phân; null -> "". */
@@ -162,16 +167,31 @@ export function metricsNotes({ local, cdn }) {
     notes.push(`local: bỏ qua ${local.skippedExisting} ảnh đã có, bộ nhớ / giây nạp chỉ của lần đọc ${local.ok} ảnh`);
   }
   if (cdn?.network?.failed?.length) notes.push(`cdn: ${cdn.network.failed.length} request lỗi`);
+  if (cdn?.network?.unmeasured?.length) {
+    notes.push(`cdn: ${cdn.network.unmeasured.length} request không đo được byte qua mạng (không cộng vào tổng)`);
+  }
   return notes.join("; ");
 }
 
-/** Thống kê giây/ảnh: chỉ tính ảnh ok. Trả { ok, errors, mean, max }. */
+/** Phân vị q (0..1) của mảng số, nội suy tuyến tính giữa 2 số liền kề (cách mặc định của numpy.percentile).
+ *  q = 0.5 là trung vị. Mảng rỗng -> null. */
+export function quantile(values, q) {
+  if (!values.length) return null;
+  const a = [...values].sort((x, y) => x - y);
+  const pos = (a.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return a[lo] + (a[hi] - a[lo]) * (pos - lo);
+}
+
+/** Thống kê giây/ảnh: chỉ tính ảnh ok. Trả { ok, errors, mean, max, median, p90 }.
+ *  Trung vị và p90 (90% số ảnh đọc nhanh hơn số này) ít bị kéo lệch bởi vài ảnh rất chậm hơn trung bình. */
 export function timeStats(rows) {
   const ok = rows.filter((r) => r.status === "ok").map((r) => Number(r.seconds));
   const errors = rows.length - ok.length;
   const mean = ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null;
   const max = ok.length ? Math.max(...ok) : null;
-  return { ok: ok.length, errors, mean, max };
+  return { ok: ok.length, errors, mean, max, median: quantile(ok, 0.5), p90: quantile(ok, 0.9) };
 }
 
 /** Danh sách ngôn ngữ cho tesseract.createWorker khi trang tự tải dữ liệu (để ghim bản @1.0.0).

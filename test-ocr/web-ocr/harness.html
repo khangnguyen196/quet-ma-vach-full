@@ -12,7 +12,7 @@
 <script src="assets.js"></script>
 <script>
   // Tham số: engine=paddlejs|tesseractjs, mode=local|cdn, ort=wasm|webgpu (chỉ paddlejs),
-  // join=rows (chỉ để thử, xem harness.mjs).
+  // join=rows (khung cùng hàng nối 1 dòng, cách chính của PaddleOCR.js; xem harness.mjs).
   // paddlejs chưa có ort: dò WebGPU trước (navigator.gpu + requestAdapter() thành công) rồi tải lại trang với
   // ort=webgpu hoặc ort=wasm, vì import map phải có TRƯỚC khi nạp module nào, mà dò WebGPU là việc bất đồng bộ.
   (function () {
