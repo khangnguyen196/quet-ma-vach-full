@@ -103,7 +103,9 @@ quet-ma-vach-full/
 │   └── style.css
 ├── tests/              # test node của app (node:test, không thư viện), chạy: npm test
 ├── test-ocr/           # so sánh OCR + cách tách thông tin (Python, xem test-ocr/README.md)
-│   └── hsd-js/         # thí nghiệm đọc hạn sử dụng bằng tesseract.js (package.json riêng)
+│   ├── hsd-js/         # thí nghiệm đọc hạn sử dụng bằng tesseract.js (package.json riêng)
+│   ├── web-ocr/        # đo OCR trong trình duyệt: PaddleOCR.js, tesseract.js trên Chromium / WebKit (package.json riêng, ocr-c)
+│   └── vietocr/        # PP-OCRv5 det + VietOCR (Python, venv riêng vietocr/.venv), chỉ để so mức máy chủ (ocr-c)
 ├── public/             # manifest.webmanifest + icons/ (PNG do tools/make-icons.mjs vẽ), chép nguyên vào dist/
 ├── tools/
 │   ├── make-icons.mjs  # vẽ icon PWA, chạy một lần: node tools/make-icons.mjs
@@ -207,7 +209,7 @@ Lưu ý: **hạn sử dụng không có trong API** (mã vạch giống nhau cho
   ```
   Đồng thời sửa initPwa() trong src/pwa.js để không đăng ký sw.js nữa (hoặc gọi navigator.serviceWorker.getRegistrations() rồi unregister()); nếu không, mỗi lần mở app lại đăng ký rồi tự hủy.
   Lưu ý: trên iPhone, app mở từ màn hình chính có thể có bộ nhớ riêng, khác Safari, nên tủ đồ ở 2 nơi không tự chung; dùng "Xuất tủ đồ" / "Nhập tủ đồ" để chuyển.
-- GitHub Pages hết giờ khi deploy (đã gặp 2 lần: đợt `ocr-b` 05/11/2026 và đợt `don-nho` 06/11/2026, run 42244840622): bước build xanh nhưng bước deploy (`actions/deploy-pages`) kẹt ở "updating_pages" khoảng 10 phút rồi báo "Timeout reached, aborting!" và tự hủy; trang web vẫn chạy bản trước, không phải lỗi code. Cách xử lý: KHÔNG chạy lại (Re-run) cùng mã commit, vì lần `ocr-b` chạy lại thì Pages hủy ngay sau 5 giây do dùng lại đúng bản đã bị hủy; thay vào đó đẩy một mã commit mới lên main (vd một commit docs nhỏ) để workflow tự build + deploy lại.
+- GitHub Pages hết giờ khi deploy (đã gặp 3 lần: đợt `ocr-b` 05/11/2026; đợt `don-nho` 06/11/2026 hai lần, run 42244840622 và 42251741864): bước build xanh nhưng bước deploy (`actions/deploy-pages`) kẹt ở "updating_pages" khoảng 10 phút rồi báo "Timeout reached, aborting!" và tự hủy; trang web vẫn chạy bản trước, không phải lỗi code. Cách xử lý: KHÔNG chạy lại (Re-run) cùng mã commit, vì lần `ocr-b` chạy lại thì Pages hủy ngay sau 5 giây do dùng lại đúng bản đã bị hủy; thay vào đó đẩy một mã commit mới lên main (vd một commit docs nhỏ) để workflow tự build + deploy lại. Lần 3 của `don-nho` (commit trống ae8c649, run 42323162476) deploy xanh, xác nhận cách "đẩy commit mới" có tác dụng.
 
 ## 8. Việc cần làm tiếp (cập nhật 06/11/2026)
 
@@ -376,3 +378,19 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
 
 - [x] **Đợt `don-nho`** (06/11/2026): 2 việc nhỏ. (1) Việc để sau ket-thuc (a): chip dị ứng bỏ tên trùng sau khi đổi sang tiếng Việt (hàm `uniqueNames` trong `src/off.js`, bỏ trùng theo đúng chữ, giữ thứ tự lần xuất hiện đầu, trong từng danh sách allergens / traces): 'en:milk' + 'fr:milk' hay 'en:milk' + 'EN:Milk' chỉ ra 1 chip "Sữa"; `allergenKeys` / `traceKeys` không đổi. Test viết trước, chạy đỏ trên code cũ (6/186 fail) rồi mới sửa (186/186). (2) `.gitattributes` (`* text=auto eol=lf`): file text trên máy xuống dòng LF như trên GitHub, bản build trên máy ra cùng VERSION với bản CI (trước đó máy có `core.autocrlf=true` nên `dist/index.html` CRLF, VERSION máy 7c57e183aa6e khác Pages 3215f6540a80). Build trên máy ở bước P2 (chưa đổi code) ra 3215f6540a80 = Pages; VERSION máy cuối đợt = df4173e7a3e4, kết quả so với Pages ghi ở báo cáo cuối đợt. Lần deploy đầu (run 42244840622, 64d2027) hết giờ ở GitHub Pages; theo chủ dự án không Re-run mà đẩy commit docs này để deploy lại.
   Quyết định của dieu-phoi (06/11/2026, don-nho vòng 0): (1) `.gitattributes` 1 dòng vì `text=auto` đã nhận PNG là nhị phân, repo không có .bat / .ps1; (2) đưa worktree về LF bằng `git rm --cached -r` + `reset --hard` trong worktree; (3) bỏ trùng theo tên tiếng Việt, đúng từng chữ, trong từng danh sách; (4) ghi PLAN trước khi lên main, không commit docs sau khi lên main.
+
+- [ ] **Đợt `ocr-c`** (07/11/2026, đang làm; vòng 1 đo + chấm, vòng 2 trang thử `public/ocr-thu.html`). Mục tiêu: tìm OCR đọc chữ bao bì tốt hơn mà chạy được TRONG app trên Safari iOS và Chrome Android (để sau này làm "chụp bao bì điền nháp"). Chỉ đo, không sửa tính năng app. Code: `test-ocr/web-ocr/` (Playwright Chromium + WebKit, 390×844, DPR 3, không COOP/COEP nên wasm 1 luồng; WebGPU chỉ khi `requestAdapter()` thành công, đo được: không có ở cả 2 nên backend wasm), `test-ocr/vietocr/` (máy chủ). Cách làm, cách đo bộ nhớ / byte tải: `test-ocr/README.md` Phần D.
+  Kiểm gói: `@paddleocr/paddleocr-js` có thật (0.4.2, 11/06/2026, repo chính thức PaddlePaddle/PaddleOCR, thư mục `paddleocr-js`); SDK chỉ có sẵn model PP-OCRv5 / v6 tiếng Trung - Anh - Nhật, nên dùng model ONNX chính thức `PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx` + `PP-OCRv5_mobile_det_onnx` trên HuggingFace qua tùy chọn model riêng của SDK (đường (1): SDK trình duyệt chạy được, không cần onnxruntime-web tự viết hay onnxruntime-node). Model latin thiếu 45/71 chữ có dấu tiếng Việt (ả ạ ầ ế ộ ờ ự…), chữ thiếu bị bỏ khi đọc.
+  Kết quả vòng 1 (96 ảnh / 31 mã / 239 điểm; 96/96 ok ở cả 5 công cụ mới; số easyocr / tesseract không đổi so với bản sao lưu):
+
+  | Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium | giây/ảnh WebKit | bộ nhớ đỉnh 1 tiến trình (MB, working set) Chromium / WebKit | MB tải lần đầu (qua mạng) | chạy được cả 2 trình duyệt? |
+  |---|---|---|---|---|---|---|---|---|
+  | PaddleOCR.js (PP-OCRv5 mobile det + latin rec) | 62% | 19% / 20% | 25% | 6,9 | 11,7 | 1.099 / 1.190 | 18,1 / 17,4 | có |
+  | tesseract.js 7 (vie+eng) | 25% / 20% | 10% | 12% | 1,5 | 2,5 | 1.004 / 694 | 5,8 | có |
+  | PP-OCRv5 det + VietOCR (Python) | 74% | 25% | 28% | 9,3 (CPU máy tính) | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
+  | EasyOCR (ocr-a) | 45% | 31% | 22% | 13,7 (CPU máy tính) | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
+  | Tesseract (ocr-a) | 20% | 12% | 12% | 1,3 (CPU máy tính) | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
+
+  Theo ngưỡng (cả 2 trình duyệt ≥ ~30% B regex, ≤ ~10 giây/ảnh, ≤ ~20 MB): PaddleOCR.js đạt tải (18,1 MB) và Chromium 6,9 giây, chưa đạt B regex (19–20%) và WebKit 11,7 giây/ảnh; tesseract.js đạt tốc độ / tải nhưng B regex 10%. Lý do B thấp ở Paddle: mỗi khung chữ 1 dòng nên nhãn và số bảng dinh dưỡng tách 2 dòng; thử nối khung cùng hàng thành 1 dòng (chỉ tham khảo): B regex 36% (Chromium) / 37% (WebKit), B dict 42% / 42% (A vẫn 62%). Giây/ảnh dao động giữa các lần chạy (máy làm việc khác cùng lúc): lần chạy nối hàng Chromium 5,8 / WebKit 8,6. Bộ nhớ trang khoảng 1,1–1,2 GB khi đọc ảnh 1600 px: cần thử iPhone thật. Đề xuất cho trang thử vòng 2 và quyết định: xem báo cáo vòng 1.
+  Sửa kèm: `score.py` coi mọi thư mục con của `outputs/` là công cụ OCR nên `outputs/hsd-js` (và `outputs/web-ocr`) hiện thành công cụ giả 0 điểm; thêm hằng `NOT_OCR_DIRS = {extract, hsd-js, web-ocr}` dùng ở `list_tools` và `all_tools`, test 11f viết trước, đỏ trên code cũ rồi xanh.
+  Quyết định của dieu-phoi (07/11/2026, vòng 0): (1) tách vòng: vòng 1 đo + chấm, vòng 2 trang `ocr-thu.html`; (2) không sửa `tools/sw-build.mjs`: service worker vẫn lấy `ocr-thu.html` từ mạng trước, chỉ thay bằng `index.html` khi mất mạng / mạng chậm quá 3 giây mà đã có bản lưu; chỉ sửa (`routeFor` trả "skip" cho `ocr-thu.html`, có test) nếu thử thật thấy bị thay khi mạng bình thường; (3) đo bộ nhớ bằng cây tiến trình trên Windows là ước lượng, được chấp nhận; (4) lỗi do bản WebKit Windows không tính là loại công cụ; (5) `score.py` bỏ qua thư mục không phải OCR (hsd-js, web-ocr).

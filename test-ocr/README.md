@@ -138,7 +138,7 @@ Chạy lại không mất công: ảnh nào đã có file kết quả thì bỏ 
 - Tỷ lệ đúng theo từng trường: sẽ thấy ví dụ "hạn sử dụng" thường thấp nhất vì in dạng chấm (dot-matrix).
 - Thời gian trung bình mỗi ảnh, số ảnh lỗi, số ảnh bỏ qua theo luật chi phí (cột "Ảnh bỏ qua (luật chi phí)").
 - `outputs/times.csv` được ghi nối thêm qua nhiều lần chạy, nên `score.py` chỉ đọc **dòng cuối của mỗi ảnh** (theo công cụ, mã, tên ảnh): ảnh lần trước lỗi hoặc bị bỏ qua, lần sau ok thì chỉ tính là ok, thời gian chỉ tính một lần.
-- `score.py` coi là công cụ OCR: thư mục con của `outputs/` và tên công cụ có dòng trong `outputs/times.csv` (công cụ bị bỏ qua hết theo luật chi phí hoặc lỗi hết chưa có thư mục nhưng vẫn hiện, điểm 0), trừ `extract` (do `run_extract.py` ở phần B tạo) và tên bắt đầu bằng dấu chấm. Ở bảng theo trường, công cụ chưa có file `.txt` nào hiện "–" ở mọi trường (chưa đọc được ảnh nào, khác với đọc mà sai = 0).
+- `score.py` coi là công cụ OCR: thư mục con của `outputs/` và tên công cụ có dòng trong `outputs/times.csv` (công cụ bị bỏ qua hết theo luật chi phí hoặc lỗi hết chưa có thư mục nhưng vẫn hiện, điểm 0), trừ thư mục không phải công cụ OCR (hằng `NOT_OCR_DIRS`: `extract` do `run_extract.py` ở phần B tạo, `hsd-js` của phần C, `web-ocr` của phần D) và tên bắt đầu bằng dấu chấm. Ở bảng theo trường, công cụ chưa có file `.txt` nào hiện "–" ở mọi trường (chưa đọc được ảnh nào, khác với đọc mà sai = 0).
 
 Chọn công cụ theo 4 tiêu chí: điểm đầy đủ thông tin, tốc độ, chi phí mỗi ảnh (cloud tính tiền sau mức miễn phí), có chạy offline không. Với app sinh viên, thường kết luận là: dùng công cụ chạy offline cho tên/thành phần, và dùng công cụ mạnh hơn, trong mức miễn phí, cho ảnh hạn sử dụng.
 
@@ -303,3 +303,103 @@ ms / ảnh = tiền xử lý + recognize. Máy đo: Intel Core i7-6820HQ 2,7 GHz
 | 8935001214274 | date.jpg | in dọc, mờ | sai: chữ rác | sai: rỗng |
 
 Nhận xét: `tesseract.js` chỉ đọc được chữ nét liền; 5 ô in chấm kim (dot-matrix: chữ ghép từ các chấm rời) không ô nào ra ngày, 2 ô chữ in dọc cũng không (ảnh cắt không xoay). Cách (b) 1/9, chưa đạt mốc 5/9 để làm tính năng đọc HSD trong app (`hsd-app`, PLAN.md mục 8).
+
+---
+
+# Phần D – OCR trong trình duyệt (đợt `ocr-c`, bản nháp vòng 1)
+
+Mục tiêu: tìm OCR đọc chữ bao bì tốt hơn mà **chạy được trong trình duyệt điện thoại** (Safari iOS, Chrome Android), để sau này làm tính năng "chụp bao bì điền nháp". Chỉ đo, chưa sửa app. Đo trên máy tính bằng Playwright: WebKit (đại diện Safari iOS) và Chromium (đại diện Chrome Android), khổ điện thoại 390×844, deviceScaleFactor 3.
+
+| Công cụ (tên trong `outputs/`) | Chạy ở đâu | Gói / model |
+|---|---|---|
+| `paddlejs-chromium`, `paddlejs-webkit` | trong trình duyệt | `@paddleocr/paddleocr-js` 0.4.2 (SDK chính thức của PaddlePaddle, kiểm `npm view` 07/11/2026), onnxruntime-web 1.24.3 (wasm), OpenCV.js 4.10; model ONNX chính thức trên HuggingFace: `PaddlePaddle/PP-OCRv5_mobile_det_onnx` + `PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx` (cố định theo mã commit trong `web-ocr/assets.js`) |
+| `tesseractjs-chromium`, `tesseractjs-webkit` | trong trình duyệt | `tesseract.js` 7.0.0, `vie+eng` (giống `run_ocr.py`), PSM 3 |
+| `paddle-vietocr` | máy chủ (Python), KHÔNG chạy trong trình duyệt | cùng file ONNX PP-OCRv5 mobile det (onnxruntime CPU) + VietOCR `vgg_transformer` 0.3.13 (PyTorch CPU) |
+
+Lưu ý model latin của PaddleOCR: bảng chữ của `latin_PP-OCRv5_mobile_rec` có 836 ký tự nhưng **thiếu 45/71 chữ có dấu tiếng Việt** (mọi chữ ở khối Unicode "Latin Extended Additional": ả ạ ầ ẩ ậ ề ế ệ ỉ ị ọ ộ ờ ợ ủ ụ ừ ữ ự ỳ…; có ă â đ ê ô ơ ư à á ã è é ì í ò ó õ ù ú ý). Chữ thiếu bị bỏ hẳn khi đọc ("Thành phần" ra "Thành phn", "Nạc" ra "Nc"). PP-OCRv6 (small / tiny) cũng thiếu 44–48/71. VietOCR có đủ.
+
+## Cài
+
+Trong `test-ocr/web-ocr` (cache npm ở ổ D):
+
+- Git Bash: `npm_config_cache='D:\cache\npm' npm ci`
+- Windows PowerShell: `$env:npm_config_cache='D:\cache\npm'; npm ci`
+
+`node_modules` khoảng 226 MB (onnxruntime-web 133 MB vì có nhiều bản wasm). Playwright KHÔNG cài vào đây: dùng bản có sẵn ở `D:\tmp\pw` (1.56.1).
+
+File tải về một lần (không commit; `.gitignore` bỏ `*.onnx`, `*.traineddata*`):
+- `D:\cache\paddle-onnx\PP-OCRv5_mobile_det_onnx\inference.onnx` + `inference.yml` (4,8 MB) và `D:\cache\paddle-onnx\latin_PP-OCRv5_mobile_rec_onnx\inference.onnx` + `inference.yml` (8,0 MB): tải ở `https://huggingface.co/<repo>/resolve/<mã commit>/<file>` (repo, mã commit, sha256 ở `web-ocr/assets.js`).
+- `D:\cache\web-ocr\tessdata\vie.traineddata.gz`, `eng.traineddata.gz` (4,2 MB): tải ở `https://cdn.jsdelivr.net/npm/@tesseract.js-data/<vie|eng>@1.0.0/4.0.0_best_int/<lang>.traineddata.gz`.
+
+VietOCR: venv riêng ở thư mục chính `test-ocr/vietocr/.venv` (khoảng 925 MB vì có torch CPU), trong `test-ocr`:
+
+```
+python -m venv vietocr\.venv
+set PYTHONUTF8=1
+set PIP_CACHE_DIR=D:\cache\pip
+vietocr\.venv\Scripts\python -m pip install -r vietocr\requirements.txt
+vietocr\.venv\Scripts\python -m pip install --no-deps vietocr==0.3.13
+```
+
+`PYTHONUTF8=1` vì `requirements.txt` có chữ tiếng Việt (thiếu thì pip trên Windows báo UnicodeDecodeError). `vietocr` cài `--no-deps` vì gói ghim bản cũ chỉ cần khi huấn luyện (imgaug 0.4.0 không chạy với numpy 2). Trọng số và cấu hình tải ở `https://vocr.vn/data/vietocr/` vào `D:\cache\vietocr` (`base.yml`, `vgg-transformer.yml`, `vgg_transformer.pth` 152 MB, sha256 `380512193a8b…ea59`); script đặt `cnn.pretrained = False` nên không tải thêm trọng số ImageNet.
+
+## Chạy
+
+Thư mục hiện tại là `test-ocr` (nơi có `photos/`, `outputs/`), giống `run_ocr.py`:
+
+```
+node web-ocr/run-browser.mjs --engine paddlejs --browser chromium        # 96 ảnh, file từ máy
+node web-ocr/run-browser.mjs --engine paddlejs --browser webkit
+node web-ocr/run-browser.mjs --engine tesseractjs --browser chromium
+node web-ocr/run-browser.mjs --engine tesseractjs --browser webkit
+node web-ocr/run-browser.mjs --engine paddlejs --browser chromium --mode cdn --limit 1   # byte tải lần đầu (4 tổ hợp)
+node web-ocr/run-browser.mjs --report        # outputs/web-ocr/metrics.csv + tai-lan-dau.md
+vietocr\.venv\Scripts\python vietocr\run_vietocr.py
+python score.py
+python run_extract.py --ocr paddlejs-chromium,paddlejs-webkit,tesseractjs-chromium,tesseractjs-webkit,paddle-vietocr --extractors regex,dict
+python score_combo.py
+node web-ocr/so-sanh.mjs                     # outputs/web-ocr/so-sanh.md
+```
+
+Biến môi trường:
+- `PLAYWRIGHT_BROWSERS_PATH=D:\cache\ms-playwright` (WebKit 26.0, bản 2215 của Playwright 1.56.1).
+- `PW_CHROMIUM` = đường dẫn `chrome-headless-shell.exe` có sẵn (`C:\Users\LTC\AppData\Local\ms-playwright\chromium_headless_shell-1248\chrome-headless-shell-win64\`, Chromium 156; không tải trình duyệt mới).
+- `PLAYWRIGHT_MODULE` (mặc định `D:\tmp\pw\node_modules\playwright\index.mjs`).
+- Tuỳ chọn: `PHOTOS_DIR`, `PADDLE_ONNX_DIR`, `TESSDATA_DIR` (cho `serve.mjs`); `PADDLE_DET_ONNX`, `VIETOCR_DIR` (cho `run_vietocr.py`).
+- `TEMP` = `TMP` = `D:\tmp` (ổ C ít chỗ).
+
+Kết quả ghi giống phần A: `outputs/<công cụ>/<mã>__<ảnh>.txt` + dòng `outputs/times.csv`; chạy lại thì ảnh đã có file kết quả được bỏ qua. Mode `cdn` chỉ ghi `outputs/web-ocr/runs/<công cụ>-cdn.json`. `score.py` không coi `outputs/hsd-js`, `outputs/web-ocr` (và `extract`) là công cụ OCR (hằng `NOT_OCR_DIRS`). Test (không cần trình duyệt): trong `web-ocr` chạy `npm test` (19 test `node:test`).
+
+## Cách làm và cách đo
+
+- `serve.mjs`: server tĩnh ở 127.0.0.1, **không gửi COOP / COEP** (như GitHub Pages), nên `crossOriginIsolated = false`, không có SharedArrayBuffer, wasm chạy **1 luồng** (`numThreads: 1`). Đã kiểm trong trang: `crossOriginIsolated` = false ở cả 2 trình duyệt.
+- WebGPU: `harness.html` gọi `navigator.gpu.requestAdapter()` trước; chỉ khi trả adapter mới dùng onnxruntime-web bản có WebGPU (`ort.min.mjs`, backend "auto", có đường lùi wasm), không thì bản chỉ wasm (`ort.wasm.min.mjs`, nhẹ hơn). Đo được: Chromium headless có `navigator.gpu` nhưng `requestAdapter()` trả null; WebKit Windows không có `navigator.gpu`. **Backend thật: wasm ở cả 2.** Safari iOS 26 có WebGPU, nên trên iPhone thật trang sẽ tải bản WebGPU (wasm JSEP 25 MB, jsDelivr nén còn khoảng 3,4 MB) và có thể nhanh hơn; chưa đo.
+- PaddleOCR.js chạy ở luồng chính (không bật `worker`), tham số mặc định của SDK (det: limit_side_len 64 kiểu min, max 4000, thresh 0,3, box_thresh 0,6, unclip 1,5). SDK chỉ nhận model dạng 1 file `.tar`; HuggingFace có 2 file rời, nên `harness.mjs` truyền `fetch` riêng: tải `inference.onnx` + `inference.yml` rồi gói tar ngay trong trình duyệt (`makeTar` trong `lib.mjs`). Gói `@techstark/opencv-js` và `clipper-lib` không có bản ES module, nên import map trỏ tới 2 file nhỏ trong `web-ocr/shims/` (nạp bằng thẻ `<script>`).
+- Tiền xử lý giống `run_ocr.py`: ảnh vẽ ra canvas như trình duyệt hiển thị (đã xoay theo EXIF; bộ ảnh hiện tại không ảnh nào có EXIF xoay), thu cạnh dài về 1600 px. Cách thu nhỏ của canvas khác PIL và khác nhau giữa 2 trình duyệt, nên chữ đọc ra không giống hệt: Paddle giống hệt 19/96 file giữa Chromium và WebKit, tesseract.js 37/96 (tesseract.js còn dùng bản core khác: Chromium `relaxedsimd`, WebKit `simd`).
+- Giây/ảnh: chỉ bước đọc (`predict` / `recognize`), không tính nạp model và chuẩn bị ảnh, giống `times.csv` của phần A.
+- **Chữ Paddle**: mỗi khung chữ (text box) 1 dòng, theo thứ tự đọc: sắp khung theo cạnh trên, gom thành hàng khi khung chồng chiều dọc với hàng đang xét ≥ 50% chiều cao nhỏ hơn, trong hàng trái sang phải (`orderLines` trong `web-ocr/lib.mjs`; `run_vietocr.py` dùng bản Python giống hệt).
+- **Bộ nhớ** (ước lượng trên Windows, iPhone có thể khác nhiều): mỗi (công cụ × trình duyệt) mở một trình duyệt MỚI (`launchServer` để biết số tiến trình); MỘT tiến trình PowerShell chạy suốt lần đo, mỗi 250 ms lấy `PrivateMemorySize64` (bộ nhớ đã cam kết riêng) và `WorkingSet64` (đang nằm trong RAM) của cả cây tiến trình con (cây tính lại mỗi 2 giây bằng `Win32_Process`). Ghi: mức nền (trung vị tổng private khi mở trang trống 3 giây), đỉnh của 1 tiến trình, đỉnh tổng. Chromium ghi thêm JS heap (CDP `Performance.getMetrics`, không tính bộ nhớ wasm). Private của WebKit rất lớn (5–7 GB) vì JavaScriptCore giữ sẵn vùng nhớ ảo cho wasm, nên so working set. Mức nền của WebKit (858 MB private) chủ yếu là tiến trình `Playwright.exe` của bản WebKit Windows.
+- **Byte tải lần đầu**: mode `cdn`, trình duyệt mới (cache trống), 1 ảnh; cộng `request.sizes().responseBodySize` (byte qua mạng, đã nén) và độ dài body sau giải nén của mọi request ra mạng (kể cả request của worker), không tính file của máy (trang đo, ảnh thử). jsDelivr vẫn phục vụ được file lớn nhất của onnxruntime-web (wasm JSEP 25 MB, asyncify 27 MB: đã tải thử, HTTP 200, nén còn 3,4–3,8 MB); bản đang dùng (wasm 12,4 MB) nén còn 2,0–2,6 MB.
+
+## Kết quả (07/11/2026, vòng 1; máy Intel Core i7-6820HQ 4 nhân 8 luồng, RAM 7,8 GB, Windows 10)
+
+96 ảnh / 31 mã / 239 điểm. Không công cụ nào lỗi hay sập: 96/96 ảnh ok ở cả 5 công cụ mới.
+
+| Công cụ | % A | % B regex | % B dict | giây/ảnh Chromium | giây/ảnh WebKit | bộ nhớ đỉnh 1 tiến trình, working set (MB) Chromium / WebKit | MB tải lần đầu (qua mạng) | chạy được cả 2 trình duyệt? |
+|---|---|---|---|---|---|---|---|---|
+| PaddleOCR.js (PP-OCRv5 mobile det + latin rec) | **62%** | 19% / 20% | 25% | 6,9 (lớn nhất 20,3) | 11,7 (lớn nhất 49,2) | 1.099 / 1.190 | **18,1** (Chromium) / 17,4 (WebKit) | có |
+| tesseract.js 7 (vie+eng) | 25% / 20% | 10% | 12% | 1,5 | 2,5 | 1.004 / 694 | 5,8 | có |
+| PP-OCRv5 det + VietOCR (Python) | **74%** | 25% | 28% | 9,3 trên CPU máy tính | không chạy trong trình duyệt | – | – (model khoảng 157 MB) | không chạy trong trình duyệt |
+| EasyOCR (ocr-a, số cũ) | 45% | 31% | 22% | 13,7 trên CPU máy tính | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
+| Tesseract (ocr-a, số cũ) | 20% | 12% | 12% | 1,3 trên CPU máy tính | không chạy trong trình duyệt | – | – | không chạy trong trình duyệt |
+
+Ô có "a / b" là Chromium / WebKit. Số đầy đủ (private, đỉnh tổng, JS heap, giây nạp) ở `outputs/web-ocr/metrics.csv`; từng file tải lần đầu ở `outputs/web-ocr/tai-lan-dau.md`.
+
+Tải lần đầu của PaddleOCR.js (qua mạng / sau giải nén, kB, Chromium): `ort-wasm-simd-threaded.wasm` 2.627 / 12.362 (jsDelivr), `opencv.js` 2.448 / 10.378 (jsDelivr), rec ONNX 8.047 / 8.042 và det ONNX 4.830 / 4.827 (HuggingFace, không nén), `clipper.js` 47 / 204, `js-yaml.mjs` 18 / 104. tesseract.js: `tesseract-core-*-lstm.wasm.js` 1.375 / 3.906, `eng.traineddata.gz` 2.955, `vie.traineddata.gz` 1.424, `worker.min.js` 33 / 111. Giây nạp từ CDN phụ thuộc mạng: Paddle 40,6 s (Chromium) / 26,9 s (WebKit) lần 1 và 148,8 / 100,8 s lần 2; tesseract.js 12–16 s; nạp từ máy (không qua mạng) Paddle 2–3 s, tesseract.js 1 s.
+
+Nhận xét:
+- PaddleOCR.js **chứa** nhiều thông tin nhất trong các công cụ chạy được trong trình duyệt (62%, hơn EasyOCR 45%), mạnh ở số dinh dưỡng (kcal 88–92%, đạm 96%, béo 88–92%, carb 92–96%) và thương hiệu (83%), yếu ở thành phần (15–16%: thiếu chữ có dấu, xem trên).
+- Nhưng **phần B regex chỉ 19–20%** (dưới ngưỡng ~30%): mỗi khung chữ thành 1 dòng nên nhãn và số của bảng dinh dưỡng nằm ở 2 dòng ("Protein" / "17,14g"), còn luật regex cần nhãn và số cùng dòng (đạm / béo / carb: A 96% nhưng B regex 0–8%). Thử thêm (chỉ để tham khảo, không vào bảng chính, kết quả ở `D:\tmp\ocr-c\variant`): nối các khung cùng hàng thành 1 dòng (`run-browser.mjs --join rows --out <thư mục khác>`, `rowLines` trong `lib.mjs`) thì A vẫn 62%, **B regex 36% (Chromium) / 37% (WebKit), B dict 42% / 42%** (Chromium: kcal 85%, đạm 46%, béo 54%, carb 65%; WebKit: 88%, 50%, 54%, 69%).
+- WebKit chậm hơn Chromium khoảng 1,5–1,7 lần. Giây/ảnh dao động giữa các lần chạy vì máy còn làm việc khác (tải file, cài thư viện): lần chạy chính Chromium 6,9 / WebKit 11,7; lần chạy thử nối hàng (cùng model, cùng ảnh) Chromium 5,8 / WebKit 8,6. Ảnh chữ dày nhất 49 giây trên WebKit. Bộ nhớ: tiến trình trang dùng khoảng 1,1–1,2 GB working set khi đọc ảnh 1600 px (bộ nhớ wasm không trả lại sau khi phình), rủi ro Safari iOS đóng trang trên iPhone ít RAM; phải thử iPhone thật.
+- tesseract.js nhanh và nhẹ (5,8 MB) nhưng chỉ ngang Tesseract Python (20–25%).
+- VietOCR (máy chủ) cao nhất phần A (74%): phần nhận dạng tiếng Việt còn nhiều chỗ để lên nếu có model đủ dấu; không dùng được trong app tĩnh (không có máy chủ).
