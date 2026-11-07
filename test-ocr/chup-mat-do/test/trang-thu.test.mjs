@@ -130,3 +130,24 @@ test("xuat-danh-muc: displayName ưu tiên tên tiếng Việt; catalogJson đ�
   assert.deepEqual(JSON.parse(s), { meta: { a: 1 }, products: [{ code: "1", text: "x" }, { code: "2", text: "y" }] });
   assert.equal(s.split("\n").length, 6);
 });
+
+// ---------- trang-thu-check.mjs (phần thuần) ----------
+import { allowedHost, requestSummary } from "../trang-thu-check.mjs";
+
+test("trang-thu-check: chỉ cùng tên miền + jsDelivr / HuggingFace; bắt POST và request tới openfoodfacts.org", () => {
+  assert.equal(allowedHost("127.0.0.1", "127.0.0.1"), true);
+  assert.equal(allowedHost("cdn.jsdelivr.net", "127.0.0.1"), true);
+  assert.equal(allowedHost("cas-bridge.xethub.hf.co", "127.0.0.1"), true);
+  assert.equal(allowedHost("cdn-lfs.huggingface.co", "127.0.0.1"), true);
+  assert.equal(allowedHost("evilhuggingface.co", "127.0.0.1"), false);
+  assert.equal(allowedHost("world.openfoodfacts.org", "127.0.0.1"), false);
+  const s = requestSummary([
+    { url: "http://127.0.0.1/x", method: "GET", host: "127.0.0.1" },
+    { url: "https://world.openfoodfacts.org/api/v2/product/1", method: "GET", host: "world.openfoodfacts.org" },
+    { url: "https://example.com/p", method: "POST", host: "example.com" },
+  ], "127.0.0.1");
+  assert.equal(s.total, 3);
+  assert.deepEqual(s.post, ["POST https://example.com/p"]);
+  assert.equal(s.openfoodfacts.length, 1);
+  assert.deepEqual(s.foreign, ["example.com", "world.openfoodfacts.org"]);
+});
