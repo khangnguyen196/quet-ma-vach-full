@@ -2,6 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import "../assets.js"; // globalThis.OcrAssets
 import * as lib from "../lib.mjs";
 import * as page from "../../../public/ocr-thu/text.mjs";
@@ -71,6 +73,13 @@ test("isMemoryError: RangeError lỗi vị trí (bounds / out of range) không p
   assert.equal(page.isMemoryError(new RangeError("Start offset -1 is outside the bounds of the buffer")), false);
   assert.equal(page.isMemoryError(new RangeError("Length out of range of buffer")), false);
   assert.equal(page.isMemoryError(new RangeError("Offset is outside the bounds of the DataView")), false);
+});
+
+test("isMemoryError: lỗi wasm 'memory access out of bounds' (đọc / ghi sai chỗ) không phải thiếu bộ nhớ; thiếu bộ nhớ thật vẫn đúng", () => {
+  assert.equal(page.isMemoryError(new WebAssembly.RuntimeError("memory access out of bounds")), false);
+  assert.equal(page.isMemoryError("Uncaught RuntimeError: memory access out of bounds"), false);
+  assert.equal(page.isMemoryError(new Error("Out of memory: Cannot allocate Wasm memory for new instance")), true);
+  assert.equal(page.isMemoryError(new Error("WebAssembly.Memory.grow would exceed the memory's declared maximum size")), true);
 });
 
 test("sumResourceBytes: byte qua mạng, file lấy từ bộ nhớ đệm, file không đo được (thiếu Timing-Allow-Origin)", () => {
@@ -298,4 +307,86 @@ test("ocr-thu-check (h): lỗi mạng thì trả { ok: false, error } thay vì n
   // máy chủ trả 404: không ném, ok = false
   const notFound = async () => ({ ok: false, status: 404, headers: { get: () => "text/html" }, text: async () => "404", arrayBuffer: async () => new ArrayBuffer(0) });
   assert.equal((await checkServedSafe(base, notFound)).ok, false);
+});
+
+test("ocr-thu-check (h): lỗi mạng có lý do gốc (e.cause) thì ghi thêm cause (mã lỗi, không có mã thì câu lỗi)", async () => {
+  const { checkServedSafe } = await import("../ocr-thu-check.mjs");
+  const base = "https://example.test/quet-ma-vach-full/";
+  const withCode = async () => { throw new TypeError("fetch failed", { cause: { code: "ENOTFOUND" } }); };
+  assert.deepEqual(await checkServedSafe(base, withCode), { ok: false, error: "fetch failed", cause: "ENOTFOUND" });
+  const withMessage = async () => { throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 127.0.0.1:4174") }); };
+  assert.deepEqual(await checkServedSafe(base, withMessage), { ok: false, error: "fetch failed", cause: "connect ECONNREFUSED 127.0.0.1:4174" });
+});
+
+// ---------- ocr-thu-check (a0): trạng thái trước khi trang sẵn sàng ----------
+// Trang giả: evaluate trả lần lượt các giá trị trong hàng đợi (hoặc ném), screenshot ghi file (hoặc ghi dở rồi ném).
+function fakePage({ evals, shotThrows = false }) {
+  const calls = { evaluate: 0, screenshot: 0 };
+  return {
+    calls,
+    async evaluate() {
+      calls.evaluate++;
+      const v = evals.shift();
+      if (v instanceof Error) throw v;
+      return v;
+    },
+    async screenshot({ path: p }) {
+      calls.screenshot++;
+      fs.writeFileSync(p, "anh do");
+      if (shotThrows) throw new Error("page.screenshot: Target page, context or browser has been closed");
+    },
+  };
+}
+
+test("ocr-thu-check (a0): captureBeforeReady chụp a0 khi trang chưa sẵn sàng; sẵn sàng trong lúc chụp thì xóa ảnh", async () => {
+  const { captureBeforeReady } = await import("../ocr-thu-check.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-thu-a0-"));
+  try {
+    const a0 = path.join(dir, "chromium-a0.png");
+    const notReady = { readyAlready: false, pickDisabled: [true, true], labelOpacity: ["0.5", "0.5"] };
+    // chưa sẵn sàng, chụp xong vẫn chưa sẵn sàng: giữ ảnh, đủ trường
+    const p1 = fakePage({ evals: [{ ...notReady }, false] });
+    assert.deepEqual(await captureBeforeReady(p1, a0), { ...notReady, shotBeforeReady: true });
+    assert.equal(fs.existsSync(a0), true);
+    fs.rmSync(a0);
+    // sẵn sàng trong lúc chụp: ảnh không còn đúng, xóa
+    const p2 = fakePage({ evals: [{ ...notReady }, true] });
+    assert.deepEqual(await captureBeforeReady(p2, a0), { ...notReady, shotBeforeReady: false });
+    assert.equal(fs.existsSync(a0), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ocr-thu-check (a0): trang đã sẵn sàng trước lúc đo thì chỉ ghi readyAlready (không ghi trạng thái nút), không chụp", async () => {
+  const { captureBeforeReady } = await import("../ocr-thu-check.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-thu-a0-"));
+  try {
+    const a0 = path.join(dir, "webkit-a0.png");
+    const p = fakePage({ evals: [{ readyAlready: true, pickDisabled: [false, false], labelOpacity: ["1", "1"] }] });
+    assert.deepEqual(await captureBeforeReady(p, a0), { readyAlready: true, shotBeforeReady: false });
+    assert.equal(p.calls.screenshot, 0);
+    assert.equal(fs.existsSync(a0), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ocr-thu-check (a0): chụp / đọc trang lỗi thì trả { error, shotBeforeReady: false }, xóa ảnh dở, không ném", async () => {
+  const { captureBeforeReady } = await import("../ocr-thu-check.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-thu-a0-"));
+  try {
+    const a0 = path.join(dir, "chromium-a0.png");
+    // chụp ghi dở rồi ném
+    const p1 = fakePage({ evals: [{ readyAlready: false, pickDisabled: [true, true], labelOpacity: ["0.5", "0.5"] }], shotThrows: true });
+    assert.deepEqual(await captureBeforeReady(p1, a0),
+      { error: "page.screenshot: Target page, context or browser has been closed", shotBeforeReady: false });
+    assert.equal(fs.existsSync(a0), false);
+    // đọc trạng thái trang ném (vd trang chuyển hướng giữa chừng)
+    const p2 = fakePage({ evals: [new Error("Execution context was destroyed")] });
+    assert.deepEqual(await captureBeforeReady(p2, a0), { error: "Execution context was destroyed", shotBeforeReady: false });
+    assert.equal(p2.calls.screenshot, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
