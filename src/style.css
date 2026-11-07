@@ -111,6 +111,12 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
   border: 2px solid rgba(255, 255, 255, .9); border-radius: 6px;
   box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .28); pointer-events: none;
 }
+/* Chữ "Đang tải bộ đọc mã…" giữa khung trong lúc chờ zxing-wasm (hình camera đã hiện) */
+.scan-wait {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  margin: 0; padding: 6px 12px; border-radius: 6px;
+  background: rgba(0, 0, 0, .6); color: #fff; font-size: 14px; white-space: nowrap; pointer-events: none;
+}
 .idle {
   position: absolute; inset: 0;
   display: grid; place-items: center; text-align: center;
