@@ -143,7 +143,7 @@ btnCam.addEventListener("click", async () => {
       if (navigator.vibrate) navigator.vibrate(60);
       lookup(text);
     });
-    // start() có thể trả về mà camera không chạy (đã tắt trong lúc mở, vd chuyển sang Tủ đồ): khi đó nút giữ
+    // start() có thể trả về mà camera không chạy (vd đã ra mã ngay khung đầu, onCode đã tắt camera): khi đó nút giữ
     // "Bật camera" và khung về như lúc tắt, không ghi đè lời nhắn đang có.
     if (scanner.running) {
       btnCam.textContent = "Tắt camera";
