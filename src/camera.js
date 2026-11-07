@@ -67,17 +67,25 @@ export function pickCameraCode(results) {
   return pickCode([...results].sort((a, b) => rank(a) - rank(b))); // sort giữ thứ tự cũ khi cùng hạng
 }
 
+// Mã 8 số đang chờ chỉ giữ chừng này mili giây: đọc lại trong khoảng này mới nhận. Lý do (code-reviewer, nhay-hon
+// vòng 1): mảnh UPC-E giả (vd "19345888" từ lon 7Up nghiêng) giữ mãi thì 15 giây sau gặp lại là nhận, tra sai sản phẩm.
+export const CONFIRM_WINDOW_MS = 1000;
+
 /**
  * Xác nhận mã trước khi tra: mã 12–13 số nhận ngay; mã 8 số (EAN-8, UPC-E: dễ là mảnh đọc nhầm của mã dài)
- * phải đọc ra lần thứ 2 (không cần 2 khung liền nhau) mới nhận. state: mã 8 số đang chờ (null lúc bắt đầu).
+ * phải đọc ra lần nữa trong CONFIRM_WINDOW_MS (không cần 2 khung liền nhau) mới nhận.
+ * state: mã 8 số đang chờ { code, at } (at = lúc đọc lần đầu, mili giây) hoặc null; now: giờ hiện tại (mili giây,
+ * vd performance.now()). Quá hạn thì lần này coi như lần đầu. Khung không có mã giữ nguyên state (vẫn hết hạn theo giờ).
  * Trả { accept: mã được nhận hoặc null, state: trạng thái mới }.
- * Ví dụ: let s = confirmCode(null, "96385074") → accept null; confirmCode(s.state, "96385074") → accept "96385074".
+ * Ví dụ: let s = confirmCode(null, "96385074", 0) → accept null, state { code: "96385074", at: 0 };
+ *   confirmCode(s.state, "96385074", 500) → accept "96385074"; confirmCode(s.state, "96385074", 1500) → accept null,
+ *   state { code: "96385074", at: 1500 }.
  */
-export function confirmCode(state, code) {
+export function confirmCode(state, code, now) {
   if (!code) return { accept: null, state };
   if (code.length !== 8) return { accept: code, state: null };
-  if (state === code) return { accept: code, state: null };
-  return { accept: null, state: code };
+  if (state && state.code === code && now - state.at <= CONFIRM_WINDOW_MS) return { accept: code, state: null };
+  return { accept: null, state: { code, at: now } };
 }
 
 /** 4 định dạng mã hàng theo tên của BarcodeDetector (giống formatsToSupport của html5-qrcode). */
