@@ -351,6 +351,175 @@ export function hamming(a, b) {
   return d;
 }
 
+// ---- So ảnh ít phụ thuộc khung cắt (vòng 2) ----
+// Lý do: vòng 1 so dHash của CẢ khung ảnh, nên cùng một tấm chụp nhưng OFF cắt khác (front_xx là bản cắt của ảnh
+// gốc) có thể cách > 10 bit và lọt vào chỉ mục. Vòng 2: cắt vùng giữa 100 / 90 / 80 / 70 % của CẢ HAI ảnh, lấy
+// khoảng cách nhỏ nhất của mọi cặp, cho cả dHash và pHash.
+
+/** Tỉ lệ cắt vùng giữa dùng khi so. */
+export const CROP_LEVELS = [1, 0.9, 0.8, 0.7];
+/** ≤ HASH_DUP bit (trên 64): coi là cùng ảnh, loại tự động. */
+export const HASH_DUP = 10;
+/** HASH_DUP < khoảng cách ≤ HASH_SUSPECT: nghi ngờ, bắt buộc xem tay. */
+export const HASH_SUSPECT = 24;
+
+/** Thu ảnh xám (mảng w×h, hàng trên xuống) về outW×outH bằng trung bình vùng (area average), chỉ lấy vùng giữa
+ *  tỉ lệ crop (0–1] theo mỗi chiều. Dùng chung cho dHash (9×8) và pHash (32×32). */
+export function resizeGray(gray, w, h, outW, outH, crop = 1) {
+  if (!gray || gray.length !== w * h) throw new Error("ảnh xám phải có đúng w×h điểm");
+  const cw = w * crop;
+  const ch = h * crop;
+  const x0 = (w - cw) / 2;
+  const y0 = (h - ch) / 2;
+  const out = new Array(outW * outH);
+  for (let oy = 0; oy < outH; oy++) {
+    const ya = y0 + (oy * ch) / outH;
+    const yb = y0 + ((oy + 1) * ch) / outH;
+    for (let ox = 0; ox < outW; ox++) {
+      const xa = x0 + (ox * cw) / outW;
+      const xb = x0 + ((ox + 1) * cw) / outW;
+      let sum = 0;
+      let area = 0;
+      for (let y = Math.floor(ya); y < Math.ceil(yb); y++) {
+        const wy = Math.min(yb, y + 1) - Math.max(ya, y);
+        if (wy <= 0) continue;
+        for (let x = Math.floor(xa); x < Math.ceil(xb); x++) {
+          const wx = Math.min(xb, x + 1) - Math.max(xa, x);
+          if (wx <= 0) continue;
+          sum += gray[Math.min(h - 1, y) * w + Math.min(w - 1, x)] * wx * wy;
+          area += wx * wy;
+        }
+      }
+      out[oy * outW + ox] = area ? sum / area : 0;
+    }
+  }
+  return out;
+}
+
+/** pHash 64 bit tự viết: ảnh xám 32×32 -> DCT-II 2 chiều -> 8×8 hệ số tần số thấp (góc trên trái) ->
+ *  bit = hệ số lớn hơn trung vị của 64 hệ số. Trả 16 ký tự hex. */
+export function pHashFromGray(gray) {
+  const N = 32;
+  if (!gray || gray.length !== N * N) throw new Error("pHash cần đúng 32×32 = 1024 điểm xám");
+  const cos = [];
+  for (let u = 0; u < 8; u++) {
+    cos.push(Array.from({ length: N }, (_, x) => Math.cos(((2 * x + 1) * u * Math.PI) / (2 * N))));
+  }
+  const coef = [];
+  for (let v = 0; v < 8; v++) {
+    for (let u = 0; u < 8; u++) {
+      let s = 0;
+      for (let y = 0; y < N; y++) {
+        const cy = cos[v][y];
+        for (let x = 0; x < N; x++) s += gray[y * N + x] * cos[u][x] * cy;
+      }
+      coef.push(s);
+    }
+  }
+  const med = median(coef);
+  let hex = "";
+  for (let i = 0; i < 64; i += 4) {
+    let n = 0;
+    for (let j = 0; j < 4; j++) n = (n << 1) | (coef[i + j] > med ? 1 : 0);
+    hex += n.toString(16);
+  }
+  return hex;
+}
+
+/** Bộ mã băm của một ảnh xám w×h: với mỗi mức cắt CROP_LEVELS có { crop, d: dHash, p: pHash }. */
+export function cropHashSet(gray, w, h, levels = CROP_LEVELS) {
+  return levels.map((crop) => ({
+    crop,
+    d: dHashFromGray(resizeGray(gray, w, h, 9, 8, crop)),
+    p: pHashFromGray(resizeGray(gray, w, h, 32, 32, crop)),
+  }));
+}
+
+/** So 2 bộ mã băm: khoảng cách nhỏ nhất của mọi cặp mức cắt, riêng dHash (dMin) và pHash (pMin);
+ *  distance = min(dMin, pMin). verdict: "trùng" (≤ dup) | "nghi ngờ" (≤ suspect, phải xem tay) | "khác". */
+export function compareHashSets(a, b, { dup = HASH_DUP, suspect = HASH_SUSPECT } = {}) {
+  let dMin = Infinity;
+  let pMin = Infinity;
+  let dPair = null;
+  let pPair = null;
+  for (const x of a || []) {
+    for (const y of b || []) {
+      const dd = hamming(x.d, y.d);
+      const pp = hamming(x.p, y.p);
+      if (dd < dMin) { dMin = dd; dPair = [x.crop, y.crop]; }
+      if (pp < pMin) { pMin = pp; pPair = [x.crop, y.crop]; }
+    }
+  }
+  if (!Number.isFinite(dMin)) return null;
+  const distance = Math.min(dMin, pMin);
+  const verdict = distance <= dup ? "trùng" : distance <= suspect ? "nghi ngờ" : "khác";
+  return { dMin, pMin, dPair, pPair, distance, verdict };
+}
+
+/** Mọi ảnh của một sản phẩm OFF thành danh sách phẳng [{ code, key, imgid }]: ảnh gốc (khóa là số, imgid = khóa)
+ *  và bản cắt đã chọn (front_xx, ingredients_xx…, imgid trỏ về ảnh gốc). */
+export function productImageList(code, product) {
+  const out = [];
+  for (const [key, v] of Object.entries(product?.images || {})) {
+    if (/^\d+$/.test(key)) out.push({ code: String(code), key, imgid: key });
+    else if (v && v.imgid != null) out.push({ code: String(code), key, imgid: String(v.imgid) });
+  }
+  return out;
+}
+
+/** Bỏ mọi ảnh trùng imgid với front.jpg của mã thử (kể cả bản cắt front_xx trỏ về imgid đó).
+ *  images: [{ code, key, imgid }]; testImgids: { [mã]: imgid | [imgid...] } (hoặc Map). Mã không có trong
+ *  testImgids giữ nguyên. Trả { kept, removed }. Vòng 3 dùng để dựng chỉ mục. */
+export function excludeTestImgids(images, testImgids) {
+  const get = (c) => (testImgids instanceof Map ? testImgids.get(c) : testImgids?.[c]);
+  const kept = [];
+  const removed = [];
+  for (const im of images || []) {
+    const t = get(String(im.code));
+    const list = (Array.isArray(t) ? t : t == null ? [] : [t]).map(String);
+    if (list.includes(String(im.imgid))) removed.push(im);
+    else kept.push(im);
+  }
+  return { kept, removed };
+}
+
+/** Luật chọn ảnh chỉ mục (vòng 2): như chooseIndexImage nhưng so bằng compareHashSets (nhiều mức cắt, dHash + pHash)
+ *  và có kết quả xem tay.
+ *  fronts: frontImages(product); testImgid; sets: { [imgid]: cropHashSet }; testSet: cropHashSet của front.jpg;
+ *  manual: { [imgid]: { verdict: "trùng" | "khác", note } } (xem tay).
+ *  Loại: "cùng imgid" | "gần trùng x bit" | "xem tay: cùng tấm chụp" | "nghi ngờ x bit, chưa xem tay" | "không có mã băm".
+ *  Trả { chosen: { key, imgid, compare, manual } | null, rejected: [...] }. */
+export function chooseIndexImageV2(fronts, testImgid, sets, testSet, manual = {}, opts = {}) {
+  const rejected = [];
+  const seen = new Set();
+  for (const f of fronts || []) {
+    if (testImgid != null && String(f.imgid) === String(testImgid)) {
+      rejected.push({ key: f.key, imgid: f.imgid, reason: "cùng imgid" });
+      continue;
+    }
+    if (seen.has(f.imgid)) { rejected.push({ key: f.key, imgid: f.imgid, reason: "trùng imgid với ứng viên trước" }); continue; }
+    seen.add(f.imgid);
+    const s = sets?.[f.imgid];
+    if (!s || !testSet) { rejected.push({ key: f.key, imgid: f.imgid, reason: "không có mã băm" }); continue; }
+    const compare = compareHashSets(s, testSet, opts);
+    if (compare.verdict === "trùng") {
+      rejected.push({ key: f.key, imgid: f.imgid, reason: `gần trùng ${compare.distance} bit`, compare });
+      continue;
+    }
+    const m = manual?.[f.imgid];
+    if (m?.verdict === "trùng") {
+      rejected.push({ key: f.key, imgid: f.imgid, reason: "xem tay: cùng tấm chụp", compare, manual: m });
+      continue;
+    }
+    if (compare.verdict === "nghi ngờ" && m?.verdict !== "khác") {
+      rejected.push({ key: f.key, imgid: f.imgid, reason: `nghi ngờ ${compare.distance} bit, chưa xem tay`, compare });
+      continue;
+    }
+    return { chosen: { key: f.key, imgid: f.imgid, compare, manual: m ?? null }, rejected };
+  }
+  return { chosen: null, rejected };
+}
+
 /** Luật chọn ảnh chỉ mục cho một mã thử.
  *  fronts: frontImages(product); testImgid: imgid của front.jpg; hashes: { [imgid]: dHash hex } của ảnh ứng viên;
  *  testHash: dHash của front.jpg.
