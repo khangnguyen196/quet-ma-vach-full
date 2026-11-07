@@ -17,9 +17,10 @@
 //  (g) app chính (trình duyệt mới, chưa có service worker): giao diện chính hiện, không lỗi console;
 //  (h) chỉ đọc, ngoài trình duyệt: Content-Type của ocr-thu.html (text/html), ocr-thu/regex.mjs, ocr-thu/text.mjs (có
 //      "javascript"; sai thì trình duyệt không chạy module); HTML có disabled sẵn ở 2 ô chọn ảnh (mở lại khi trang sẵn sàng).
-//      Lỗi mạng thì (h) = { ok: false, error }, script vẫn ghi ket-qua.json của (a)-(g).
+//      Lỗi mạng thì (h) = { ok: false, error, cause? }, script vẫn ghi ket-qua.json của (a)-(g).
 // Trước khi trang sẵn sàng: nếu kịp thì chụp <trình duyệt>-a0.png và ghi độ mờ (opacity) của 2 nút chọn ảnh
-// (report.beforeReady, chỉ để xem, không tính vào QUA).
+// (report.beforeReady, chỉ để xem, không tính vào QUA). Trang đã sẵn sàng trước lúc đo thì chỉ ghi readyAlready;
+// chụp lỗi thì ghi error và chạy tiếp.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -74,12 +75,41 @@ async function checkServed(base, fetchImpl) {
 }
 
 /** (h) như checkServed nhưng không ném: lỗi mạng (fetch ném) thì trả { ok: false, error } để script vẫn ghi
- *  ket-qua.json của (a)-(g) và kết luận CÓ BƯỚC KHÔNG QUA. fetchImpl: để test truyền fetch giả. */
+ *  ket-qua.json của (a)-(g) và kết luận CÓ BƯỚC KHÔNG QUA. fetch của Node chỉ báo "fetch failed", lý do gốc
+ *  (ENOTFOUND, ECONNREFUSED…) nằm ở e.cause: có thì ghi thêm cause (mã lỗi, không có mã thì câu lỗi).
+ *  fetchImpl: để test truyền fetch giả. */
 export async function checkServedSafe(base, fetchImpl = globalThis.fetch) {
   try {
     return await checkServed(base, fetchImpl);
   } catch (e) {
-    return { ok: false, error: String(e?.message ?? e) };
+    const out = { ok: false, error: String(e?.message ?? e) };
+    const c = e?.cause;
+    if (c != null) out.cause = String(c.code ?? c.message ?? c);
+    return out;
+  }
+}
+
+/** (a0) Trạng thái trang trước khi sẵn sàng (chỉ để xem, không tính vào QUA).
+ *  - Trang đã sẵn sàng trước lúc đo: chỉ { readyAlready: true, shotBeforeReady: false } (trạng thái nút lúc đó đã là
+ *    sau khi sẵn sàng, không ghi để khỏi hiểu nhầm).
+ *  - Chưa sẵn sàng: ghi 2 ô chọn ảnh có khóa không (pickDisabled), độ mờ 2 nút (labelOpacity), chụp khung nhìn vào a0Path;
+ *    sẵn sàng xong trong lúc chụp thì ảnh không còn đúng: xóa, shotBeforeReady = false.
+ *  - Đọc trang / chụp lỗi: không ném, trả { error, shotBeforeReady: false } và xóa ảnh dở, để các bước (a)-(h) vẫn chạy. */
+export async function captureBeforeReady(page, a0Path) {
+  try {
+    const before = await page.evaluate(() => ({
+      readyAlready: !!(window.__ocrThu && "ready" in window.__ocrThu),
+      pickDisabled: ["pickCamera", "pickLibrary"].map((id) => document.getElementById(id)?.disabled ?? null),
+      labelOpacity: [...document.querySelectorAll("label.btn")].map((l) => getComputedStyle(l).opacity),
+    }));
+    if (before.readyAlready) return { readyAlready: true, shotBeforeReady: false };
+    await page.screenshot({ path: a0Path });
+    const shotBeforeReady = !(await page.evaluate(() => !!(window.__ocrThu && "ready" in window.__ocrThu)));
+    if (!shotBeforeReady) fs.rmSync(a0Path, { force: true });
+    return { ...before, shotBeforeReady };
+  } catch (e) {
+    fs.rmSync(a0Path, { force: true });
+    return { error: String(e?.message ?? e), shotBeforeReady: false };
   }
 }
 
@@ -123,22 +153,10 @@ async function main() {
       .then(() => true, () => false);
     await page.goto(args.base + "ocr-thu.html");
     // trước khi trang sẵn sàng (nếu kịp): 2 ô chọn ảnh khóa, nút chọn ảnh mờ (chỉ để xem, không tính vào QUA)
-    const isReady = () => page.evaluate(() => !!(window.__ocrThu && "ready" in window.__ocrThu));
-    const before = await page.evaluate(() => ({
-      readyAlready: !!(window.__ocrThu && "ready" in window.__ocrThu),
-      pickDisabled: ["pickCamera", "pickLibrary"].map((id) => document.getElementById(id)?.disabled ?? null),
-      labelOpacity: [...document.querySelectorAll("label.btn")].map((l) => getComputedStyle(l).opacity),
-    }));
-    let shotBeforeReady = false;
-    if (!before.readyAlready) {
-      // chụp khung nhìn (nhanh hơn cả trang); sẵn sàng xong trong lúc chụp thì ảnh không còn đúng: xóa, ghi "chưa chụp"
-      const a0 = path.join(args.shots, `${args.browser}-a0.png`);
-      await page.screenshot({ path: a0 });
-      shotBeforeReady = !(await isReady());
-      if (!shotBeforeReady) fs.rmSync(a0, { force: true });
-    }
-    report.beforeReady = { ...before, shotBeforeReady };
-    console.log("(a0) trước khi sẵn sàng:", JSON.stringify(report.beforeReady), shotBeforeReady ? "– đã chụp a0" : "– chưa chụp (trang sẵn sàng trước khi chụp xong)");
+    report.beforeReady = await captureBeforeReady(page, path.join(args.shots, `${args.browser}-a0.png`));
+    const b0 = report.beforeReady;
+    console.log("(a0) trước khi sẵn sàng:", JSON.stringify(b0), b0.shotBeforeReady ? "– đã chụp a0"
+      : b0.error ? "– lỗi khi chụp, bỏ qua (không tính vào QUA)" : "– chưa chụp (trang sẵn sàng trước khi chụp xong)");
     const viaSw = await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller));
     const title = await page.title();
     const isTestPage = (await page.locator("#runPaddle").count()) === 1;
