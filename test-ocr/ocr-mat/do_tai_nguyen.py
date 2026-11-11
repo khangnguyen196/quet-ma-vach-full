@@ -12,6 +12,10 @@ dùng) của tiến trình + MỌI tiến trình con mỗi --interval giây (m�
 
 --ocr-dir phải là thư mục MỚI: đã có *__front.json thì báo lỗi, thoát mã 2, không chạy lệnh OCR; khi đọc kết quả
 chỉ nhận file sửa sau lúc bắt đầu. Thoát giữa chừng (Ctrl+C, lỗi) thì kill cả cây tiến trình con.
+Vòng 3 chặn thêm (đều thoát mã 2, KHÔNG chạy lệnh OCR):
+  - <--out>/<--name>-tai-nguyen.json đã có (tránh lần sau ghi đè lần trước); cố ý ghi đè thì thêm --ghi-de;
+  - lệnh con có "--out <x>" (hoặc "--out=<x>") mà x khác --ocr-dir sau khi chuẩn hóa đường dẫn.
+Chạy xong mà không có ảnh nào (images == 0): vẫn ghi file tài nguyên để xem, in lỗi, thoát mã 3.
 
 Ra: <--out>/<tên>-tai-nguyen.json. Thứ tự ảnh: trường "order" trong file OCR nếu có, không thì giờ sửa file.
 Chỉ để đo, không thuộc app. Cần psutil (requirements.txt cùng thư mục, cài trong venv riêng ở ổ D).
@@ -116,6 +120,27 @@ def read_entries(ocr_dir, since):
     return entries
 
 
+def _sleep(seconds):
+    """Chờ giữa 2 lần lấy mẫu (tách riêng để test vá hàm này, không vá time.sleep của cả tiến trình test)."""
+    time.sleep(seconds)
+
+
+def norm_path(p):
+    """Chuẩn hóa đường dẫn để so: tuyệt đối, bỏ '.' / '..' / dấu / cuối, không phân biệt hoa thường trên Windows."""
+    return os.path.normcase(os.path.abspath(os.path.normpath(str(p))))
+
+
+def child_out_dirs(cmd):
+    """Mọi giá trị của '--out <x>' hoặc '--out=<x>' trong lệnh con."""
+    outs = []
+    for i, arg in enumerate(cmd):
+        if arg == "--out" and i + 1 < len(cmd):
+            outs.append(cmd[i + 1])
+        elif arg.startswith("--out="):
+            outs.append(arg[len("--out="):])
+    return outs
+
+
 def kill_tree(pid):
     """Kill tiến trình pid và mọi tiến trình con (venv Python trên Windows chạy python thật là tiến trình con)."""
     import psutil
@@ -145,6 +170,7 @@ def main(argv=None):
     ap.add_argument("--model", action="append", default=[])
     ap.add_argument("--interval", type=float, default=0.25)
     ap.add_argument("--out", default=r"D:\tmp\ocr-mat\ket-qua")
+    ap.add_argument("--ghi-de", action="store_true", help="cho phép ghi đè <out>/<name>-tai-nguyen.json đã có")
     a = ap.parse_args(argv[:cut])
     cmd = argv[cut + 1:]
     interval = min(a.interval, MAX_INTERVAL)
@@ -155,6 +181,18 @@ def main(argv=None):
     if old:
         print(f"Thư mục OCR {a.ocr_dir} đã có {len(old)} file *__front.json của lần chạy cũ: "
               "kết quả sẽ lẫn file cũ. Hãy dùng một thư mục mới (không chạy lệnh OCR).", file=sys.stderr)
+        return 2
+
+    out = Path(a.out) / f"{a.name}-tai-nguyen.json"
+    if out.exists() and not a.ghi_de:
+        print(f"File tài nguyên {out} đã có (của lần chạy trước): chạy tiếp sẽ ghi đè. Đổi --name, "
+              "hoặc thêm --ghi-de nếu cố ý ghi đè (không chạy lệnh OCR).", file=sys.stderr)
+        return 2
+
+    lech = [x for x in child_out_dirs(cmd) if norm_path(x) != norm_path(a.ocr_dir)]
+    if lech:
+        print(f"Lệnh OCR ghi vào --out {lech[0]} nhưng --ocr-dir là {a.ocr_dir}: kết quả sẽ không được đọc. "
+              "Hãy dùng cùng một thư mục (không chạy lệnh OCR).", file=sys.stderr)
         return 2
 
     t0 = time.time()
@@ -168,7 +206,7 @@ def main(argv=None):
         while child.poll() is None:
             if proc is not None:
                 peak.add(sample_tree(proc))
-            time.sleep(interval)
+            _sleep(interval)
     finally:
         if child.poll() is None:  # thoát giữa chừng (Ctrl+C, lỗi): không để lệnh OCR chạy nền
             kill_tree(child.pid)
@@ -195,12 +233,15 @@ def main(argv=None):
         "modelMB": round(sum(path_size(m) for m in a.model) / 2**20, 1),
     }
     os.makedirs(a.out, exist_ok=True)
-    out = Path(a.out) / f"{a.name}-tai-nguyen.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     s = res["seconds"]
     print(f"{a.name}: {res['imagesOk']}/{res['images']} ảnh ok; giây/ảnh (bỏ ảnh đầu) trung vị {s['median']}, lớn nhất {s['max']}; "
           f"ảnh đầu {s['first']}; nạp model {res['loadSeconds']}; RSS đỉnh {res['rssPeakTotalMB']} MB; model {res['modelMB']} MB")
     print(f"Ghi: {out}")
+    if not rows:
+        print(f"Lỗi: không có ảnh nào trong {a.ocr_dir} (images = 0; mã thoát lệnh OCR {child.returncode}). "
+              "Kiểm lại lệnh OCR và --ocr-dir.", file=sys.stderr)
+        return 3
     return child.returncode
 
 
