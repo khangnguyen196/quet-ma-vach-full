@@ -25,7 +25,7 @@ import {
 } from "./lib.mjs";
 
 function parseArgs(argv) {
-  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: process.env.PHOTOS_DIR || "photos", timeout: 300, report: false, join: "", only: "", lines: false, det: "", rec: "", ort: "", channel: "", tag: "" };
+  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: process.env.PHOTOS_DIR || "photos", timeout: 300, report: false, join: "", only: "", lines: false, det: "", rec: "", ort: "", channel: "", tag: "", params: "" };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -45,7 +45,8 @@ function parseArgs(argv) {
     else if (k === "--rec") a.rec = v(); // latin | server
     else if (k === "--ort") a.ort = v(); // wasm | webgpu (bỏ bước dò WebGPU của harness.html)
     else if (k === "--channel") a.channel = v(); // chrome | msedge (Playwright channel, chỉ chromium)
-    else if (k === "--tag") a.tag = v(); // hậu tố tên công cụ / thư mục kết quả, vd webgpu -> paddlejs-rows-chromium-webgpu
+    else if (k === "--tag") a.tag = v();
+    else if (k === "--params") a.params = v(); // r1 (vòng 3): tham số chạy PaddleOCR.js bám RapidOCR (assets.js PARAM_PRESETS) // hậu tố tên công cụ / thư mục kết quả, vd webgpu -> paddlejs-rows-chromium-webgpu
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
@@ -152,7 +153,7 @@ async function runOnce(args) {
   const browserType = args.browser === "chromium" ? pw.chromium : pw.webkit;
 
   const run = {
-    tool, engine: args.engine, browser: args.browser, mode: args.mode, options: { det: args.det, rec: args.rec, ort: args.ort, channel: args.channel, tag: args.tag }, startedAt: new Date().toISOString(),
+    tool, engine: args.engine, browser: args.browser, mode: args.mode, options: { det: args.det, rec: args.rec, ort: args.ort, channel: args.channel, tag: args.tag, params: args.params }, startedAt: new Date().toISOString(),
     images: todo.length, ok: 0, errors: 0, skippedExisting: 0, crashes: 0, initError: null, init: null, errorsSample: [],
   };
   const samples = [];

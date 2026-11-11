@@ -62,6 +62,56 @@
     },
   };
 
+  // Đợt ocr-mat vòng 3 (R1-trình-duyệt): đúng 2 file ONNX của R1 (gói PyPI rapidocr 3.10.0, nguồn chính thức RapidAI
+  // trên ModelScope, ghim tag v3.10.0; sha256 trùng default_models.yaml của gói và ETag của ModelScope).
+  // inference.yml (tên model + tiền xử lý + bộ ký tự) lấy từ ONNX chính thức của PaddlePaddle trên HuggingFace (ghim
+  // mã commit): character_dict trùng hệt metadata "character" của file ONNX RapidOCR (18.708 ký tự). File ONNX của
+  // HuggingFace khác sha256 nên không dùng. sha256 dưới là của file ONNX (file yml: ymlSha256).
+  var R1_MODELS = {
+    det: {
+      name: "PP-OCRv6_small_det",
+      repo: "PaddlePaddle/PP-OCRv6_small_det_onnx",
+      rev: "28fe5895c24fd108c19eb3e8479f4ab385fbfc62",
+      onnxUrl: "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx",
+      dir: "rapidocr-PP-OCRv6_small_det",
+      sha256: "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+      ymlSha256: "193f435274bf9f0b5f71a929bbfbcf148282df7e633b34e7c373e8f44741b516",
+    },
+    rec: {
+      name: "PP-OCRv6_small_rec",
+      repo: "PaddlePaddle/PP-OCRv6_small_rec_onnx",
+      rev: "b8f84f0b80c529de40b4fbb3544b84fa7233a513",
+      onnxUrl: "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx",
+      dir: "rapidocr-PP-OCRv6_small_rec",
+      sha256: "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+      ymlSha256: "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1",
+    },
+  };
+  MODEL_VARIANTS.det.r1 = R1_MODELS.det;
+  MODEL_VARIANTS.rec.r1 = R1_MODELS.rec;
+
+  // Tham số chạy của PaddleOCR.js (truyền vào PaddleOCR.create), chọn bằng tham số params; trống = mặc định SDK (như 1a).
+  // r1: mặc định config.yaml của RapidOCR 3.10.0 (Det limit_side_len 736 kiểu min, thresh 0,3, box_thresh 0,5,
+  // unclip_ratio 1,6; Global text_score 0,5). Không có cls (PaddleOCR.js không nạp được cls v2.0 của RapidOCR).
+  var PARAM_PRESETS = {
+    r1: {
+      textDetLimitSideLen: 736,
+      textDetLimitType: "min",
+      textDetThresh: 0.3,
+      textDetBoxThresh: 0.5,
+      textDetUnclipRatio: 1.6,
+      textRecScoreThresh: 0.5,
+    },
+  };
+
+  /** Tham số chạy theo tên (trống = {} = mặc định SDK); tên lạ -> lỗi. */
+  function pickParams(name) {
+    if (!name) return {};
+    var p = PARAM_PRESETS[name];
+    if (!p) throw new Error("Không có bộ tham số params=" + name);
+    return Object.assign({}, p);
+  }
+
   /** Model theo tên biến thể (det: mobile | server; rec: latin | server); trống = mặc định; tên lạ -> lỗi. */
   function pickModel(kind, variant) {
     if (!variant) return MODELS[kind];
@@ -86,6 +136,7 @@
         : "/node_modules/" + pkg + "/" + path;
     };
     var model = function (m, file) {
+      if (mode === "cdn" && file === "inference.onnx" && m.onnxUrl) return m.onnxUrl; // r1: ONNX từ RapidAI (ModelScope)
       return mode === "cdn"
         ? "https://huggingface.co/" + m.repo + "/resolve/" + m.rev + "/" + file
         : "/cache/paddle-onnx/" + m.dir + "/" + file;
@@ -105,6 +156,7 @@
       detYml: model(det, "inference.yml"),
       recOnnx: model(rec, "inference.onnx"),
       recYml: model(rec, "inference.yml"),
+      runtimeParams: pickParams(opts && opts.params),
       tesseract: npm("tesseract.js", "dist/tesseract.esm.min.js"),
       tesseractWorker: npm("tesseract.js", "dist/worker.min.js"),
       tesseractCore: mode === "cdn"
@@ -126,5 +178,5 @@
     };
   }
 
-  root.OcrAssets = { VERSIONS: VERSIONS, MODELS: MODELS, MODEL_VARIANTS: MODEL_VARIANTS, TESS_LANGS: TESS_LANGS, assetUrls: assetUrls };
+  root.OcrAssets = { VERSIONS: VERSIONS, MODELS: MODELS, MODEL_VARIANTS: MODEL_VARIANTS, PARAM_PRESETS: PARAM_PRESETS, TESS_LANGS: TESS_LANGS, assetUrls: assetUrls };
 })(globalThis);

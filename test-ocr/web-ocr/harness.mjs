@@ -83,6 +83,8 @@ async function initPaddle() {
       proxy: false,
     },
     fetch: tarFetch,
+    // params=r1 (vòng 3): tham số dò khung / ngưỡng chữ bám RapidOCR (assets.js PARAM_PRESETS); trống = {} = mặc định SDK
+    ...(A.runtimeParams || {}),
   });
   const summary = ocr.getInitializationSummary();
   return {
@@ -94,6 +96,7 @@ async function initPaddle() {
       ortBuild: A.ort.split("/").pop(),
       detModel: A.detName,
       recModel: A.recName,
+      runtimeParams: A.runtimeParams,
       modelBytes: summary?.assets?.map((a) => a.bytes),
     },
     async recognize(canvas) {

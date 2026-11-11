@@ -320,8 +320,9 @@ export function imagePeak(samples) {
 // Đợt ocr-mat: tùy chọn THÊM của run-browser.mjs (mặc định giữ nguyên như Phần D / E)
 // ---------------------------------------------------------------------------
 
-export const DET_VARIANTS = ["mobile", "server"];
-export const REC_VARIANTS = ["latin", "server"];
+export const DET_VARIANTS = ["mobile", "server", "r1"];
+export const REC_VARIANTS = ["latin", "server", "r1"];
+export const PARAM_CHOICES = ["r1"]; // bộ tham số chạy PaddleOCR.js (assets.js PARAM_PRESETS); trống = mặc định SDK
 export const ORT_CHOICES = ["wasm", "webgpu"];
 export const CHANNELS = ["chrome", "msedge"];
 
@@ -338,10 +339,11 @@ export function checkExtraOptions(a) {
   if (a.rec && !REC_VARIANTS.includes(a.rec)) throw new Error(`--rec phải là ${REC_VARIANTS.join(" | ")}`);
   if (a.ort && !ORT_CHOICES.includes(a.ort)) throw new Error(`--ort phải là ${ORT_CHOICES.join(" | ")}`);
   if (a.channel && !CHANNELS.includes(a.channel)) throw new Error(`--channel phải là ${CHANNELS.join(" | ")}`);
-  if ((a.det || a.rec || a.ort) && a.engine !== "paddlejs") throw new Error("--det / --rec / --ort chỉ dùng cho paddlejs");
+  if (a.params && !PARAM_CHOICES.includes(a.params)) throw new Error(`--params phải là ${PARAM_CHOICES.join(" | ")}`);
+  if ((a.det || a.rec || a.ort || a.params) && a.engine !== "paddlejs") throw new Error("--det / --rec / --ort / --params chỉ dùng cho paddlejs");
   if (a.channel && a.browser !== "chromium") throw new Error("--channel chỉ dùng cho chromium");
   if (a.tag && !/^[a-z0-9][a-z0-9-]*$/.test(a.tag)) throw new Error("--tag chỉ gồm chữ thường, số, gạch ngang");
-  if ((a.det || a.rec || a.ort || a.channel) && !a.tag) throw new Error("dùng --det / --rec / --ort / --channel thì phải có --tag (thư mục kết quả riêng)");
+  if ((a.det || a.rec || a.ort || a.channel || a.params) && !a.tag) throw new Error("dùng --det / --rec / --ort / --channel / --params thì phải có --tag (thư mục kết quả riêng)");
 }
 
 /** Query của harness.html. Không có tùy chọn thêm -> đúng chuỗi cũ (engine, mode, join, lines). */
@@ -350,5 +352,6 @@ export function harnessQuery(a) {
   if (a.ort) q += `&ort=${a.ort}`;
   if (a.det) q += `&det=${a.det}`;
   if (a.rec) q += `&rec=${a.rec}`;
+  if (a.params) q += `&params=${a.params}`;
   return q;
 }

@@ -64,3 +64,48 @@ test("harness.mjs lấy tên model từ assets (detName / recName), harness.html
   const html = fs.readFileSync(new URL("../harness.html", import.meta.url), "utf8");
   assert.match(html, /det: q\.get\("det"\) \|\| ""/);
 });
+
+// ---------------- vòng 3: R1-trình-duyệt (chỉ THÊM, mặc định giữ nguyên) ----------------
+
+test("R1: det / rec = r1 lấy ONNX của RapidOCR (ModelScope, cdn) + yml PaddlePaddle (HuggingFace, ghim commit)", () => {
+  const c = assetUrls("cdn", { det: "r1", rec: "r1", params: "r1" });
+  assert.equal(c.detName, "PP-OCRv6_small_det");
+  assert.equal(c.recName, "PP-OCRv6_small_rec");
+  assert.equal(c.detOnnx, "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx");
+  assert.equal(c.recOnnx, "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx");
+  assert.equal(c.detYml, "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/28fe5895c24fd108c19eb3e8479f4ab385fbfc62/inference.yml");
+  assert.equal(c.recYml, "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/b8f84f0b80c529de40b4fbb3544b84fa7233a513/inference.yml");
+  const l = assetUrls("local", { det: "r1", rec: "r1" });
+  assert.equal(l.detOnnx, "/cache/paddle-onnx/rapidocr-PP-OCRv6_small_det/inference.onnx");
+  assert.equal(l.recYml, "/cache/paddle-onnx/rapidocr-PP-OCRv6_small_rec/inference.yml");
+  assert.equal(MODEL_VARIANTS.det.r1.sha256, "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f");
+  assert.equal(MODEL_VARIANTS.rec.r1.sha256, "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884");
+});
+
+test("params: trống = {} (mặc định SDK như 1a); r1 = tham số RapidOCR 3.10.0; tên lạ -> lỗi", () => {
+  assert.deepEqual(assetUrls("local", {}).runtimeParams, {});
+  assert.deepEqual(assetUrls("cdn", { det: "server" }).runtimeParams, {});
+  assert.deepEqual(assetUrls("local", { params: "r1" }).runtimeParams, {
+    textDetLimitSideLen: 736, textDetLimitType: "min", textDetThresh: 0.3, textDetBoxThresh: 0.5, textDetUnclipRatio: 1.6, textRecScoreThresh: 0.5,
+  });
+  assert.throws(() => assetUrls("local", { params: "r9" }), /params=r9/);
+  // không sửa được bộ tham số gốc qua kết quả trả về
+  assetUrls("local", { params: "r1" }).runtimeParams.textDetThresh = 9;
+  assert.equal(globalThis.OcrAssets.PARAM_PRESETS.r1.textDetThresh, 0.3);
+});
+
+test("--params: cần --tag, chỉ paddlejs, giá trị lạ -> lỗi; harnessQuery nối params sau cùng", () => {
+  assert.doesNotThrow(() => checkExtraOptions({ ...base, det: "r1", rec: "r1", params: "r1", tag: "r1" }));
+  assert.throws(() => checkExtraOptions({ ...base, params: "r1" }), /--tag/);
+  assert.throws(() => checkExtraOptions({ ...base, params: "x", tag: "x" }), /--params/);
+  assert.throws(() => checkExtraOptions({ ...base, engine: "tesseractjs", params: "r1", tag: "x" }), /paddlejs/);
+  assert.equal(harnessQuery({ ...base, det: "r1", rec: "r1", params: "r1" }), "engine=paddlejs&mode=local&join=rows&lines=1&det=r1&rec=r1&params=r1");
+  assert.equal(harnessQuery({ ...base, params: "" }), "engine=paddlejs&mode=local&join=rows&lines=1");
+});
+
+test("harness.mjs trải runtimeParams vào PaddleOCR.create; harness.html truyền params", () => {
+  const mjs = fs.readFileSync(new URL("../harness.mjs", import.meta.url), "utf8");
+  assert.match(mjs, /\.\.\.\(A\.runtimeParams \|\| \{\}\)/);
+  const html = fs.readFileSync(new URL("../harness.html", import.meta.url), "utf8");
+  assert.match(html, /params: q\.get\("params"\) \|\| ""/);
+});
