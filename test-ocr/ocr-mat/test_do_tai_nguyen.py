@@ -1,5 +1,6 @@
 """Test các hàm thuần của do_tai_nguyen.py (không chạy OCR, không mạng)."""
 import json
+import time
 import sys
 
 from do_tai_nguyen import Peak, median, order_rows, path_size, time_stats, tree_rss, main
@@ -217,3 +218,37 @@ def test_main_out_cua_lenh_con_trung_ocr_dir_sau_chuan_hoa(tmp_path):
                  sys.executable, "-c", GHI_1_FILE, str(ocr), "--out", viet_khac])
     assert code == 0
     assert json.loads((tmp_path / "khop-tai-nguyen.json").read_text(encoding="utf-8"))["images"] == 1
+
+
+# ---------------- vòng 3: luật dừng (bộ nhớ, thời gian, 3 ảnh đầu) ----------------
+
+def test_stop_reason():
+    from do_tai_nguyen import first3_seconds, stop_reason
+
+    mb = 2**20
+    assert stop_reason(7000 * mb, 10, None) is None  # không đặt luật -> không dừng
+    assert stop_reason(6001 * mb, 10, None, max_rss_mb=6000)["rule"] == "bo-nho"
+    assert stop_reason(6000 * mb, 10, None, max_rss_mb=6000) is None  # bằng ngưỡng: chưa vượt
+    assert stop_reason(1, 7201, None, max_wall_s=7200)["rule"] == "thoi-gian"
+    assert stop_reason(1, 10, [200, 130, 90], max_3_dau_s=120)["rule"] == "3-anh-dau"  # trung vị 130
+    assert stop_reason(1, 10, [200, 110, 90], max_3_dau_s=120) is None  # trung vị 110
+    assert first3_seconds([{"seconds": 1}, {"seconds": 2}]) is None
+    assert first3_seconds([{"seconds": 1}, {"status": "loi"}, {"seconds": 3}, {"seconds": 9}]) == [1, 0.0, 3]
+
+
+def test_main_dung_theo_luat_bo_nho(tmp_path):
+    """RSS vượt --max-rss-mb -> kill lệnh con, ghi dungTheoLuatBoNho + số ảnh đã chạy, thoát mã 4."""
+    ocr = tmp_path / "ocr"
+    script = (
+        "import json,sys,time,pathlib;d=pathlib.Path(sys.argv[1]);d.mkdir(parents=True,exist_ok=True);"
+        "(d/'a__front.json').write_text(json.dumps({'order':0,'seconds':1.0,'status':'ok'}));"
+        "x=bytearray(64*2**20);time.sleep(60)"
+    )
+    t = time.time()
+    code = main(["--name", "nang", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--max-rss-mb", "20", "--",
+                 sys.executable, "-c", script, str(ocr)])
+    assert time.time() - t < 30  # không chờ hết 60 giây
+    assert code == 4
+    r = json.loads((tmp_path / "nang-tai-nguyen.json").read_text(encoding="utf-8"))
+    assert r["dungTheoLuatBoNho"] is True and r["dungTheoLuat"] == "bo-nho"
+    assert r["images"] == 1

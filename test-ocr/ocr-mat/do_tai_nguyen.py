@@ -120,6 +120,26 @@ def read_entries(ocr_dir, since):
     return entries
 
 
+def first3_seconds(rows):
+    """Giây của 3 ảnh đầu (theo thứ tự chạy, gồm cả ảnh đầu); chưa đủ 3 ảnh -> None."""
+    if len(rows) < 3:
+        return None
+    return [r.get("seconds") if isinstance(r.get("seconds"), (int, float)) else 0.0 for r in rows[:3]]
+
+
+def stop_reason(rss_total_bytes, elapsed, first3, max_rss_mb=0, max_wall_s=0, max_3_dau_s=0):
+    """Luật dừng (0 = không dùng). Trả None hoặc {'rule': 'bo-nho'|'thoi-gian'|'3-anh-dau', 'text'}."""
+    if max_rss_mb and rss_total_bytes / 2**20 > max_rss_mb:
+        return {"rule": "bo-nho", "text": f"RSS tổng {rss_total_bytes / 2**20:.0f} MB > {max_rss_mb:.0f} MB (luật bộ nhớ)"}
+    if max_wall_s and elapsed > max_wall_s:
+        return {"rule": "thoi-gian", "text": f"chạy {elapsed:.0f} giây > {max_wall_s:.0f} giây"}
+    if max_3_dau_s and first3 is not None:
+        m = median(first3)
+        if m is not None and m > max_3_dau_s:
+            return {"rule": "3-anh-dau", "text": f"3 ảnh đầu trung vị {m:.1f} giây > {max_3_dau_s:.0f} giây"}
+    return None
+
+
 def _sleep(seconds):
     """Chờ giữa 2 lần lấy mẫu (tách riêng để test vá hàm này, không vá time.sleep của cả tiến trình test)."""
     time.sleep(seconds)
@@ -171,6 +191,10 @@ def main(argv=None):
     ap.add_argument("--interval", type=float, default=0.25)
     ap.add_argument("--out", default=r"D:\tmp\ocr-mat\ket-qua")
     ap.add_argument("--ghi-de", action="store_true", help="cho phép ghi đè <out>/<name>-tai-nguyen.json đã có")
+    # Luật dừng (vòng 3): 0 = không dùng
+    ap.add_argument("--max-rss-mb", type=float, default=0, help="RSS tổng cả cây > số này (MB) thì dừng (luật bộ nhớ)")
+    ap.add_argument("--max-wall-s", type=float, default=0, help="chạy quá số giây này thì dừng (luật ~2 giờ / model)")
+    ap.add_argument("--max-3-dau-s", type=float, default=0, help="3 ảnh đầu trung vị > số giây này thì dừng (luật 120 giây)")
     a = ap.parse_args(argv[:cut])
     cmd = argv[cut + 1:]
     interval = min(a.interval, MAX_INTERVAL)
@@ -198,6 +222,8 @@ def main(argv=None):
     t0 = time.time()
     child = subprocess.Popen(cmd)
     peak = Peak()
+    stopped = None
+    last_check = 0.0
     try:
         try:
             proc = psutil.Process(child.pid)
@@ -206,6 +232,17 @@ def main(argv=None):
         while child.poll() is None:
             if proc is not None:
                 peak.add(sample_tree(proc))
+            now = time.time()
+            first3 = None
+            if a.max_3_dau_s and now - last_check >= 5:  # đọc file OCR mỗi ~5 giây, không mỗi mẫu
+                last_check = now
+                first3 = first3_seconds(order_rows(read_entries(a.ocr_dir, t0 - 2)))
+            stopped = stop_reason(peak.total, now - t0, first3, a.max_rss_mb, a.max_wall_s, a.max_3_dau_s)
+            if stopped:
+                print(f"DỪNG theo luật: {stopped['text']}", file=sys.stderr, flush=True)
+                kill_tree(child.pid)
+                child.wait()
+                break
             _sleep(interval)
     finally:
         if child.poll() is None:  # thoát giữa chừng (Ctrl+C, lỗi): không để lệnh OCR chạy nền
@@ -231,6 +268,10 @@ def main(argv=None):
         "intervalSeconds": interval,
         "modelBytes": {m: path_size(m) for m in a.model},
         "modelMB": round(sum(path_size(m) for m in a.model) / 2**20, 1),
+        "luatDung": {"maxRssMB": a.max_rss_mb or None, "maxWallSeconds": a.max_wall_s or None, "max3DauSeconds": a.max_3_dau_s or None},
+        "dungTheoLuat": stopped["rule"] if stopped else None,
+        "dungTheoLuatBoNho": bool(stopped and stopped["rule"] == "bo-nho"),
+        "dungLyDo": stopped["text"] if stopped else None,
     }
     os.makedirs(a.out, exist_ok=True)
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -242,6 +283,9 @@ def main(argv=None):
         print(f"Lỗi: không có ảnh nào trong {a.ocr_dir} (images = 0; mã thoát lệnh OCR {child.returncode}). "
               "Kiểm lại lệnh OCR và --ocr-dir.", file=sys.stderr)
         return 3
+    if stopped:
+        print(f"Dừng theo luật ({stopped['text']}) sau {len(rows)} ảnh.", file=sys.stderr)
+        return 4
     return child.returncode
 
 

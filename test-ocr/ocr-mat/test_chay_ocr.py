@@ -132,3 +132,24 @@ def test_main_loi_co_chu_empty_khong_bi_nuot(tmp_path, monkeypatch):
     assert rec["status"] == "loi"
     assert "result is empty" in rec["error"]
     assert "items" not in rec
+
+
+def test_rapid_adapter_r1_nocls_tat_cls(monkeypatch):
+    """r1-nocls: chỉ khác r1 ở Global.use_cls false (model mặc định của gói, không đổi Det / Rec)."""
+    import types
+
+    import chay_ocr
+
+    seen = {}
+
+    class _Engine:
+        def __init__(self, params):
+            seen[len(seen)] = dict(params)
+
+    monkeypatch.setitem(sys.modules, "rapidocr", types.SimpleNamespace(RapidOCR=_Engine))
+    chay_ocr.ADAPTERS["r1"](8)
+    chay_ocr.ADAPTERS["r1-nocls"](8)
+    r1, nocls = seen[0], seen[1]
+    assert "Global.use_cls" not in r1
+    assert nocls.pop("Global.use_cls") is False
+    assert nocls == r1

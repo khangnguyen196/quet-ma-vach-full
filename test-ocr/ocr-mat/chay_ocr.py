@@ -3,6 +3,7 @@
 Mỗi model một hàm adapter (cấu hình CHỐT trước trong test-ocr/README.md Phần F, "Chốt bổ sung (vòng 2)"):
   r1         RapidOCR 3.10.0, model mặc định của gói (PP-OCRv6 det small + rec small,
              cls ch_ppocr_mobile_v2.0_cls_mobile.onnx (nhãn PP-OCRv4 mobile trong config.yaml))
+  r1-nocls   như r1 nhưng Global.use_cls false (vòng 3: đối chứng cho R1-trình-duyệt, không có cls)
   r2         RapidOCR 3.10.0 + đúng ONNX của 1a (PP-OCRv5 mobile det + latin_PP-OCRv5 mobile rec, HuggingFace PaddlePaddle)
   r3         RapidOCR 3.10.0 + PP-OCRv5 server det @dcf248c4 + latin_PP-OCRv5 mobile rec (2a(b) trên CPU)
   easyocr    EasyOCR 1.7.2, lang ['vi', 'en'], tham số mặc định, CPU
@@ -177,6 +178,8 @@ def rapid_adapter(variant, threads):
         "EngineConfig.onnxruntime.intra_op_num_threads": threads,
         "EngineConfig.onnxruntime.inter_op_num_threads": 1,
     }
+    if variant == "r1-nocls":  # vòng 3: đối chứng của R1-trình-duyệt (PaddleOCR.js không nạp được cls v2.0)
+        params["Global.use_cls"] = False
     if variant in ("r2", "r3"):
         det = "PP-OCRv5_mobile_det_onnx" if variant == "r2" else "PP-OCRv5_server_det_onnx"
         rec_dir = PADDLE_ONNX / "latin_PP-OCRv5_mobile_rec_onnx"
@@ -312,6 +315,7 @@ ADAPTERS = {
     "florence-large": florence_adapter,
     "got": got_adapter,
     "r1": lambda t: rapid_adapter("r1", t),
+    "r1-nocls": lambda t: rapid_adapter("r1-nocls", t),
     "r2": lambda t: rapid_adapter("r2", t),
     "r3": lambda t: rapid_adapter("r3", t),
     "easyocr": easyocr_adapter,
