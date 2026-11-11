@@ -1,0 +1,6 @@
+# venv D:\tmp\ocr-mat\venv-vl (chay_ocr.py --model paddleocr-vl). Chỉ để đo, không thuộc app.
+# config.json của PaddlePaddle/PaddleOCR-VL @dae29965 ghi transformers_version 4.55.0 (mã repo dùng transformers.masking_utils).
+# Cài torch bản CPU trước: pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+transformers==4.55.0
+einops==0.8.2
+sentencepiece==0.2.3
