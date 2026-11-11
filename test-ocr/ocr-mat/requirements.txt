@@ -1,3 +1,5 @@
 # Đợt ocr-mat: chỉ để đo trên máy, không thuộc app. Cài trong venv riêng ở ổ D (D:\tmp\ocr-mat\venv).
 psutil==7.0.0
 pytest==8.3.5
+# chay_ocr.py đọc character_dict trong inference.yml của model PaddlePaddle (keys_from_yml)
+pyyaml==6.0.3

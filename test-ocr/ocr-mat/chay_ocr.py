@@ -1,0 +1,294 @@
+"""Đợt ocr-mat (vòng 2, P2): chạy MỘT model OCR Python (CPU) trên 30 ảnh front.jpg, ghi file OCR chung cho t1-ocr.mjs.
+
+Mỗi model một hàm adapter (cấu hình CHỐT trước trong test-ocr/README.md Phần F, "Chốt bổ sung (vòng 2)"):
+  r1         RapidOCR 3.10.0, model mặc định của gói (PP-OCRv6 det small + rec small, cls PP-OCRv4 mobile)
+  r2         RapidOCR 3.10.0 + đúng ONNX của 1a (PP-OCRv5 mobile det + latin_PP-OCRv5 mobile rec, HuggingFace PaddlePaddle)
+  r3         RapidOCR 3.10.0 + PP-OCRv5 server det @dcf248c4 + latin_PP-OCRv5 mobile rec (2a(b) trên CPU)
+  easyocr    EasyOCR 1.7.2, lang ['vi', 'en'], tham số mặc định, CPU
+  tesseract  Tesseract 5.4.0 (UB Mannheim) qua pytesseract 0.3.13, vie+eng (tessdata @ced78752), psm mặc định
+  onnxtr     OnnxTR 0.9.0: bộ dò khung mặc định + Felix92/onnxtr-parseq-multilingual-v1
+
+    <venv>\\Scripts\\python chay_ocr.py --model r1 --out D:\\tmp\\ocr-mat\\ocr\\r1 [--limit 3] [--threads 8]
+
+Ảnh vào: xoay theo EXIF rồi thu cạnh dài về 1.600 px (chỉ thu nhỏ, làm tròn như web-ocr/harness.mjs), RGB.
+Ra mỗi ảnh <out>/<mã>__front.json:
+  { code, model, status: "ok" | "loi", error?, items: [{ text, conf (0–1 hoặc null), box: {minX,minY,maxX,maxY} }],
+    seconds (giây đọc chữ ảnh đó, không gồm nạp model), order (thứ tự chạy, từ 0), loadSeconds (chỉ ảnh đầu),
+    width, height (ảnh đã thu) }
+Thư mục --out phải mới (đã có *__front.json thì dừng). Chỉ để đo, không thuộc app, không gọi mạng ngoài việc thư viện
+tự tải model lần đầu (nguồn ghi trong Chốt bổ sung).
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import sys
+import time
+import traceback
+from pathlib import Path
+
+MAX_SIDE = 1600
+PHOTOS = r"D:\quet-ma-vach-full\test-ocr\photos"
+TRUTH = Path(__file__).resolve().parent.parent / "truth.csv"
+PADDLE_ONNX = Path(r"D:\cache\paddle-onnx")
+KEYS_DIR = Path(r"D:\tmp\ocr-mat\keys")
+TESSERACT_EXE = r"D:\tools\tesseract\tesseract.exe"
+TESSDATA = r"D:\cache\tessdata\ced78752"
+ONNXTR_REC = "Felix92/onnxtr-parseq-multilingual-v1"
+ONNXTR_REC_REV = "7d7329948dbcff02637a3eb9c14ae0c4440c5ed0"
+
+
+# ---------------- hàm thuần (có pytest) ----------------
+
+def fit_size(w, h, max_side=MAX_SIDE):
+    """Cỡ mới khi thu cạnh dài về max_side (chỉ thu nhỏ), làm tròn như harness.mjs (Math.round, ít nhất 1)."""
+    scale = min(1.0, max_side / max(w, h))
+    return max(1, round_half_up(w * scale)), max(1, round_half_up(h * scale))
+
+
+def round_half_up(x):
+    """Làm tròn như Math.round của JS (0,5 lên), khác round() của Python (làm tròn về số chẵn)."""
+    import math
+
+    return int(math.floor(x + 0.5))
+
+
+def poly_to_box(points):
+    """Khung nhiều góc [[x, y], ...] -> {minX, minY, maxX, maxY} (số thực). Rỗng / hỏng -> None."""
+    try:
+        xs = [float(p[0]) for p in points]
+        ys = [float(p[1]) for p in points]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not xs:
+        return None
+    return {"minX": min(xs), "minY": min(ys), "maxX": max(xs), "maxY": max(ys)}
+
+
+def norm_conf(conf, scale=1.0):
+    """Độ tin về 0–1 (chia thang); None / không phải số / âm (tesseract -1 = không phải từ) -> None."""
+    if conf is None:
+        return None
+    try:
+        c = float(conf)
+    except (TypeError, ValueError):
+        return None
+    if c != c or c < 0:  # NaN hoặc âm
+        return None
+    return c / scale
+
+
+def make_item(text, conf, points, scale=1.0):
+    """Một khung chữ chuẩn; chữ rỗng / khung hỏng -> None."""
+    text = str(text or "").strip()
+    box = poly_to_box(points)
+    if not text or box is None:
+        return None
+    return {"text": text, "conf": norm_conf(conf, scale), "box": box}
+
+
+def rel_box_to_points(geom, w, h):
+    """Khung tương đối ((xmin, ymin), (xmax, ymax)) của docTR / OnnxTR -> 4 góc theo pixel."""
+    (x0, y0), (x1, y1) = geom
+    return [[x0 * w, y0 * h], [x1 * w, y0 * h], [x1 * w, y1 * h], [x0 * w, y1 * h]]
+
+
+def keys_from_yml(text):
+    """Danh sách ký tự (character_dict) trong inference.yml của model nhận dạng PaddlePaddle (dạng `  - 'x'`)."""
+    import yaml
+
+    d = yaml.safe_load(text)
+    chars = d["PostProcess"]["character_dict"]
+    return [str(c) for c in chars]
+
+
+def sample_codes(truth_rows, has_front):
+    """Mã của truth.csv có front.jpg, giữ thứ tự truth.csv."""
+    return [r["code"] for r in truth_rows if has_front(r["code"])]
+
+
+# ---------------- ảnh ----------------
+
+def load_image(path):
+    """PIL RGB đã xoay theo EXIF + thu cạnh dài về 1.600 px (BICUBIC)."""
+    from PIL import Image, ImageOps
+
+    img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+    size = fit_size(*img.size)
+    if size != img.size:
+        img = img.resize(size, Image.Resampling.BICUBIC)
+    return img
+
+
+# ---------------- adapter ----------------
+
+def write_keys(rec_dir):
+    """Ghi file ký tự (mỗi dòng 1 ký tự) từ inference.yml của model nhận dạng cho RapidOCR (rec_keys_path)."""
+    yml = Path(rec_dir) / "inference.yml"
+    chars = keys_from_yml(yml.read_text(encoding="utf-8"))
+    KEYS_DIR.mkdir(parents=True, exist_ok=True)
+    out = KEYS_DIR / (Path(rec_dir).name + ".txt")
+    out.write_text("\n".join(chars) + "\n", encoding="utf-8", newline="\n")
+    return out
+
+
+def rapid_adapter(variant, threads):
+    from rapidocr import RapidOCR
+
+    params = {
+        "Global.log_level": "warning",
+        "EngineConfig.onnxruntime.intra_op_num_threads": threads,
+        "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+    }
+    if variant in ("r2", "r3"):
+        det = "PP-OCRv5_mobile_det_onnx" if variant == "r2" else "PP-OCRv5_server_det_onnx"
+        rec_dir = PADDLE_ONNX / "latin_PP-OCRv5_mobile_rec_onnx"
+        params.update({
+            "Det.model_path": str(PADDLE_ONNX / det / "inference.onnx"),
+            "Rec.model_path": str(rec_dir / "inference.onnx"),
+            "Rec.rec_keys_path": str(write_keys(rec_dir)),
+        })
+    engine = RapidOCR(params=params)
+
+    def run(img):
+        try:
+            res = engine(img)
+        except Exception as e:  # RapidOCR ném lỗi khi không dò được khung chữ nào
+            if "empty" in str(e).lower():
+                return []
+            raise
+        if res.boxes is None or res.txts is None:
+            return []
+        return [it for it in (make_item(t, s, b) for b, t, s in zip(res.boxes.tolist(), res.txts, res.scores)) if it]
+
+    return run
+
+
+def easyocr_adapter(threads):
+    import numpy as np
+    import torch
+    import easyocr
+
+    torch.set_num_threads(threads)
+    reader = easyocr.Reader(["vi", "en"], gpu=False)
+
+    def run(img):
+        out = reader.readtext(np.asarray(img))
+        return [it for it in (make_item(t, c, b) for b, t, c in out) if it]
+
+    return run
+
+
+def tesseract_adapter(threads):
+    import pytesseract
+
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_EXE
+    os.environ["OMP_THREAD_LIMIT"] = str(threads)
+    cfg = f'--tessdata-dir "{TESSDATA}"'
+
+    def run(img):
+        d = pytesseract.image_to_data(img, lang="vie+eng", config=cfg, output_type=pytesseract.Output.DICT)
+        items = []
+        for i, t in enumerate(d["text"]):
+            if int(d["level"][i]) != 5:  # chỉ lấy mức từ
+                continue
+            x, y, w, h = (int(d[k][i]) for k in ("left", "top", "width", "height"))
+            it = make_item(t, d["conf"][i], [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], scale=100.0)
+            if it:
+                items.append(it)
+        return items
+
+    return run
+
+
+def onnxtr_adapter(threads):
+    import numpy as np
+    from onnxtr.models import EngineConfig, from_hub, ocr_predictor
+
+    import onnxruntime as ort
+
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = threads
+    so.inter_op_num_threads = 1
+    cfg = EngineConfig(providers=["CPUExecutionProvider"], session_options=so)
+    reco = from_hub(ONNXTR_REC, revision=ONNXTR_REC_REV, engine_cfg=cfg)
+    predictor = ocr_predictor(reco_arch=reco, det_engine_cfg=cfg, reco_engine_cfg=cfg, clf_engine_cfg=cfg)
+
+    def run(img):
+        w, h = img.size
+        doc = predictor([np.asarray(img)])
+        items = []
+        for block in doc.pages[0].blocks:
+            for line in block.lines:
+                for word in line.words:
+                    it = make_item(word.value, word.confidence, rel_box_to_points(word.geometry, w, h))
+                    if it:
+                        items.append(it)
+        return items
+
+    return run
+
+
+ADAPTERS = {
+    "r1": lambda t: rapid_adapter("r1", t),
+    "r2": lambda t: rapid_adapter("r2", t),
+    "r3": lambda t: rapid_adapter("r3", t),
+    "easyocr": easyocr_adapter,
+    "tesseract": tesseract_adapter,
+    "onnxtr": onnxtr_adapter,
+}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Chạy một model OCR Python trên 30 ảnh front.jpg.")
+    ap.add_argument("--model", required=True, choices=sorted(ADAPTERS))
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--photos", default=PHOTOS)
+    ap.add_argument("--limit", type=int, default=0, help="chỉ chạy n ảnh đầu (0 = tất cả)")
+    ap.add_argument("--threads", type=int, default=8)
+    a = ap.parse_args(argv)
+    for s in (sys.stdout, sys.stderr):  # Windows: màn hình cp1252 không in được chữ Việt
+        if hasattr(s, "reconfigure"):
+            s.reconfigure(encoding="utf-8", errors="replace")
+
+    out = Path(a.out)
+    if out.exists() and any(out.glob("*__front.json")):
+        print(f"Thư mục {out} đã có file *__front.json: hãy dùng thư mục mới.", file=sys.stderr)
+        return 2
+    out.mkdir(parents=True, exist_ok=True)
+    with open(TRUTH, encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    codes = sample_codes(rows, lambda c: (Path(a.photos) / c / "front.jpg").is_file())
+    if a.limit:
+        codes = codes[: a.limit]
+
+    t = time.perf_counter()
+    run = ADAPTERS[a.model](a.threads)
+    load = time.perf_counter() - t
+    print(f"{a.model}: nạp model {load:.1f} giây; {len(codes)} ảnh", flush=True)
+
+    for order, code in enumerate(codes):
+        rec = {"code": code, "model": a.model, "order": order}
+        if order == 0:
+            rec["loadSeconds"] = round(load, 3)
+        try:
+            img = load_image(Path(a.photos) / code / "front.jpg")
+            rec["width"], rec["height"] = img.size
+            t = time.perf_counter()
+            items = run(img)
+            rec["seconds"] = round(time.perf_counter() - t, 3)
+            rec["status"] = "ok"
+            rec["items"] = items
+        except Exception as e:  # ghi lỗi thật, chạy tiếp ảnh sau
+            rec["status"] = "loi"
+            rec["error"] = f"{type(e).__name__}: {e}"
+            rec["trace"] = traceback.format_exc()[-2000:]
+        (out / f"{code}__front.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+        print(f"  {order + 1}/{len(codes)} {code}: {rec['status']} {rec.get('seconds', '')} giây, {len(rec.get('items', []))} khung", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

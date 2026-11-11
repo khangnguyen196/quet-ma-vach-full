@@ -1,0 +1,4 @@
+# venv D:\tmp\ocr-mat\venv-tess (chay_ocr.py --model tesseract). Tesseract 5.4.0 (UB Mannheim) giải nén ở D:\tools\tesseract.
+pytesseract==0.3.13
+pillow==13.0.0
+numpy==2.5.4
