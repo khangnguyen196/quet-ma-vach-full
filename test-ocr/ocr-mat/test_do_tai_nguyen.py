@@ -73,3 +73,79 @@ def test_main_chay_lenh_that(tmp_path):
     assert r["intervalSeconds"] == 0.5  # --interval bị chặn ở 0,5 giây
     assert r["rssSamples"] >= 1
     assert r["rssPeakTotalMB"] > 0
+
+
+def test_main_chan_thu_muc_da_co_file_cu(tmp_path, capsys):
+    """Thư mục OCR đã có *__front.json của lần chạy cũ -> báo lỗi, thoát mã 2, KHÔNG chạy lệnh OCR."""
+    ocr = tmp_path / "ocr"
+    ocr.mkdir()
+    (ocr / "cu__front.json").write_text(json.dumps({"order": 0, "seconds": 1.0, "status": "ok"}), encoding="utf-8")
+    dau = tmp_path / "da-chay.txt"
+    script = "import pathlib,sys;pathlib.Path(sys.argv[1]).write_text('x')"
+    code = main(["--name", "cu", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", script, str(dau)])
+    assert code == 2
+    assert not dau.exists()  # lệnh OCR không được chạy
+    assert not (tmp_path / "cu-tai-nguyen.json").exists()
+    err = capsys.readouterr().err
+    assert "1 file" in err and "thư mục mới" in err
+
+
+def test_doc_ket_qua_bo_file_cu_hon_t0(tmp_path):
+    """Lớp thứ hai: khi đọc kết quả chỉ nhận file có giờ sửa >= t0 (file cũ lọt vào giữa chừng không được tính)."""
+    import os
+
+    from do_tai_nguyen import read_entries
+
+    cu = tmp_path / "cu__front.json"
+    cu.write_text(json.dumps({"order": 0, "seconds": 1.0}), encoding="utf-8")
+    os.utime(cu, (1_000_000, 1_000_000))
+    moi = tmp_path / "moi__front.json"
+    moi.write_text(json.dumps({"order": 1, "seconds": 2.0}), encoding="utf-8")
+    t0 = moi.stat().st_mtime - 1
+    entries = read_entries(tmp_path, t0)
+    assert [j["seconds"] for _, j in entries] == [2.0]
+
+
+def test_main_lenh_con_thoat_ngay(tmp_path, monkeypatch):
+    """Lệnh con thoát trước khi psutil kịp mở (NoSuchProcess) -> script không lỗi, vẫn ghi kết quả."""
+    import psutil
+
+    def khong_co(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(psutil, "Process", khong_co)
+    ocr = tmp_path / "ocr"
+    code = main(["--name", "nhanh", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", "pass"])
+    assert code == 0
+    r = json.loads((tmp_path / "nhanh-tai-nguyen.json").read_text(encoding="utf-8"))
+    assert r["images"] == 0
+    assert r["exitCode"] == 0
+
+
+def test_main_thoat_giua_chung_kill_tien_trinh_con(tmp_path, monkeypatch):
+    """Ctrl+C (KeyboardInterrupt) giữa vòng lấy mẫu -> tiến trình con bị kill, không chạy nền."""
+    import subprocess
+
+    import do_tai_nguyen
+
+    tao = []
+    goc = subprocess.Popen
+
+    def popen(*a, **k):
+        p = goc(*a, **k)
+        tao.append(p)
+        return p
+
+    def ngat(_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(do_tai_nguyen.subprocess, "Popen", popen)
+    monkeypatch.setattr(do_tai_nguyen.time, "sleep", ngat)
+    ocr = tmp_path / "ocr"
+    try:
+        main(["--name", "ngat", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", "import time; time.sleep(60)"])
+        raise AssertionError("phải ném KeyboardInterrupt")
+    except KeyboardInterrupt:
+        pass
+    assert len(tao) == 1
+    assert tao[0].wait(timeout=10) is not None  # đã thoát (bị kill), không còn chạy nền
