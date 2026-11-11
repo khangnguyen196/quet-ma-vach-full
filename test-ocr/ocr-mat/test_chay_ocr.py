@@ -153,3 +153,20 @@ def test_rapid_adapter_r1_nocls_tat_cls(monkeypatch):
     assert "Global.use_cls" not in r1
     assert nocls.pop("Global.use_cls") is False
     assert nocls == r1
+
+
+def test_surya_text_html_ra_chu_theo_thu_tu_doc():
+    """Khối HTML của Surya -> chữ: bỏ thẻ, <br> / <p> xuống dòng, theo reading_order, bỏ khối skipped."""
+    from types import SimpleNamespace as B
+
+    from chay_ocr import html_to_text, surya_text
+
+    assert html_to_text("<p>Mì <b>Omachi</b><br>xốt bò hầm</p>") == "Mì Omachi\nxốt bò hầm"
+    assert html_to_text("A &amp; B") == "A & B"
+    assert html_to_text(None) == ""
+    blocks = [
+        B(html="<p>Khối lượng 80 g</p>", reading_order=1, skipped=False),
+        B(html="<h1>VISSAN</h1>", reading_order=0, skipped=False),
+        B(html="", reading_order=2, skipped=True),
+    ]
+    assert surya_text(blocks) == "VISSAN\nKhối lượng 80 g"

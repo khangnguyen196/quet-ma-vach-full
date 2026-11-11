@@ -9,6 +9,9 @@ Mỗi model một hàm adapter (cấu hình CHỐT trước trong test-ocr/READM
   easyocr    EasyOCR 1.7.2, lang ['vi', 'en'], tham số mặc định, CPU
   tesseract  Tesseract 5.4.0 (UB Mannheim) qua pytesseract 0.3.13, vie+eng (tessdata @ced78752), psm mặc định
   onnxtr     OnnxTR 0.9.0: bộ dò khung mặc định + Felix92/onnxtr-parseq-multilingual-v1
+  florence-large / got   (vòng 2–3, model nặng, { text })
+  surya      Surya 0.23.0, OCR cả trang qua llama-server (CPU), GGUF datalab-to/surya-ocr-2.5-gguf (vòng 3)
+  paddleocr-vl  PaddleOCR-VL 0.9B (transformers, trust_remote_code tại commit ghim), prompt "OCR:" (vòng 3)
 
     <venv>\\Scripts\\python chay_ocr.py --model r1 --out D:\\tmp\\ocr-mat\\ocr\\r1 [--limit 3] [--threads 8]
 
@@ -311,7 +314,96 @@ def got_adapter(threads):
     return run
 
 
+PADDLEOCR_VL = ("PaddlePaddle/PaddleOCR-VL", "dae2996584399c9fb7eabfeecf8acd2c7cae95b7")
+
+
+def paddleocr_vl_adapter(threads):
+    """PaddleOCR-VL 0.9B qua transformers (mã của repo tại commit ghim, trust_remote_code), cả ảnh (không qua
+    PP-DocLayoutV2), prompt "OCR:", max_new_tokens 1024, do_sample false, float32 (CPU) -> { text }."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoProcessor
+
+    torch.set_num_threads(threads)
+    repo, rev = PADDLEOCR_VL
+    model = AutoModelForCausalLM.from_pretrained(repo, revision=rev, trust_remote_code=True, torch_dtype=torch.float32).eval()
+    processor = AutoProcessor.from_pretrained(repo, revision=rev, trust_remote_code=True)
+
+    def run(img):
+        messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": "OCR:"}]}]
+        inputs = processor.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt")
+        with torch.inference_mode():
+            ids = model.generate(**inputs, max_new_tokens=1024, do_sample=False)
+        text = processor.batch_decode(ids[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
+        return {"text": str(text)}
+
+    return run
+
+
+SURYA_GGUF = ("datalab-to/surya-ocr-2.5-gguf", "eb78671ae9af9bdddfac2e25507c55337b6098e2")
+LLAMA_SERVER = r"D:\tools\llama.cpp-b12284\llama-server.exe"
+
+
+def html_to_text(html):
+    """HTML của một khối Surya -> chữ, mỗi dòng / đoạn một dòng (bỏ thẻ, bỏ dòng trống)."""
+    from html.parser import HTMLParser
+
+    class _P(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("br", "p", "div", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            self.handle_starttag(tag, [])
+
+        def handle_data(self, data):
+            self.parts.append(data)
+
+    p = _P()
+    p.feed(str(html or ""))
+    p.close()
+    return "\n".join(s.strip() for s in "".join(p.parts).splitlines() if s.strip())
+
+
+def surya_text(blocks):
+    """Khối Surya (polygon, html, reading_order, skipped) -> { text } theo thứ tự đọc của model."""
+    keep = [b for b in blocks if not getattr(b, "skipped", False)]
+    keep.sort(key=lambda b: getattr(b, "reading_order", 0))
+    return "\n".join(t for t in (html_to_text(getattr(b, "html", "")) for b in keep) if t)
+
+
+def surya_adapter(threads):
+    """Surya OCR 0.23.0 (VLM surya-ocr-2.5): OCR cả trang (full_page, mặc định của lệnh surya_ocr) chạy CPU qua
+    llama-server (llama.cpp, bản GGUF chính thức của tác giả, ghim commit). Máy có GPU NVIDIA nên ép backend llamacpp
+    (tự dò sẽ chọn vllm / Docker). -> { text } (khối HTML -> chữ theo thứ tự đọc)."""
+    from huggingface_hub import hf_hub_download
+
+    repo, rev = SURYA_GGUF
+    os.environ["SURYA_GGUF_LOCAL_MODEL_PATH"] = hf_hub_download(repo, "surya-2.5.gguf", revision=rev)
+    os.environ["SURYA_GGUF_LOCAL_MMPROJ_PATH"] = hf_hub_download(repo, "surya-2.5-mmproj.gguf", revision=rev)
+    os.environ["SURYA_INFERENCE_BACKEND"] = "llamacpp"
+    os.environ["LLAMA_CPP_BINARY"] = LLAMA_SERVER
+    os.environ["LLAMA_CPP_EXTRA_ARGS"] = f"--threads {threads}"
+    os.environ.setdefault("TORCH_DEVICE", "cpu")
+    from surya.inference import SuryaInferenceManager
+    from surya.recognition import RecognitionPredictor
+
+    manager = SuryaInferenceManager(lazy=False)  # bật llama-server + nạp model ngay (tính vào thời gian nạp)
+    rec = RecognitionPredictor(manager)
+
+    def run(img):
+        page = rec([img], full_page=True)[0]
+        return {"text": surya_text(page.blocks)}
+
+    return run
+
+
 ADAPTERS = {
+    "surya": surya_adapter,
+    "paddleocr-vl": paddleocr_vl_adapter,
     "florence-large": florence_adapter,
     "got": got_adapter,
     "r1": lambda t: rapid_adapter("r1", t),
