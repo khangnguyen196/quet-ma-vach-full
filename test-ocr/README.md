@@ -692,3 +692,23 @@ Ghi chú model nặng:
 - "Đáng làm máy chủ" (ngưỡng Chốt vòng 3): chỉ R3 (22 / 14, 11,2 giây CPU, 1.501 MB, Apache-2.0). Surya cao nhất nhưng 65 giây/ảnh, 3,8 GB, giấy phép có điều kiện doanh thu; Florence-2 large 21 < 22, 28,5 giây, 3,75 GB.
 - Ghép sẽ chọn theo luật đã chốt (số hiện có, CHƯA chạy): G1 = Surya + 2a(b) Chromium (5 đầu 23, rồi 22 hòa 4 cách, vị trí 1 cao nhất là 2a(b) 16). G2 = tốt nhất trình duyệt (2a(b) Chromium 22 / 16, hơn R1-trình-duyệt 22 / 14 ở vị trí 1) + tốt nhất máy tính (Surya) -> trùng G1. G3 = 1a (chấm cả 1a-chromium và 1a-webkit) + Surya. G3b = R1-trình-duyệt (Chromium và WebKit) + Surya.
 - Trang thử: không cách nào qua ngưỡng đổi; R1-trình-duyệt sát nhất (chỉ thiếu 1 ảnh ở 5 đầu WebKit 21 / 22).
+
+## Chốt bổ sung (vòng 4): cách ghép cụ thể, đo lại giây r1-nocls (12/11/2026, commit riêng TRƯỚC lần ghép đầu tiên và trước lần đo lại r1-nocls)
+
+**Thêm sau khi đã thấy số vòng 1–3.** Chỉ thêm, không sửa Chốt trên (câu tìm + T1 + chấm `t1-ocr.mjs`, luật ghép G1 / G2 / G3 / G3b, ngưỡng "ghép có ích" / "đáng làm máy chủ" giữ nguyên). Vòng 4 không chạy OCR nào ngoài r1-nocls-v4.
+
+- Cách ghép cụ thể (`chup-mat-do/ghep-ocr.mjs`, chỉ import, không sửa `lib.mjs` / `vn-data.mjs` / `t1.mjs` / `t1-ocr.mjs`):
+  - Cụm = dòng do `ocrLines()` của `t1-ocr.mjs` trả cho từng OCR (có khung -> nối hàng bằng `rowLines`, độ tin của hàng = trung bình khung; `lines` / `text` -> từng dòng), đúng thang độ tin của từng OCR (trường `scale` trong file kết quả `D:\tmp\ocr-mat\ket-qua\<tên>.json` của thành phần đó).
+  - A = thành phần có "trong 5 đầu" cao hơn (hòa: vị trí 1 cao hơn, rồi nhanh hơn = `secondsMedian` trong file kết quả nhỏ hơn), B = còn lại. Hòa cả 3 -> A = thành phần ghi trước trong lệnh.
+  - Giữ MỌI dòng của A theo thứ tự (kể cả dòng trùng nhau trong A, dòng có khóa rỗng). Thêm dòng của B theo thứ tự nếu khóa chưa có trong các dòng đã lấy (A + các dòng B đã thêm); khóa = `normalizeText` của `lib.mjs` (bỏ dấu, đ -> d, thường, ký tự không phải chữ / số thành dấu cách, gộp khoảng trắng); dòng B có khóa rỗng bỏ. Dòng giữ độ tin của bản được giữ (đã quy 0–1; không có độ tin -> không ghi `conf`).
+  - Một bên lỗi / thiếu file (`ocrProblem` của `t1-ocr.mjs`) -> dùng nguyên bên kia; cả hai lỗi -> ghi file `status: "loi"` (tính sai).
+  - Ra `{ code, status: "ok", lines: [{ text, conf }], seconds, a, b }` cho mỗi ảnh vào `D:\tmp\ocr-mat\ocr\ghep-<tên>\<mã>__front.json`, chấm bằng `node chup-mat-do/t1-ocr.mjs --dir <thư mục ghép> --name ghep-<tên>` (KHÔNG đổi, không `--tool`, thang 1). Giây ghép = tổng giây 2 thành phần theo file OCR của từng ảnh (không đo mới); bảng ghi tổng 2 giây trung vị.
+- Danh sách ghép (theo luật Chốt vòng 3, số vòng 1–3):
+  - G1 = Surya (`surya-v3`) + 2a(b) Chromium (`paddlejs-rows-chromium-server-det-latin-rec`).
+  - G2 = "trùng G1" (tốt nhất trình duyệt 2a(b) Chromium + tốt nhất máy tính Surya), không chạy lại.
+  - G3 = 1a-chromium + Surya và 1a-webkit + Surya (OCR thô 1a ở `D:\tmp\chup-mat-do\ocr\paddlejs-rows-{chromium,webkit}`, chỉ đọc).
+  - G3b = R1-trình-duyệt Chromium + Surya và R1-trình-duyệt WebKit + Surya (`paddlejs-rows-{chromium,webkit}-r1`).
+  - Đối chiếu "ghép có ích" (Chốt vòng 3): 5 đầu ≥ (thành phần tốt nhất) + 2 VÀ vị trí 1 không thấp hơn thành phần tốt nhất.
+- Thêm NGOÀI Chốt, chỉ tham khảo (KHÔNG dùng cho kết luận chính): G4 = R1-trình-duyệt Chromium + R3 và R1-trình-duyệt WebKit + R3 (`r3-v2`).
+- Kiểm tự nhất quán của bộ ghép (trước các lần ghép trên): ghép A với chính A (1a-chromium, Surya, R3) -> câu tìm + top5 trùng A 30/30 (so bằng `compareWithT1` của `t1-ocr.mjs` với file kết quả của A).
+- Đo lại giây r1-nocls lúc máy rảnh (giây vòng 3 bị `pip install` chen): cấu hình KHÔNG đổi (`chay_ocr.py --model r1-nocls`, venv-rapid), thư mục mới `D:\tmp\ocr-mat\ocr\r1-nocls-v4`, qua `do_tai_nguyen.py --max-rss-mb 6000 --max-3-dau-s 120 --max-wall-s 1800` (như v3), ghi RAM trống lúc chạy. Chỉ dùng số giây (+ RSS); chữ phải trùng `r1-nocls-v3` (so câu tìm + top5 30/30); lệch thì ghi ảnh lệch, không chọn bản nào. Trước khi chạy: không còn tiến trình nặng khác (pip, OCR, trình duyệt đo).
