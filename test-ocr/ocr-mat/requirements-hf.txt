@@ -1,0 +1,5 @@
+# venv D:\tmp\ocr-mat\venv-hf (chay_ocr.py --model florence-large|got). Chỉ để đo, không thuộc app.
+# Cài torch bản CPU trước: pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+transformers==4.49.0
+einops==0.8.2
+timm==1.0.31

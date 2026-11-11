@@ -186,7 +186,10 @@ def tesseract_adapter(threads):
 
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_EXE
     os.environ["OMP_THREAD_LIMIT"] = str(threads)
-    cfg = f'--tessdata-dir "{TESSDATA}"'
+    # Không dùng --tessdata-dir "...": pytesseract tách tham số bằng shlex (kiểu POSIX) nên trên Windows dấu nháy bị
+    # giữ lại trong đường dẫn -> Tesseract không mở được file (lỗi thật lần chạy đầu). Dùng biến môi trường.
+    os.environ["TESSDATA_PREFIX"] = TESSDATA
+    cfg = ""
 
     def run(img):
         d = pytesseract.image_to_data(img, lang="vie+eng", config=cfg, output_type=pytesseract.Output.DICT)
@@ -231,7 +234,63 @@ def onnxtr_adapter(threads):
     return run
 
 
+FLORENCE = ("microsoft/Florence-2-large", "21a599d414c4d928c9032694c424fb94458e3594")
+GOT = ("stepfun-ai/GOT-OCR-2.0-hf", "d3017ef2c2c1395888c8d635c5e0508bcb0ac78d")
+
+
+def florence_adapter(threads):
+    """Florence-2 large, task <OCR> (chỉ chữ, không khung) -> { text }."""
+    from unittest.mock import patch
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoProcessor
+    from transformers.dynamic_module_utils import get_imports
+
+    torch.set_num_threads(threads)
+    repo, rev = FLORENCE
+
+    def no_flash(filename):  # mã của repo đòi import flash_attn (chỉ có trên GPU) dù không dùng: bỏ khỏi danh sách import
+        return [i for i in get_imports(filename) if i != "flash_attn"]
+
+    with patch("transformers.dynamic_module_utils.get_imports", no_flash):
+        model = AutoModelForCausalLM.from_pretrained(repo, revision=rev, trust_remote_code=True, torch_dtype=torch.float32).eval()
+    processor = AutoProcessor.from_pretrained(repo, revision=rev, trust_remote_code=True)
+
+    def run(img):
+        inputs = processor(text="<OCR>", images=img, return_tensors="pt")
+        with torch.inference_mode():
+            ids = model.generate(input_ids=inputs["input_ids"], pixel_values=inputs["pixel_values"],
+                                 max_new_tokens=1024, num_beams=3, do_sample=False)
+        raw = processor.batch_decode(ids, skip_special_tokens=False)[0]
+        text = processor.post_process_generation(raw, task="<OCR>", image_size=img.size)["<OCR>"]
+        return {"text": str(text)}
+
+    return run
+
+
+def got_adapter(threads):
+    """GOT-OCR2.0 (bản transformers chính thức), OCR thường -> { text }."""
+    import torch
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    torch.set_num_threads(threads)
+    repo, rev = GOT
+    model = AutoModelForImageTextToText.from_pretrained(repo, revision=rev, torch_dtype=torch.float32).eval()
+    processor = AutoProcessor.from_pretrained(repo, revision=rev)
+
+    def run(img):
+        inputs = processor(img, return_tensors="pt")
+        with torch.inference_mode():
+            ids = model.generate(**inputs, do_sample=False, tokenizer=processor.tokenizer, stop_strings="<|im_end|>", max_new_tokens=4096)
+        text = processor.decode(ids[0, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        return {"text": str(text)}
+
+    return run
+
+
 ADAPTERS = {
+    "florence-large": florence_adapter,
+    "got": got_adapter,
     "r1": lambda t: rapid_adapter("r1", t),
     "r2": lambda t: rapid_adapter("r2", t),
     "r3": lambda t: rapid_adapter("r3", t),
@@ -277,16 +336,20 @@ def main(argv=None):
             img = load_image(Path(a.photos) / code / "front.jpg")
             rec["width"], rec["height"] = img.size
             t = time.perf_counter()
-            items = run(img)
+            res = run(img)
             rec["seconds"] = round(time.perf_counter() - t, 3)
             rec["status"] = "ok"
-            rec["items"] = items
+            if isinstance(res, dict):  # model không có khung: { text } hoặc { lines }
+                rec.update(res)
+            else:
+                rec["items"] = res
         except Exception as e:  # ghi lỗi thật, chạy tiếp ảnh sau
             rec["status"] = "loi"
             rec["error"] = f"{type(e).__name__}: {e}"
             rec["trace"] = traceback.format_exc()[-2000:]
         (out / f"{code}__front.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
-        print(f"  {order + 1}/{len(codes)} {code}: {rec['status']} {rec.get('seconds', '')} giây, {len(rec.get('items', []))} khung", flush=True)
+        size = f"{len(rec['items'])} khung" if "items" in rec else f"{len(str(rec.get('text', '')))} ký tự"
+        print(f"  {order + 1}/{len(codes)} {code}: {rec['status']} {rec.get('seconds', '')} giây, {size}", flush=True)
     return 0
 
 
