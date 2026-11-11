@@ -139,7 +139,8 @@ def rapid_items(res):
         return []  # ảnh không có chữ (kết quả rỗng của RapidOCR)
     if txts is None or boxes is None:
         return {"items": [], "canhBao": f"RapidOCR trả {type(res).__name__}: có khung nhưng không có chữ (hoặc ngược lại)"}
-    scores = getattr(res, "scores", None) or [None] * len(txts)
+    scores = getattr(res, "scores", None)
+    scores = scores if scores is not None else [None] * len(txts)  # không dùng `or`: mảng numpy không có giá trị đúng / sai
     return [it for it in (make_item(t, s, b) for b, t, s in zip(boxes.tolist(), txts, scores)) if it]
 
 
@@ -340,7 +341,8 @@ def paddleocr_vl_adapter(threads):
 
 
 SURYA_GGUF = ("datalab-to/surya-ocr-2.5-gguf", "eb78671ae9af9bdddfac2e25507c55337b6098e2")
-LLAMA_SERVER = r"D:\tools\llama.cpp-b12284\llama-server.exe"
+# Đường dẫn llama-server: biến môi trường OCR_MAT_LLAMA_SERVER nếu có, không thì bản đã dùng ở vòng 3.
+LLAMA_SERVER = os.environ.get("OCR_MAT_LLAMA_SERVER") or r"D:\tools\llama.cpp-b12284\llama-server.exe"
 
 
 def html_to_text(html):

@@ -103,6 +103,33 @@ def test_rapid_items_ket_qua_rong_va_binh_thuong():
     assert ok == [{"text": "Omachi", "conf": 0.97, "box": {"minX": 0.0, "minY": 0.0, "maxX": 4.0, "maxY": 2.0}}]
 
 
+class _MangKieuNumpy(list):
+    """Giống mảng numpy ở chỗ quan trọng: dùng trong `if` / `or` thì ném ValueError (nhiều phần tử)."""
+
+    def __bool__(self):
+        raise ValueError("The truth value of an array with more than one element is ambiguous.")
+
+
+def test_rapid_items_scores_tuple_va_mang_numpy():
+    """Vòng 4 (review): scores là tuple hoặc mảng numpy (không dùng được với `or`) -> vẫn ra đúng độ tin;
+    scores None -> độ tin None."""
+    from chay_ocr import rapid_items
+
+    boxes = _Arr([[[0, 0], [4, 0], [4, 2], [0, 2]], [[0, 3], [4, 3], [4, 5], [0, 5]]])
+    txts = ("Omachi", "Mì khoai tây")
+    want = [0.97, 0.5]
+    for scores in ((0.97, 0.5), _MangKieuNumpy([0.97, 0.5])):
+        assert [it["conf"] for it in rapid_items(_Out(boxes=boxes, txts=txts, scores=scores))] == want
+    assert [it["conf"] for it in rapid_items(_Out(boxes=boxes, txts=txts, scores=None))] == [None, None]
+    try:  # có numpy (venv-rapid) thì thử thêm mảng numpy thật; venv đo không có numpy thì phần trên đã đại diện
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None:
+        got = [it["conf"] for it in rapid_items(_Out(boxes=boxes, txts=txts, scores=np.array(want)))]
+        assert got == want
+
+
 def test_main_loi_co_chu_empty_khong_bi_nuot(tmp_path, monkeypatch):
     """Lỗi thật (kể cả câu lỗi có chữ "empty") không bị coi là ảnh không có chữ: ghi status "loi" + câu lỗi thật."""
     import chay_ocr

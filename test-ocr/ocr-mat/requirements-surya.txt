@@ -1,4 +1,8 @@
 # venv D:\tmp\ocr-mat\venv-surya (chay_ocr.py --model surya). Chỉ để đo, không thuộc app.
 # Cài torch bản CPU trước: pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
-# Cần llama-server của llama.cpp (bản CPU Windows b12284, GitHub ggml-org/llama.cpp release, giải nén D:\tools\llama.cpp-b12284).
+# Cần llama-server của llama.cpp (bản CPU Windows b12284, GitHub ggml-org/llama.cpp release, giải nén D:\tools\llama.cpp-b12284;
+# để chỗ khác thì đặt biến môi trường OCR_MAT_LLAMA_SERVER = đường dẫn llama-server.exe).
 surya-ocr==0.23.0
+# Ghim thêm (vòng 4) đúng bản đang có trong venv-surya lúc đo vòng 3 (pip freeze 12/11/2026), không nâng:
+transformers==5.22.2
+huggingface_hub==1.33.0

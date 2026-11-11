@@ -45,8 +45,8 @@ function parseArgs(argv) {
     else if (k === "--rec") a.rec = v(); // latin | server
     else if (k === "--ort") a.ort = v(); // wasm | webgpu (bỏ bước dò WebGPU của harness.html)
     else if (k === "--channel") a.channel = v(); // chrome | msedge (Playwright channel, chỉ chromium)
-    else if (k === "--tag") a.tag = v();
-    else if (k === "--params") a.params = v(); // r1 (vòng 3): tham số chạy PaddleOCR.js bám RapidOCR (assets.js PARAM_PRESETS) // hậu tố tên công cụ / thư mục kết quả, vd webgpu -> paddlejs-rows-chromium-webgpu
+    else if (k === "--tag") a.tag = v(); // hậu tố tên công cụ / thư mục kết quả, vd webgpu -> paddlejs-rows-chromium-webgpu
+    else if (k === "--params") a.params = v(); // r1 (vòng 3): tham số chạy PaddleOCR.js bám RapidOCR (assets.js PARAM_PRESETS)
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
