@@ -116,7 +116,7 @@ def test_main_lenh_con_thoat_ngay(tmp_path, monkeypatch):
     monkeypatch.setattr(psutil, "Process", khong_co)
     ocr = tmp_path / "ocr"
     code = main(["--name", "nhanh", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", "pass"])
-    assert code == 0
+    assert code == 3  # vòng 3: không có ảnh nào -> mã 3 (xem test_main_khong_anh_nao_thoat_3)
     r = json.loads((tmp_path / "nhanh-tai-nguyen.json").read_text(encoding="utf-8"))
     assert r["images"] == 0
     assert r["exitCode"] == 0
@@ -140,7 +140,8 @@ def test_main_thoat_giua_chung_kill_tien_trinh_con(tmp_path, monkeypatch):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(do_tai_nguyen.subprocess, "Popen", popen)
-    monkeypatch.setattr(do_tai_nguyen.time, "sleep", ngat)
+    # vá hàm _sleep riêng của do_tai_nguyen (không vá time.sleep của cả tiến trình test)
+    monkeypatch.setattr(do_tai_nguyen, "_sleep", ngat)
     ocr = tmp_path / "ocr"
     try:
         main(["--name", "ngat", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", "import time; time.sleep(60)"])
@@ -149,3 +150,70 @@ def test_main_thoat_giua_chung_kill_tien_trinh_con(tmp_path, monkeypatch):
         pass
     assert len(tao) == 1
     assert tao[0].wait(timeout=10) is not None  # đã thoát (bị kill), không còn chạy nền
+
+
+# ---------------- vòng 3 (P1.1): chặn kết quả lặng lẽ sai / bị ghi đè ----------------
+
+GHI_1_FILE = (
+    "import json,sys,pathlib;d=pathlib.Path(sys.argv[1]);d.mkdir(parents=True,exist_ok=True);"
+    "(d/'a__front.json').write_text(json.dumps({'order':0,'seconds':1.0,'status':'ok'}))"
+)
+
+
+def test_main_khong_anh_nao_thoat_3(tmp_path, capsys):
+    """(a) Lệnh OCR chạy xong mà không ghi ảnh nào (images == 0) -> báo lỗi tiếng Việt, mã 3, vẫn ghi file tài nguyên."""
+    ocr = tmp_path / "ocr"
+    code = main(["--name", "rong", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", "pass"])
+    assert code == 3
+    r = json.loads((tmp_path / "rong-tai-nguyen.json").read_text(encoding="utf-8"))
+    assert r["images"] == 0
+    assert "không có ảnh nào" in capsys.readouterr().err
+
+
+def test_main_chan_ghi_de_file_tai_nguyen(tmp_path, capsys):
+    """(b) <out>/<name>-tai-nguyen.json đã có -> mã 2, KHÔNG chạy lệnh OCR, file cũ giữ nguyên."""
+    ocr = tmp_path / "ocr"
+    cu = tmp_path / "trung-tai-nguyen.json"
+    cu.write_text('{"cu": true}', encoding="utf-8")
+    code = main(["--name", "trung", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--", sys.executable, "-c", GHI_1_FILE, str(ocr)])
+    assert code == 2
+    assert not (ocr / "a__front.json").exists()  # lệnh OCR không được chạy
+    assert cu.read_text(encoding="utf-8") == '{"cu": true}'
+    assert "--ghi-de" in capsys.readouterr().err
+
+
+def test_main_ghi_de_co_chu_y(tmp_path):
+    """(b) Có cờ --ghi-de -> chạy và ghi đè file tài nguyên cũ."""
+    ocr = tmp_path / "ocr"
+    cu = tmp_path / "trung-tai-nguyen.json"
+    cu.write_text('{"cu": true}', encoding="utf-8")
+    code = main(["--name", "trung", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--ghi-de", "--",
+                 sys.executable, "-c", GHI_1_FILE, str(ocr)])
+    assert code == 0
+    r = json.loads(cu.read_text(encoding="utf-8"))
+    assert r["images"] == 1
+
+
+def test_main_chan_out_cua_lenh_con_khac_ocr_dir(tmp_path, capsys):
+    """(c) Lệnh con có --out <x> mà x khác --ocr-dir -> mã 2, không chạy (kết quả sẽ không được đọc)."""
+    ocr = tmp_path / "ocr"
+    khac = tmp_path / "khac"
+    dau = tmp_path / "da-chay.txt"
+    script = "import pathlib,sys;pathlib.Path(sys.argv[1]).write_text('x')"
+    for out_args in (["--out", str(khac)], [f"--out={khac}"]):
+        code = main(["--name", "lech", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--",
+                     sys.executable, "-c", script, str(dau), *out_args])
+        assert code == 2
+        assert not dau.exists()
+        assert not (tmp_path / "lech-tai-nguyen.json").exists()
+        assert "--ocr-dir" in capsys.readouterr().err
+
+
+def test_main_out_cua_lenh_con_trung_ocr_dir_sau_chuan_hoa(tmp_path):
+    """(c) --out của lệnh con viết khác dạng (thêm '/./', dấu / cuối) nhưng cùng thư mục -> chạy bình thường."""
+    ocr = tmp_path / "ocr"
+    viet_khac = str(tmp_path) + "/./ocr/"
+    code = main(["--name", "khop", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--",
+                 sys.executable, "-c", GHI_1_FILE, str(ocr), "--out", viet_khac])
+    assert code == 0
+    assert json.loads((tmp_path / "khop-tai-nguyen.json").read_text(encoding="utf-8"))["images"] == 1
