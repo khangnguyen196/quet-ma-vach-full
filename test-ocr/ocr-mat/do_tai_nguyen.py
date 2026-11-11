@@ -1,0 +1,164 @@
+"""Đợt ocr-mat (P1.3): đo tài nguyên một lần chạy OCR bằng Python trên máy (CPU).
+
+Chạy một lệnh OCR (lệnh đó tự ghi <mã>__front.json vào --ocr-dir), trong lúc chạy lấy mẫu RSS (bộ nhớ thật đang
+dùng) của tiến trình + MỌI tiến trình con mỗi --interval giây (mặc định 0,25, tối đa 0,5). Xong thì:
+  - giây/ảnh: trung vị + lớn nhất, KHÔNG tính ảnh đầu (ảnh đầu thường chậm vì khởi động); ảnh đầu ghi riêng;
+    thời gian nạp model (trường loadSeconds trong file OCR, nếu có) ghi riêng;
+  - RSS đỉnh của cả cây tiến trình (tổng) và của 1 tiến trình lớn nhất;
+  - dung lượng model trên đĩa (--model, nhiều lần được; thư mục thì cộng mọi file).
+
+    D:\\tmp\\ocr-mat\\venv\\Scripts\\python do_tai_nguyen.py --name easyocr --ocr-dir D:\\tmp\\ocr-mat\\ocr\\easyocr \\
+        --model D:\\cache\\easyocr -- <lệnh OCR ...>
+
+Ra: <--out>/<tên>-tai-nguyen.json. Thứ tự ảnh: trường "order" trong file OCR nếu có, không thì giờ sửa file.
+Chỉ để đo, không thuộc app. Cần psutil (requirements.txt cùng thư mục, cài trong venv riêng ở ổ D).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+MAX_INTERVAL = 0.5
+
+
+def median(values):
+    """Trung vị (giữa 2 số giữa nếu chẵn); rỗng -> None."""
+    a = sorted(v for v in values if v is not None)
+    if not a:
+        return None
+    m = len(a) // 2
+    return a[m] if len(a) % 2 else (a[m - 1] + a[m]) / 2
+
+
+def time_stats(rows):
+    """rows: [{'seconds': float, 'status': 'ok'|...}] theo thứ tự chạy. Bỏ ảnh đầu (dù ok hay lỗi), chỉ tính ảnh ok.
+    Trả {'first', 'n', 'median', 'max'}: first = giây ảnh đầu (None nếu không có)."""
+    if not rows:
+        return {"first": None, "n": 0, "median": None, "max": None}
+    first = rows[0].get("seconds")
+    rest = [r["seconds"] for r in rows[1:] if r.get("status", "ok") == "ok" and isinstance(r.get("seconds"), (int, float))]
+    return {"first": first, "n": len(rest), "median": median(rest), "max": max(rest) if rest else None}
+
+
+def tree_rss(rss_list):
+    """Tổng RSS (byte) của một lần lấy mẫu cả cây tiến trình; bỏ giá trị None (tiến trình vừa thoát)."""
+    return sum(r for r in rss_list if r)
+
+
+class Peak:
+    """Giữ đỉnh qua các lần lấy mẫu: tổng cả cây và 1 tiến trình lớn nhất."""
+
+    def __init__(self):
+        self.total = 0
+        self.proc = 0
+        self.samples = 0
+
+    def add(self, rss_list):
+        vals = [r for r in rss_list if r]
+        self.samples += 1
+        self.total = max(self.total, tree_rss(vals))
+        self.proc = max([self.proc, *vals])
+
+
+def path_size(p):
+    """Dung lượng (byte) của một file, hoặc mọi file trong thư mục (đệ quy). Không có -> 0."""
+    p = Path(p)
+    if p.is_file():
+        return p.stat().st_size
+    if p.is_dir():
+        return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+    return 0
+
+
+def order_rows(entries):
+    """entries: [(mtime, json)] -> rows theo 'order' (nếu mọi file có) hoặc mtime."""
+    if entries and all(isinstance(j.get("order"), (int, float)) for _, j in entries):
+        return [j for _, j in sorted(entries, key=lambda e: e[1]["order"])]
+    return [j for _, j in sorted(entries, key=lambda e: e[0])]
+
+
+def sample_tree(proc):
+    """RSS của tiến trình + mọi con (psutil). Tiến trình thoát giữa chừng -> bỏ."""
+    import psutil
+
+    out = []
+    try:
+        procs = [proc, *proc.children(recursive=True)]
+    except psutil.Error:
+        return out
+    for p in procs:
+        try:
+            out.append(p.memory_info().rss)
+        except psutil.Error:
+            pass
+    return out
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--" not in argv:
+        print("Cần lệnh OCR sau dấu --", file=sys.stderr)
+        return 2
+    cut = argv.index("--")
+    ap = argparse.ArgumentParser(description="Đo giây/ảnh, RSS đỉnh, dung lượng model của một lần chạy OCR.")
+    ap.add_argument("--name", required=True)
+    ap.add_argument("--ocr-dir", required=True)
+    ap.add_argument("--model", action="append", default=[])
+    ap.add_argument("--interval", type=float, default=0.25)
+    ap.add_argument("--out", default=r"D:\tmp\ocr-mat\ket-qua")
+    a = ap.parse_args(argv[:cut])
+    cmd = argv[cut + 1:]
+    interval = min(a.interval, MAX_INTERVAL)
+
+    import psutil
+
+    t0 = time.time()
+    child = subprocess.Popen(cmd)
+    proc = psutil.Process(child.pid)
+    peak = Peak()
+    while child.poll() is None:
+        peak.add(sample_tree(proc))
+        time.sleep(interval)
+    wall = time.time() - t0
+
+    entries = []
+    for f in Path(a.ocr_dir).glob("*__front.json"):
+        try:
+            entries.append((f.stat().st_mtime, json.loads(f.read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            pass
+    rows = order_rows(entries)
+    loads = [r.get("loadSeconds") for r in rows if isinstance(r.get("loadSeconds"), (int, float))]
+    res = {
+        "name": a.name,
+        "cmd": cmd,
+        "exitCode": child.returncode,
+        "wallSeconds": round(wall, 2),
+        "images": len(rows),
+        "imagesOk": sum(1 for r in rows if r.get("status", "ok") == "ok"),
+        "seconds": time_stats(rows),
+        "loadSeconds": loads[0] if loads else None,
+        "rssPeakTotalMB": round(peak.total / 2**20, 1),
+        "rssPeakProcMB": round(peak.proc / 2**20, 1),
+        "rssSamples": peak.samples,
+        "intervalSeconds": interval,
+        "modelBytes": {m: path_size(m) for m in a.model},
+        "modelMB": round(sum(path_size(m) for m in a.model) / 2**20, 1),
+    }
+    os.makedirs(a.out, exist_ok=True)
+    out = Path(a.out) / f"{a.name}-tai-nguyen.json"
+    out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    s = res["seconds"]
+    print(f"{a.name}: {res['imagesOk']}/{res['images']} ảnh ok; giây/ảnh (bỏ ảnh đầu) trung vị {s['median']}, lớn nhất {s['max']}; "
+          f"ảnh đầu {s['first']}; nạp model {res['loadSeconds']}; RSS đỉnh {res['rssPeakTotalMB']} MB; model {res['modelMB']} MB")
+    print(f"Ghi: {out}")
+    return child.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
