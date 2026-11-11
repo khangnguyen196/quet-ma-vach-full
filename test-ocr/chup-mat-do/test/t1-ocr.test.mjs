@@ -39,7 +39,7 @@ test("đọc định dạng có khung: conf null giữ null (dòng vẫn dùng �
   assert.deepEqual(queryFromOcr({ items: [{ text: "OMACHI", conf: null, box: box(0, 0, 100, 40) }] }), ["omachi"]);
 });
 
-test("đọc định dạng không khung (lines) và dạng cũ chỉ có text: giống queryOf của t1.mjs", () => {
+test("đọc định dạng không khung (lines) và dạng cũ chỉ có text: câu tìm = t1QueryFromLines trên dòng của công cụ", () => {
   const lines = [{ text: "VISSAN", h: 83, conf: 0.99 }, { text: "LAP XUN MAI QUÊ", h: 344, conf: 0.95 }];
   assert.deepEqual(queryFromOcr({ status: "ok", lines }), t1QueryFromLines(lines));
   assert.deepEqual(queryFromOcr({ status: "ok", text: "VISSAN\nLAP XUN MAI QUÊ" }), ["vissan", "lap", "xun", "mai", "que"]);
@@ -53,6 +53,10 @@ test("thang độ tin: tesseract.js 0–100 chia 100 (52 -> 0,52 giữ; 40 -> 0,
   assert.deepEqual(queryFromOcr(ocr, 100), ["omachi"]);
   // sai thang (để 1) thì 40 bị coi là 40 ≥ 0,5 -> giữ: chứng tỏ thang có tác dụng
   assert.deepEqual(queryFromOcr(ocr, 1), ["omachi", "vinamilk"]);
+  // dạng { lines } thang 100 (như tesseractjs cũ): chia 100 rồi mới lọc MIN_CONF
+  const linesOnly = { lines: [{ text: "VISSAN", conf: 91 }, { text: "LẠP XƯỞNG", conf: 30 }] };
+  assert.deepEqual(ocrLines(linesOnly, 100), [{ text: "VISSAN", conf: 0.91 }, { text: "LẠP XƯỞNG", conf: 0.3 }]);
+  assert.deepEqual(queryFromOcr(linesOnly, 100), ["vissan"]);
   // có khung: conf cũng chia thang
   assert.deepEqual(queryFromOcr({ items: [{ text: "OMACHI", conf: 40, box: box(0, 0, 10, 10) }] }, 100), []);
 });

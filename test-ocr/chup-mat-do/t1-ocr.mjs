@@ -14,6 +14,12 @@
 // Mẫu số: mọi mã của truth.csv có photos/<mã>/front.jpg (30); ảnh lỗi / thiếu file tính sai.
 // Ra: <out>/<tên>.json (từng ảnh: câu tìm, top5, hạng, đúng tên / thương hiệu) + 1 dòng bảng ở màn hình.
 // --so-t1 <bộ>: so câu tìm + top5 TỪNG ảnh với D:\tmp\chup-mat-do\ket-qua\t1.json (hồi quy); lệch thì mã thoát 1.
+// --tool và --scale cùng có: --scale thắng (in cảnh báo).
+//
+// KHÁC t1.mjs ở 2 chỗ (cố ý; câu tìm / T1 / cách chấm giữ nguyên):
+//   1. File OCR KHÔNG có trường status thì coi là ok (t1.mjs đòi status === "ok", thiếu status bị tính lỗi): file đổi
+//      định dạng / file cũ có thể không ghi status (ocr-mat/chay_ocr.py luôn ghi).
+//   2. Ảnh trong mẫu số mà THIẾU file OCR thì tính SAI, mẫu số vẫn 30 (t1.mjs bỏ qua ảnh thiếu file, mẫu số nhỏ lại).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +146,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const tool = arg("tool");
   if (tool && !(tool in CONF_SCALE)) { console.error(`--tool không biết: ${tool} (có: ${Object.keys(CONF_SCALE).join(", ")})`); process.exit(2); }
   const scale = Number(arg("scale", tool ? CONF_SCALE[tool] : 1));
+  if (tool && arg("scale") != null) console.warn(`Cảnh báo: có cả --tool ${tool} và --scale ${arg("scale")}: dùng --scale (${scale}), bỏ thang của --tool (${CONF_SCALE[tool]}).`);
   if (!(scale > 0)) { console.error("--scale phải là số > 0"); process.exit(2); }
   const outDir = arg("out", "D:\\tmp\\ocr-mat\\ket-qua");
   const photos = arg("photos", "D:\\quet-ma-vach-full\\test-ocr\\photos");
