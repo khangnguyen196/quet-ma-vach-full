@@ -1,7 +1,8 @@
 """Đợt ocr-mat (vòng 2, P2): chạy MỘT model OCR Python (CPU) trên 30 ảnh front.jpg, ghi file OCR chung cho t1-ocr.mjs.
 
 Mỗi model một hàm adapter (cấu hình CHỐT trước trong test-ocr/README.md Phần F, "Chốt bổ sung (vòng 2)"):
-  r1         RapidOCR 3.10.0, model mặc định của gói (PP-OCRv6 det small + rec small, cls PP-OCRv4 mobile)
+  r1         RapidOCR 3.10.0, model mặc định của gói (PP-OCRv6 det small + rec small,
+             cls ch_ppocr_mobile_v2.0_cls_mobile.onnx (nhãn PP-OCRv4 mobile trong config.yaml))
   r2         RapidOCR 3.10.0 + đúng ONNX của 1a (PP-OCRv5 mobile det + latin_PP-OCRv5 mobile rec, HuggingFace PaddlePaddle)
   r3         RapidOCR 3.10.0 + PP-OCRv5 server det @dcf248c4 + latin_PP-OCRv5 mobile rec (2a(b) trên CPU)
   easyocr    EasyOCR 1.7.2, lang ['vi', 'en'], tham số mặc định, CPU
@@ -104,6 +105,40 @@ def keys_from_yml(text):
     return [str(c) for c in chars]
 
 
+def tesseract_items(d, scale=100.0):
+    """Dict của pytesseract.image_to_data -> khung chữ mức từ (level 5). Từ có độ tin -1 (không phải từ) BỎ hẳn
+    (đúng Chốt: "từ có độ tin -1 bỏ"), không giữ với conf null."""
+    items = []
+    for i, t in enumerate(d["text"]):
+        if int(d["level"][i]) != 5:  # chỉ lấy mức từ
+            continue
+        try:
+            conf = float(d["conf"][i])
+        except (TypeError, ValueError):
+            continue
+        if conf < 0:
+            continue
+        x, y, w, h = (int(d[k][i]) for k in ("left", "top", "width", "height"))
+        it = make_item(t, conf, [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], scale=scale)
+        if it:
+            items.append(it)
+    return items
+
+
+def rapid_items(res):
+    """Kết quả RapidOCR 3.10.0 -> khung chữ. RapidOCR không ném lỗi khi ảnh không có chữ: nó tự bắt và trả kết quả
+    rỗng (RapidOCROutput() với boxes / txts None, hoặc TextDetOutput khi dò được khung mà nhận dạng rỗng).
+    Trả list (bình thường / rỗng thật) hoặc { items: [], canhBao } khi có khung mà không có chữ."""
+    boxes = getattr(res, "boxes", None)
+    txts = getattr(res, "txts", None)
+    if boxes is None and txts is None:
+        return []  # ảnh không có chữ (kết quả rỗng của RapidOCR)
+    if txts is None or boxes is None:
+        return {"items": [], "canhBao": f"RapidOCR trả {type(res).__name__}: có khung nhưng không có chữ (hoặc ngược lại)"}
+    scores = getattr(res, "scores", None) or [None] * len(txts)
+    return [it for it in (make_item(t, s, b) for b, t, s in zip(boxes.tolist(), txts, scores)) if it]
+
+
 def sample_codes(truth_rows, has_front):
     """Mã của truth.csv có front.jpg, giữ thứ tự truth.csv."""
     return [r["code"] for r in truth_rows if has_front(r["code"])]
@@ -153,15 +188,8 @@ def rapid_adapter(variant, threads):
     engine = RapidOCR(params=params)
 
     def run(img):
-        try:
-            res = engine(img)
-        except Exception as e:  # RapidOCR ném lỗi khi không dò được khung chữ nào
-            if "empty" in str(e).lower():
-                return []
-            raise
-        if res.boxes is None or res.txts is None:
-            return []
-        return [it for it in (make_item(t, s, b) for b, t, s in zip(res.boxes.tolist(), res.txts, res.scores)) if it]
+        # Không bắt lỗi theo câu chữ: lỗi thật ném ra -> main ghi status "loi". Ảnh không có chữ: rapid_items trả rỗng.
+        return rapid_items(engine(img))
 
     return run
 
@@ -193,15 +221,7 @@ def tesseract_adapter(threads):
 
     def run(img):
         d = pytesseract.image_to_data(img, lang="vie+eng", config=cfg, output_type=pytesseract.Output.DICT)
-        items = []
-        for i, t in enumerate(d["text"]):
-            if int(d["level"][i]) != 5:  # chỉ lấy mức từ
-                continue
-            x, y, w, h = (int(d[k][i]) for k in ("left", "top", "width", "height"))
-            it = make_item(t, d["conf"][i], [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], scale=100.0)
-            if it:
-                items.append(it)
-        return items
+        return tesseract_items(d)
 
     return run
 
