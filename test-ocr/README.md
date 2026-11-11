@@ -643,3 +643,24 @@ Thêm sau khi đã thấy số vòng 1–2, trước khi đo R1 trong trình duy
   - "Đáng làm máy chủ" = trong 5 đầu ≥ 22/30, vị trí 1 ≥ 13/30, ≤ 15 giây/ảnh CPU trung vị, RSS đỉnh ≤ 2.000 MB, giấy phép cho dùng không điều kiện doanh thu.
 - Ghi chú cấu hình (không đổi luật): Florence-2 / GOT-OCR2.0 / PaddleOCR-VL trả `{ text }`; `t1-ocr` tách theo xuống dòng. Florence `<OCR>` thường trả một khối không xuống dòng nên câu tìm lấy từ theo thứ tự đọc. GOT tự thu ảnh về 1024 × 1024 bên trong.
 - Model nặng vòng 3 (cấu hình như Chốt bổ sung vòng 2, luật dừng cũ + luật bộ nhớ): Florence-2 large chạy lại toàn bộ 30 ảnh vào `florence-large-v3`; GOT-OCR2.0 (venv-hf, `transformers` 4.49.0 có `GotOcr2ForConditionalGeneration`); Surya (venv-surya riêng, kiểm giấy phép + điều kiện tải trước khi cài); PaddleOCR-VL (venv riêng nếu cần bản `transformers` khác).
+
+## Kết quả vòng 3 (11–12/11/2026)
+
+Chốt bổ sung vòng 3: commit 30a8aed lúc 23:09:50 ngày 11/11/2026; lần chạy OCR mới đầu tiên (R1-trình-duyệt Chromium) bắt đầu 23:12:57.
+
+### R1 trong trình duyệt (việc ưu tiên)
+
+Cấu hình đúng Chốt bổ sung vòng 3 (PaddleOCR.js 0.4.2 + onnxruntime-web 1.24.3 wasm 1 luồng, ONNX PP-OCRv6 small của rapidocr 3.10.0, yml PaddlePaddle, tham số R1, không cls). Nạp được ngay, không lỗi op, 30/30 ảnh ok cả 2 trình duyệt. Giây = giây đọc chữ / ảnh theo file OCR (30 ảnh, như 1a).
+
+| Cách | Vị trí 1 (/30) | Trong 5 đầu (/30) | Đúng tên / thương hiệu (/30) | Giây/ảnh trung vị (lớn nhất), WebKit / Chromium | Nạp (giây) | Tải lần đầu WebKit / Chromium | WS đỉnh (cả cây) WebKit / Chromium | Giấy phép | Chạy trong app được không | Qua ngưỡng đổi trang thử |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1a PaddleOCR.js mobile (mốc) | WebKit 8 · Chromium 10 | 19 · 19 | 14 / 10 · 16 / 11 | 5,8 (8,4) / 5,3 (9,5) | – | 18,6 / 18,7 MB | 1.198 / 1.176 MB | Apache-2.0 | có (đang là trang thử) | – |
+| R1 Python (vòng 2, có cls) | 13 | 20 | 16 / 15 | CPU 2,5 (6,7) | 3,2 | – | RSS 472 MB | Apache-2.0 | – | – |
+| **R1-trình-duyệt** | WebKit **13** · Chromium **14** | **21** · **22** | 14 / 13 · 16 / 15 | 7,8 (16,6) / 5,9 (12,2) | 3,9 / 3,0 (máy); 10,7 / 10,8 (cdn) | 35,7 / 37,0 MB | 1.503 / 1.055 MB | PP-OCRv6 + RapidOCR: Apache-2.0 | có (cùng SDK + onnxruntime-web như trang thử; chỉ đổi 2 file model + tham số) | **không**, thiếu 1 ảnh: (1) 5 đầu WebKit 21 < 22 (Chromium 22 đạt); (2) vị trí 1 13 ≥ 8, 14 ≥ 10 đạt; (3) WebKit 7,8 ≤ 15 giây đạt; (4) 35,7 / 37,0 ≤ 150 MB đạt; (5) WS 1.503 / 1.055 ≤ 2.000 đạt; (6) Apache-2.0 đạt; (7) thư viện jsDelivr đúng bản ghim, model ModelScope tag v3.10.0 + yml HuggingFace ghim commit đạt |
+
+Ghi chú:
+- Tải lần đầu (`--mode cdn --limit 1`, cache trống): ONNX rec 21,2–21,3 MB + det 9,9 MB (ModelScope không nén), ort wasm 2,0–2,6 MB, opencv.js 2,4–3,0 MB, 15 request, 0 lỗi. WebKit Windows: "đỉnh 1 tiến trình" theo bộ nhớ riêng (private) lên 5,8 GB nhưng WS (bộ nhớ thật đang dùng, cột so sánh của Phần D / E) 1.503 MB; nền WebKit (Playwright.exe) ~0,86 GB.
+- So với 1a: Chromium top5 khác 24/30 ảnh; lên 7 (8936036020977 ngoài 5 -> 2; 8936036027099 4 -> 1; 8936079120276 3 -> 1; 8934840000130 2 -> 1; 8935039511024 ngoài 5 -> 2; 8936134361040 ngoài 5 -> 1; 8936045081310 4 -> 1), xuống 4 (8934614031322 2 -> 3; 8934804025766 2 -> 4; 8936012061321 1 -> 5; 8936017367107 2 -> 3). WebKit top5 khác 26/30; lên 8 (8936028641487 ngoài 5 -> 1; 8936036020977 ngoài 5 -> 2; 8936036027099 4 -> 2; 8936079120276 3 -> 1; 8934840000130 2 -> 1; 8934673300759 3 -> 1; 8936134361040 ngoài 5 -> 1; 8936045081310 5 -> 1), xuống 5 (8934614031322 2 -> 3; 8934804025766 2 -> 5; 8936012061321 2 -> ngoài 5; 8935039511024 1 -> 2; 8936017367107 3 -> 4).
+- WebKit so với Chromium (cùng model, cùng tham số): top5 khác 9/30, WebKit kém ở 4 ảnh (8936036027099 1 -> 2; 8934804025766 4 -> 5; 8936012061321 5 -> ngoài 5; 8936017367107 3 -> 4), không ảnh nào hơn: khác do cách giải mã / thu nhỏ ảnh của 2 trình duyệt (như 1a, 2b).
+- So với R1 Python (có cls): Chromium top5 khác 16/30; lên 4 (8936079120276 ngoài 5 -> 1; 8934804025766 5 -> 4; 8935039511024 ngoài 5 -> 2; 8936045081310 5 -> 1), xuống 1 (8934614031322 1 -> 3). Trong trình duyệt KHÔNG kém bản Python dù bỏ cls (xem đối chứng R1 không cls dưới).
+- Kết luận R1-trình-duyệt: tốt hơn 1a rõ ở vị trí 1 (+5 / +4) và trong 5 đầu (+3 / +2), nhanh gần bằng 1a, nặng hơn 1a ~17–18 MB tải lần đầu; không qua ngưỡng đổi trang thử chỉ vì WebKit 21/30 (thiếu 1 ảnh) -> trang thử giữ 1a theo luật (vòng này không sửa trang thử).
