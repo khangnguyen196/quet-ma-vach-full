@@ -10,6 +10,9 @@ dùng) của tiến trình + MỌI tiến trình con mỗi --interval giây (m�
     D:\\tmp\\ocr-mat\\venv\\Scripts\\python do_tai_nguyen.py --name easyocr --ocr-dir D:\\tmp\\ocr-mat\\ocr\\easyocr \\
         --model D:\\cache\\easyocr -- <lệnh OCR ...>
 
+--ocr-dir phải là thư mục MỚI: đã có *__front.json thì báo lỗi, thoát mã 2, không chạy lệnh OCR; khi đọc kết quả
+chỉ nhận file sửa sau lúc bắt đầu. Thoát giữa chừng (Ctrl+C, lỗi) thì kill cả cây tiến trình con.
+
 Ra: <--out>/<tên>-tai-nguyen.json. Thứ tự ảnh: trường "order" trong file OCR nếu có, không thì giờ sửa file.
 Chỉ để đo, không thuộc app. Cần psutil (requirements.txt cùng thư mục, cài trong venv riêng ở ổ D).
 """
@@ -99,6 +102,37 @@ def sample_tree(proc):
     return out
 
 
+def read_entries(ocr_dir, since):
+    """[(mtime, json)] của mọi <mã>__front.json trong ocr_dir có giờ sửa >= since (bỏ file của lần chạy cũ)."""
+    entries = []
+    for f in Path(ocr_dir).glob("*__front.json"):
+        try:
+            mtime = f.stat().st_mtime
+            if mtime < since:
+                continue
+            entries.append((mtime, json.loads(f.read_text(encoding="utf-8"))))
+        except (OSError, ValueError):
+            pass
+    return entries
+
+
+def kill_tree(pid):
+    """Kill tiến trình pid và mọi tiến trình con (venv Python trên Windows chạy python thật là tiến trình con)."""
+    import psutil
+
+    try:
+        root = psutil.Process(pid)
+        procs = [*root.children(recursive=True), root]
+    except psutil.Error:
+        return
+    for p in procs:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(procs, timeout=5)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--" not in argv:
@@ -117,22 +151,32 @@ def main(argv=None):
 
     import psutil
 
+    old = list(Path(a.ocr_dir).glob("*__front.json"))
+    if old:
+        print(f"Thư mục OCR {a.ocr_dir} đã có {len(old)} file *__front.json của lần chạy cũ: "
+              "kết quả sẽ lẫn file cũ. Hãy dùng một thư mục mới (không chạy lệnh OCR).", file=sys.stderr)
+        return 2
+
     t0 = time.time()
     child = subprocess.Popen(cmd)
-    proc = psutil.Process(child.pid)
     peak = Peak()
-    while child.poll() is None:
-        peak.add(sample_tree(proc))
-        time.sleep(interval)
+    try:
+        try:
+            proc = psutil.Process(child.pid)
+        except psutil.NoSuchProcess:
+            proc = None  # lệnh con thoát quá nhanh: không lấy mẫu được, vẫn ghi kết quả
+        while child.poll() is None:
+            if proc is not None:
+                peak.add(sample_tree(proc))
+            time.sleep(interval)
+    finally:
+        if child.poll() is None:  # thoát giữa chừng (Ctrl+C, lỗi): không để lệnh OCR chạy nền
+            kill_tree(child.pid)
+            child.wait()
     wall = time.time() - t0
 
-    entries = []
-    for f in Path(a.ocr_dir).glob("*__front.json"):
-        try:
-            entries.append((f.stat().st_mtime, json.loads(f.read_text(encoding="utf-8"))))
-        except (OSError, ValueError):
-            pass
-    rows = order_rows(entries)
+    # Lớp thứ hai: file sửa trước t0 là của lần chạy cũ (làm tròn giờ của hệ tệp: lùi 2 giây cho chắc).
+    rows = order_rows(read_entries(a.ocr_dir, t0 - 2))
     loads = [r.get("loadSeconds") for r in rows if isinstance(r.get("loadSeconds"), (int, float))]
     res = {
         "name": a.name,
