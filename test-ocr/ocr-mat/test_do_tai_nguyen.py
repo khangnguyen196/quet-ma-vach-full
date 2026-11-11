@@ -236,16 +236,35 @@ def test_stop_reason():
     assert first3_seconds([{"seconds": 1}, {"status": "loi"}, {"seconds": 3}, {"seconds": 9}]) == [1, 0.0, 3]
 
 
+def test_main_dung_theo_luat_bo_nho_0_anh_thoat_4(tmp_path, capsys):
+    """Vòng 4 (review): lệnh con cấp phát ~256 MB NGAY, chưa ghi ảnh nào -> dừng theo luật bộ nhớ vẫn thoát mã 4
+    (không phải mã 3 "không có ảnh nào"); in cả 2 ý."""
+    ocr = tmp_path / "ocr"
+    script = "import time;x=b'x'*(256*2**20);time.sleep(60)"
+    t = time.time()
+    code = main(["--name", "nang0", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--max-rss-mb", "60", "--",
+                 sys.executable, "-c", script])
+    assert time.time() - t < 30  # không chờ hết 60 giây
+    assert code == 4
+    r = json.loads((tmp_path / "nang0-tai-nguyen.json").read_text(encoding="utf-8"))
+    assert r["dungTheoLuatBoNho"] is True and r["dungTheoLuat"] == "bo-nho"
+    assert r["images"] == 0
+    err = capsys.readouterr().err
+    assert "không có ảnh nào" in err and "Dừng theo luật" in err
+
+
 def test_main_dung_theo_luat_bo_nho(tmp_path):
-    """RSS vượt --max-rss-mb -> kill lệnh con, ghi dungTheoLuatBoNho + số ảnh đã chạy, thoát mã 4."""
+    """RSS vượt --max-rss-mb -> kill lệnh con, ghi dungTheoLuatBoNho + số ảnh đã chạy, thoát mã 4.
+    Vòng 4: ngưỡng 60 MB (Python vừa khởi động chưa tới, không bị dừng trước khi ghi ảnh), ghi ảnh TRƯỚC rồi mới
+    cấp phát ~256 MB (chạm từng trang nên RSS lên thật) -> chắc chắn vượt ngưỡng sau khi đã có 1 ảnh."""
     ocr = tmp_path / "ocr"
     script = (
         "import json,sys,time,pathlib;d=pathlib.Path(sys.argv[1]);d.mkdir(parents=True,exist_ok=True);"
         "(d/'a__front.json').write_text(json.dumps({'order':0,'seconds':1.0,'status':'ok'}));"
-        "x=bytearray(64*2**20);time.sleep(60)"
+        "x=b'x'*(256*2**20);time.sleep(60)"
     )
     t = time.time()
-    code = main(["--name", "nang", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--max-rss-mb", "20", "--",
+    code = main(["--name", "nang", "--ocr-dir", str(ocr), "--out", str(tmp_path), "--max-rss-mb", "60", "--",
                  sys.executable, "-c", script, str(ocr)])
     assert time.time() - t < 30  # không chờ hết 60 giây
     assert code == 4
