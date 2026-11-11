@@ -16,6 +16,7 @@ Vòng 3 chặn thêm (đều thoát mã 2, KHÔNG chạy lệnh OCR):
   - <--out>/<--name>-tai-nguyen.json đã có (tránh lần sau ghi đè lần trước); cố ý ghi đè thì thêm --ghi-de;
   - lệnh con có "--out <x>" (hoặc "--out=<x>") mà x khác --ocr-dir sau khi chuẩn hóa đường dẫn.
 Chạy xong mà không có ảnh nào (images == 0): vẫn ghi file tài nguyên để xem, in lỗi, thoát mã 3.
+Dừng theo luật (bộ nhớ / thời gian / 3 ảnh đầu): thoát mã 4, kể cả khi 0 ảnh (vòng 4: in cả 2 ý, mã 4 thắng mã 3).
 
 Ra: <--out>/<tên>-tai-nguyen.json. Thứ tự ảnh: trường "order" trong file OCR nếu có, không thì giờ sửa file.
 Chỉ để đo, không thuộc app. Cần psutil (requirements.txt cùng thư mục, cài trong venv riêng ở ổ D).
@@ -279,13 +280,17 @@ def main(argv=None):
     print(f"{a.name}: {res['imagesOk']}/{res['images']} ảnh ok; giây/ảnh (bỏ ảnh đầu) trung vị {s['median']}, lớn nhất {s['max']}; "
           f"ảnh đầu {s['first']}; nạp model {res['loadSeconds']}; RSS đỉnh {res['rssPeakTotalMB']} MB; model {res['modelMB']} MB")
     print(f"Ghi: {out}")
+    # Dừng theo luật kiểm TRƯỚC "không có ảnh nào": dừng theo luật mà 0 ảnh thì in cả 2 ý, thoát mã 4.
+    if stopped:
+        if not rows:
+            print(f"Lỗi: không có ảnh nào trong {a.ocr_dir} (images = 0) vì lệnh OCR bị dừng trước ảnh đầu.",
+                  file=sys.stderr)
+        print(f"Dừng theo luật ({stopped['text']}) sau {len(rows)} ảnh.", file=sys.stderr)
+        return 4
     if not rows:
         print(f"Lỗi: không có ảnh nào trong {a.ocr_dir} (images = 0; mã thoát lệnh OCR {child.returncode}). "
               "Kiểm lại lệnh OCR và --ocr-dir.", file=sys.stderr)
         return 3
-    if stopped:
-        print(f"Dừng theo luật ({stopped['text']}) sau {len(rows)} ảnh.", file=sys.stderr)
-        return 4
     return child.returncode
 
 
