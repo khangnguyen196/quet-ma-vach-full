@@ -69,9 +69,10 @@ async function initPaddle() {
     return fetch(url);
   };
   const ocr = await PaddleOCR.create({
-    textDetectionModelName: "PP-OCRv5_mobile_det",
+    // tên model theo assets.js (mặc định PP-OCRv5_mobile_det + latin_PP-OCRv5_mobile_rec như 1a; det / rec đổi được)
+    textDetectionModelName: A.detName || "PP-OCRv5_mobile_det",
     textDetectionModelAsset: { url: "tar:det" },
-    textRecognitionModelName: "latin_PP-OCRv5_mobile_rec",
+    textRecognitionModelName: A.recName || "latin_PP-OCRv5_mobile_rec",
     textRecognitionModelAsset: { url: "tar:rec" },
     ortOptions: {
       // WebGPU chỉ khi harness.html dò thấy (navigator.gpu + requestAdapter() thành công); "auto" của SDK
@@ -91,6 +92,8 @@ async function initPaddle() {
       webgpuAvailable: summary?.webgpuAvailable,
       gpuReason: P.gpuReason,
       ortBuild: A.ort.split("/").pop(),
+      detModel: A.detName,
+      recModel: A.recName,
       modelBytes: summary?.assets?.map((a) => a.bytes),
     },
     async recognize(canvas) {

@@ -36,9 +36,10 @@
       })();
       return;
     }
-    var urls = OcrAssets.assetUrls(mode, { webgpu: q.get("ort") === "webgpu" });
+    // det / rec (đợt ocr-mat): biến thể model của paddlejs (det=mobile|server, rec=latin|server); trống = mặc định 1a
+    var urls = OcrAssets.assetUrls(mode, { webgpu: q.get("ort") === "webgpu", det: q.get("det") || "", rec: q.get("rec") || "" });
     window.__OCR_ASSETS = urls;
-    window.__OCR_PARAMS = { engine: engine, mode: mode, ort: q.get("ort") || "", gpuReason: q.get("gpuReason") || "", join: q.get("join") || "", lines: q.get("lines") === "1" };
+    window.__OCR_PARAMS = { engine: engine, mode: mode, ort: q.get("ort") || "", gpuReason: q.get("gpuReason") || "", join: q.get("join") || "", lines: q.get("lines") === "1", det: q.get("det") || "", rec: q.get("rec") || "" };
     if (engine === "paddlejs") {
       var map = document.createElement("script");
       map.type = "importmap";

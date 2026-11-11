@@ -315,3 +315,40 @@ export function imagePeak(samples) {
     peakProcWs: Math.max(...list.flatMap((s) => s.procs.map((p) => Number(p.ws) || 0))),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Đợt ocr-mat: tùy chọn THÊM của run-browser.mjs (mặc định giữ nguyên như Phần D / E)
+// ---------------------------------------------------------------------------
+
+export const DET_VARIANTS = ["mobile", "server"];
+export const REC_VARIANTS = ["latin", "server"];
+export const ORT_CHOICES = ["wasm", "webgpu"];
+export const CHANNELS = ["chrome", "msedge"];
+
+/** Tên công cụ + hậu tố (vd paddlejs-rows-chromium-webgpu). Không có tag -> đúng toolName cũ. */
+export function taggedToolName(engine, browser, join = "", tag = "") {
+  const base = toolName(engine, browser, join);
+  return tag ? `${base}-${tag}` : base;
+}
+
+/** Kiểm các tùy chọn thêm: det / rec / ort chỉ cho paddlejs, channel chỉ cho chromium; dùng tùy chọn nào thì phải có
+ *  --tag (ghi vào thư mục riêng, không lẫn với kết quả 1a / 1b đã có). tag chỉ chữ thường, số, gạch ngang. */
+export function checkExtraOptions(a) {
+  if (a.det && !DET_VARIANTS.includes(a.det)) throw new Error(`--det phải là ${DET_VARIANTS.join(" | ")}`);
+  if (a.rec && !REC_VARIANTS.includes(a.rec)) throw new Error(`--rec phải là ${REC_VARIANTS.join(" | ")}`);
+  if (a.ort && !ORT_CHOICES.includes(a.ort)) throw new Error(`--ort phải là ${ORT_CHOICES.join(" | ")}`);
+  if (a.channel && !CHANNELS.includes(a.channel)) throw new Error(`--channel phải là ${CHANNELS.join(" | ")}`);
+  if ((a.det || a.rec || a.ort) && a.engine !== "paddlejs") throw new Error("--det / --rec / --ort chỉ dùng cho paddlejs");
+  if (a.channel && a.browser !== "chromium") throw new Error("--channel chỉ dùng cho chromium");
+  if (a.tag && !/^[a-z0-9][a-z0-9-]*$/.test(a.tag)) throw new Error("--tag chỉ gồm chữ thường, số, gạch ngang");
+  if ((a.det || a.rec || a.ort || a.channel) && !a.tag) throw new Error("dùng --det / --rec / --ort / --channel thì phải có --tag (thư mục kết quả riêng)");
+}
+
+/** Query của harness.html. Không có tùy chọn thêm -> đúng chuỗi cũ (engine, mode, join, lines). */
+export function harnessQuery(a) {
+  let q = `engine=${a.engine}&mode=${a.mode}${a.join ? `&join=${a.join}` : ""}${a.lines ? "&lines=1" : ""}`;
+  if (a.ort) q += `&ort=${a.ort}`;
+  if (a.det) q += `&det=${a.det}`;
+  if (a.rec) q += `&rec=${a.rec}`;
+  return q;
+}

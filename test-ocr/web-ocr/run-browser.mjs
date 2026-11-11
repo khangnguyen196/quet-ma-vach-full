@@ -21,11 +21,11 @@ import { pathToFileURL } from "node:url";
 import { startServer, defaultMounts } from "./serve.mjs";
 import {
   resultFileName, toolName, timesRow, pickPhotos, summarizeMemory, sumBytes, timeStats, mb, csvLine, shouldWriteRun, metricsNotes,
-  onlyImages, imagePeak,
+  onlyImages, imagePeak, taggedToolName, checkExtraOptions, harnessQuery,
 } from "./lib.mjs";
 
 function parseArgs(argv) {
-  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: process.env.PHOTOS_DIR || "photos", timeout: 300, report: false, join: "", only: "", lines: false };
+  const a = { engine: "paddlejs", browser: "chromium", mode: "local", limit: 0, out: "outputs", photos: process.env.PHOTOS_DIR || "photos", timeout: 300, report: false, join: "", only: "", lines: false, det: "", rec: "", ort: "", channel: "", tag: "" };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -40,6 +40,12 @@ function parseArgs(argv) {
     else if (k === "--join") a.join = v(); // "rows": khung cùng hàng nối 1 dòng (công cụ paddlejs-rows-<trình duyệt>)
     else if (k === "--only") a.only = v(); // chỉ ảnh có tên này (không đuôi), vd front
     else if (k === "--lines") a.lines = true; // ghi thêm <mã>__<ảnh>.json: dòng + chiều cao chữ + độ tin + bộ nhớ
+    // đợt ocr-mat (chỉ THÊM, mặc định giữ nguyên): model khác, ép backend, Chrome / Edge bản cài trên máy, hậu tố tên công cụ
+    else if (k === "--det") a.det = v(); // mobile | server
+    else if (k === "--rec") a.rec = v(); // latin | server
+    else if (k === "--ort") a.ort = v(); // wasm | webgpu (bỏ bước dò WebGPU của harness.html)
+    else if (k === "--channel") a.channel = v(); // chrome | msedge (Playwright channel, chỉ chromium)
+    else if (k === "--tag") a.tag = v(); // hậu tố tên công cụ / thư mục kết quả, vd webgpu -> paddlejs-rows-chromium-webgpu
     else throw new Error(`Không biết tham số ${k}`);
   }
   if (!["paddlejs", "tesseractjs"].includes(a.engine)) throw new Error("--engine phải là paddlejs hoặc tesseractjs");
@@ -51,6 +57,7 @@ function parseArgs(argv) {
   if (a.join && toolName(a.engine, a.browser, a.join) === toolName(a.engine, a.browser)) {
     throw new Error("--join ghi vào thư mục của công cụ không join");
   }
+  checkExtraOptions(a);
   return a;
 }
 
@@ -127,7 +134,7 @@ async function loadPlaywright() {
 
 async function runOnce(args) {
   const pw = await loadPlaywright();
-  const tool = toolName(args.engine, args.browser, args.join);
+  const tool = taggedToolName(args.engine, args.browser, args.join, args.tag);
   const photos = listPhotos(args.photos);
   const picked = onlyImages(photos, args.only);
   const todo = args.limit > 0 ? picked.slice(0, args.limit) : picked;
@@ -140,11 +147,12 @@ async function runOnce(args) {
   const server = await startServer({ port: 0, mounts: { ...defaultMounts(), "/photos/": path.resolve(args.photos) } });
   const base = `http://localhost:${server.port}`;
   const launchOpts = { headless: true };
-  if (args.browser === "chromium" && process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
+  if (args.browser === "chromium" && args.channel) launchOpts.channel = args.channel; // bản cài trên máy (vd Chrome có WebGPU)
+  else if (args.browser === "chromium" && process.env.PW_CHROMIUM) launchOpts.executablePath = process.env.PW_CHROMIUM;
   const browserType = args.browser === "chromium" ? pw.chromium : pw.webkit;
 
   const run = {
-    tool, engine: args.engine, browser: args.browser, mode: args.mode, startedAt: new Date().toISOString(),
+    tool, engine: args.engine, browser: args.browser, mode: args.mode, options: { det: args.det, rec: args.rec, ort: args.ort, channel: args.channel, tag: args.tag }, startedAt: new Date().toISOString(),
     images: todo.length, ok: 0, errors: 0, skippedExisting: 0, crashes: 0, initError: null, init: null, errorsSample: [],
   };
   const samples = [];
@@ -235,7 +243,7 @@ async function runOnce(args) {
     };
 
     const openAndInit = async () => {
-      const url = `${base}/harness.html?engine=${args.engine}&mode=${args.mode}${args.join ? `&join=${args.join}` : ""}${args.lines ? "&lines=1" : ""}`;
+      const url = `${base}/harness.html?${harnessQuery(args)}`;
       await page.goto(url);
       await page.waitForFunction(() => window.harnessReady === true, null, { timeout: 120000 });
       return withTimeout(page.evaluate(() => window.harness.init()), 900000, "init");

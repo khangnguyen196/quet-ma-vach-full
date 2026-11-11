@@ -35,6 +35,41 @@
     },
   };
 
+  // Đợt ocr-mat (2a): model khác để đo, chọn bằng tham số det / rec (mặc định = MODELS ở trên, số cũ giữ nguyên).
+  // PP-OCRv5 server (ONNX chính thức của PaddlePaddle trên HuggingFace, Apache-2.0), ghim mã commit; sha256 theo
+  // HuggingFace API (lfs.sha256, 11/11/2026). server_rec là bộ chữ Trung / Anh (18.383 ký tự, thiếu 48/67 chữ thường
+  // có dấu tiếng Việt).
+  var MODEL_VARIANTS = {
+    det: {
+      mobile: MODELS.det,
+      server: {
+        name: "PP-OCRv5_server_det",
+        repo: "PaddlePaddle/PP-OCRv5_server_det_onnx",
+        rev: "dcf248c4dcc064c6d030db241255f9e8fbc6733a",
+        dir: "PP-OCRv5_server_det_onnx",
+        sha256: "10803475a591f7dc623e24670fb5752ec94d39a1f8cf069aac1b6f0ce19cfc85",
+      },
+    },
+    rec: {
+      latin: MODELS.rec,
+      server: {
+        name: "PP-OCRv5_server_rec",
+        repo: "PaddlePaddle/PP-OCRv5_server_rec_onnx",
+        rev: "b70df217f4fd99d14f970bad092cebe7d74cc4d1",
+        dir: "PP-OCRv5_server_rec_onnx",
+        sha256: "d9dc333c9c7b042c6dffb8e33d72b6f65c9c1d463d0a3c2f78174fea55e94752",
+      },
+    },
+  };
+
+  /** Model theo tên biến thể (det: mobile | server; rec: latin | server); trống = mặc định; tên lạ -> lỗi. */
+  function pickModel(kind, variant) {
+    if (!variant) return MODELS[kind];
+    var m = MODEL_VARIANTS[kind][variant];
+    if (!m) throw new Error("Không có model " + kind + "=" + variant);
+    return m;
+  }
+
   // Ngôn ngữ tesseract.js: vie+eng giống run_ocr.py (Tesseract Python) để so cùng điều kiện.
   var TESS_LANGS = "vie+eng";
 
@@ -43,6 +78,8 @@
    *  webgpu: true thì dùng bản onnxruntime-web có WebGPU (ort.min.mjs, wasm JSEP lớn hơn); false thì bản chỉ wasm. */
   function assetUrls(mode, opts) {
     var webgpu = !!(opts && opts.webgpu);
+    var det = pickModel("det", opts && opts.det);
+    var rec = pickModel("rec", opts && opts.rec);
     var npm = function (pkg, path) {
       return mode === "cdn"
         ? "https://cdn.jsdelivr.net/npm/" + pkg + "@" + VERSIONS[pkg] + "/" + path
@@ -62,10 +99,12 @@
       opencv: npm("@techstark/opencv-js", "dist/opencv.js"),
       clipper: npm("clipper-lib", "clipper.js"),
       jsYaml: npm("js-yaml", "dist/js-yaml.mjs"),
-      detOnnx: model(MODELS.det, "inference.onnx"),
-      detYml: model(MODELS.det, "inference.yml"),
-      recOnnx: model(MODELS.rec, "inference.onnx"),
-      recYml: model(MODELS.rec, "inference.yml"),
+      detName: det.name,
+      recName: rec.name,
+      detOnnx: model(det, "inference.onnx"),
+      detYml: model(det, "inference.yml"),
+      recOnnx: model(rec, "inference.onnx"),
+      recYml: model(rec, "inference.yml"),
       tesseract: npm("tesseract.js", "dist/tesseract.esm.min.js"),
       tesseractWorker: npm("tesseract.js", "dist/worker.min.js"),
       tesseractCore: mode === "cdn"
@@ -87,5 +126,5 @@
     };
   }
 
-  root.OcrAssets = { VERSIONS: VERSIONS, MODELS: MODELS, TESS_LANGS: TESS_LANGS, assetUrls: assetUrls };
+  root.OcrAssets = { VERSIONS: VERSIONS, MODELS: MODELS, MODEL_VARIANTS: MODEL_VARIANTS, TESS_LANGS: TESS_LANGS, assetUrls: assetUrls };
 })(globalThis);
