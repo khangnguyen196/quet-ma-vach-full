@@ -712,3 +712,36 @@ Ghi chú model nặng:
 - Thêm NGOÀI Chốt, chỉ tham khảo (KHÔNG dùng cho kết luận chính): G4 = R1-trình-duyệt Chromium + R3 và R1-trình-duyệt WebKit + R3 (`r3-v2`).
 - Kiểm tự nhất quán của bộ ghép (trước các lần ghép trên): ghép A với chính A (1a-chromium, Surya, R3) -> câu tìm + top5 trùng A 30/30 (so bằng `compareWithT1` của `t1-ocr.mjs` với file kết quả của A).
 - Đo lại giây r1-nocls lúc máy rảnh (giây vòng 3 bị `pip install` chen): cấu hình KHÔNG đổi (`chay_ocr.py --model r1-nocls`, venv-rapid), thư mục mới `D:\tmp\ocr-mat\ocr\r1-nocls-v4`, qua `do_tai_nguyen.py --max-rss-mb 6000 --max-3-dau-s 120 --max-wall-s 1800` (như v3), ghi RAM trống lúc chạy. Chỉ dùng số giây (+ RSS); chữ phải trùng `r1-nocls-v3` (so câu tìm + top5 30/30); lệch thì ghi ảnh lệch, không chọn bản nào. Trước khi chạy: không còn tiến trình nặng khác (pip, OCR, trình duyệt đo).
+
+## Kết quả vòng 4 (12/11/2026)
+
+Chốt bổ sung vòng 4: commit 03a521d lúc 02:26:25; bộ ghép (test 813bdf7, code 524288f); lần ghép đầu tiên (kiểm tự nhất quán) 02:28:11; các ghép G1–G4 02:28:19–02:28:21; r1-nocls-v4 02:29:07–02:30:03. Không chạy OCR nào khác.
+
+Kiểm tự nhất quán: ghép A với chính A -> câu tìm + top5 trùng A **30/30** ở cả 3 bộ (1a-chromium 10/19, Surya 16/23, R3 14/22, đúng số cũ).
+
+### Ghép (chấm bằng `t1-ocr.mjs` không đổi; mẫu số 30; 0 ảnh lỗi ở mọi bộ, 30/30 ảnh ghép cả hai bên)
+
+| Ghép | A (giữ hết) + B (thêm dòng mới) | Vị trí 1 (/30) | Trong 5 đầu (/30) | Đúng tên / thương hiệu (/30) | Thành phần (vị trí 1 / 5 đầu; tên / thương hiệu) | Ghép có ích | Top5 khác thành phần tốt nhất; ảnh lên / xuống hạng | Giây cộng (tổng trung vị 2 thành phần; trung vị theo ảnh, lớn nhất) |
+|---|---|---|---|---|---|---|---|---|
+| G1 | Surya + 2a(b) Chromium | 16 | 23 | 21 / 17 | Surya 16 / 23; 20 / 17 · 2a(b) 16 / 22; 21 / 16 | **không** (23 < 23 + 2; vị trí 1 bằng) | 13/30 ảnh khác danh sách 5 gợi ý, KHÔNG ảnh nào đổi hạng của mã đúng | 64,4 + 78,8 = 143,2; 143,9 (241,6) |
+| G2 | trùng G1 (không chạy lại) | – | – | – | – | – | – | – |
+| G3 Chromium | Surya + 1a-chromium | 16 | **22** | 21 / 17 | Surya 16 / 23 · 1a 10 / 19; 16 / 11 | **không** (kém Surya 1 ảnh ở 5 đầu) | 11/30; lên 0; xuống 1 (8934804025766 5 -> ngoài 5) | 64,4 + 5,3 = 69,7; 70,7 (108,3) |
+| G3 WebKit | Surya + 1a-webkit | 16 | **22** | 20 / 17 | Surya 16 / 23 · 1a 8 / 19; 14 / 10 | **không** | 9/30; lên 0; xuống 1 (8934804025766 5 -> ngoài 5) | 64,4 + 5,8 = 70,1; 70,7 (109,0) |
+| G3b Chromium | Surya + R1-trình-duyệt Chromium | 16 | 23 | 20 / 17 | Surya 16 / 23 · R1-tr.d. 14 / 22; 16 / 15 | **không** (23 < 25) | 11/30; lên 0; xuống 0 | 64,4 + 5,9 = 70,3; 72,8 (108,8) |
+| G3b WebKit | Surya + R1-trình-duyệt WebKit | 16 | 23 | 20 / 17 | Surya 16 / 23 · R1-tr.d. 13 / 21; 14 / 13 | **không** | 11/30; lên 0; xuống 0 | 64,4 + 7,8 = 72,2; 74,9 (119,9) |
+| G4 Chromium (ngoài Chốt, tham khảo) | R1-trình-duyệt Chromium + R3 (hòa 22 / 14, R1-tr.d. nhanh hơn -> A) | 16 | 23 | 22 / 17 | R1-tr.d. 14 / 22; 16 / 15 · R3 14 / 22; 22 / 14 | không (23 < 24; vị trí 1 +2) | so R1-tr.d.: 20/30; lên 4 (8936221043071 5 -> 1; 8936221044160 ngoài 5 -> 1; 8936012061321 5 -> 4; 8935039511024 2 -> 1), xuống 2 (8934804025766 4 -> 5; 8936045081310 1 -> 4). So R3: 18/30; lên 3 (8936036020977 3 -> 2; 8936036027099 4 -> 1; 8936134361040 ngoài 5 -> 1), xuống 4 (8934614031322 2 -> 3; 8934804025766 2 -> 5; 8936012061321 3 -> 4; 8936017367107 2 -> 3) | 5,9 (trình duyệt) + 11,2 (CPU) = 17,1; 17,7 (25,3) |
+| G4 WebKit (ngoài Chốt, tham khảo) | R3 + R1-trình-duyệt WebKit | 16 | 22 | 22 / 17 | R3 14 / 22 · R1-tr.d. 13 / 21; 14 / 13 | không (5 đầu bằng R3; vị trí 1 +2) | so R3: 18/30; lên 3 (8936036020977 3 -> 2; 8936036027099 4 -> 1; 8936134361040 ngoài 5 -> 1), xuống 4 (8934614031322 2 -> 3; 8934804025766 2 -> ngoài 5; 8936012061321 3 -> 4; 8936017367107 2 -> 4) | 11,2 + 7,8 = 19,0; 19,6 (31,2) |
+
+Ghi chú ghép:
+- Giây = giây đọc chữ / ảnh theo file OCR của từng thành phần (30 ảnh, gồm ảnh đầu; Surya 64,4 ở đây là trung vị 30 ảnh theo file, khác 65,4 của `do_tai_nguyen` bỏ ảnh đầu), cộng lại; giây CPU (Surya, R3) và giây trình duyệt (1a, 2a(b), R1-tr.d.) khác máy chạy nên tổng chỉ để so độ lớn. Không đo mới.
+- Không ghép nào "có ích" theo Chốt vòng 3. Thêm chữ của OCR thứ hai vào Surya không đưa thêm mã nào vào 5 đầu; với 1a còn làm rơi 1 ảnh (8934804025766: câu tìm thêm các từ của 1a, mã đúng hạng 5 -> ngoài 5). Ghép 2 OCR nhẹ (G4 Chromium: R1-tr.d. + R3) lên 23 / 16 (bằng Surya ở 5 đầu và vị trí 1) với 17,7 giây/ảnh, nhưng chỉ +1 ở 5 đầu (cần +2) và là phép thử ngoài Chốt (chọn sau khi thấy số).
+- Đúng tên cao nhất là G4 (22/30, bằng R3).
+
+### r1-nocls đo lại giây (`r1-nocls-v4`)
+
+| Lần | Giây/ảnh CPU trung vị (lớn nhất), bỏ ảnh đầu | Ảnh đầu | Nạp model | RSS đỉnh (cả cây) | Model | RAM trống lúc chạy | Chữ so v3 | Vị trí 1 / 5 đầu / tên / thương hiệu |
+|---|---|---|---|---|---|---|---|---|
+| v3 (vòng 3, máy bận `pip install`; KHÔNG dùng giây) | 3,3 (9,3) | 4,8 | 3,9 | 497 MB | 29,7 MB | – | – | 13 / 22 / 17 / 15 |
+| **v4** (máy rảnh, CPU 4–10 % trước khi chạy) | **1,5 (2,2)** | 2,0 | 2,0 | 516 MB | 29,7 MB (det 9,9 + rec 21,2 MB) | 2.430–2.903 MB (mẫu 5 giây; RAM máy 8.011 MB) | câu tìm + top5 trùng **30/30** | 13 / 22 / 17 / 15 (trùng v3) |
+
+`do_tai_nguyen.py --max-rss-mb 6000 --max-3-dau-s 120 --max-wall-s 1800`, 30/30 ảnh ok, mã thoát 0, 55 giây đồng hồ. Theo ngưỡng "đáng làm máy chủ" (Chốt vòng 3): 5 đầu 22 ≥ 22, vị trí 1 13 ≥ 13, 1,5 ≤ 15 giây, 516 MB ≤ 2.000 MB, Apache-2.0 -> đạt cả 5 (nhưng là đối chứng, không phải cách đã chốt; xem Tổng kết đợt).
