@@ -22,10 +22,11 @@ COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py 
 RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); assert not p, p; print('sha256 model OK:', e.MODEL_SHA256)"
 
 # Chạy thật: không tải model, chỉ CORS github.io (không localhost), đăng nhập tắt (AUTH_MODE=supabase làm ở đợt dang-nhap)
-# MAX_PIXELS=50 MP, riêng JPEG progressive MAX_PIXELS_PROGRESSIVE=40 MP: ca nặng nhất được nhận (JPEG CMYK progressive
-# 40 MP) peak_wset 629 MB, bộ nhớ riêng 822 MB (cách 900 MB khoảng 78 MB), đo trên Windows 10 máy 8 GB; loại ảnh đã đo:
-# JPEG baseline RGB/CMYK, JPEG progressive RGB 4:4:4/CMYK, PNG, HEIC 48 MP. Linux / B1s chưa đo; B1s 1 GiB gồm cả hệ điều
-# hành + Docker nên có thể cần swap hoặc hạ MAX_PIXELS / MAX_PIXELS_PROGRESSIVE (server/README.md, mục "RAM ảnh lớn").
+# MAX_PIXELS=50 MP; JPEG nhiều lượt quét (progressive, hoặc lượt quét đầu ít màu hơn ảnh) MAX_PIXELS_PROGRESSIVE=40 MP.
+# Ca nặng nhất được nhận: JPEG nhiều lượt quét 40 MP, đo bằng CMYK progressive peak_wset 629 / riêng 822 MB (MiB; loại không
+# progressive ở 40 MP chưa đo, ước tương đương), Windows 10 máy 8 GB. 78 MB chỉ là biên so với 900 MB, CHƯA phải biên trên
+# B1s: 30 ảnh thật đã 549 MB peak_wset, B1s 1 GiB còn HĐH + Docker (chưa đo). Lần đầu lên B1s nên đặt MAX_PIXELS=24000000,
+# MAX_PIXELS_PROGRESSIVE=20000000, bật swap, đo VmHWM rồi mới nâng dần (server/README.md, mục "RAM ảnh lớn").
 ENV OCR_OFFLINE=1 \
     CORS_ALLOW_LOCALHOST=0 \
     AUTH_MODE=off \

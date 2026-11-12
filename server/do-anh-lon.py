@@ -1,7 +1,7 @@
 """Đo RAM đỉnh của máy chủ OCR khi nhận ẢNH LỚN (ảnh tổng hợp ~50 MP, nhẹ < 5 MB). Chỉ để đo, không thuộc app.
 Chỉ dùng thư viện đã có trong venv (Pillow, psutil của requirements-dev.txt).
 
-    # 1) tạo 6 ảnh JPEG / PNG (không commit; mặc định D:\\tmp\\may-chu-1\\anh-lon) + ảnh HEIC bằng venv tạm có pillow-heif
+    # 1) tạo 8 ảnh JPEG / PNG (không commit; mặc định D:\\tmp\\may-chu-1\\anh-lon) + ảnh HEIC bằng venv tạm có pillow-heif
     python do-anh-lon.py tao [--dir D:\\tmp\\may-chu-1\\anh-lon]
     D:\\tmp\\may-chu-1\\venv-heic-tao\\Scripts\\python do-anh-lon.py tao --heic
     # 2) đo 1 ảnh, 1 số luồng mỗi lệnh (--repeat lần, mỗi lần 1 máy chủ mới; mặc định 2, ghi số lớn nhất)
@@ -190,6 +190,7 @@ def measure(a, runs: list):
                MODELSCOPE_CACHE=rf"{D}\ms", PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1", OCR_THREADS=str(a.threads),
                OCR_OFFLINE="1", AUTH_MODE="off", RATE_LIMIT_PER_MIN="1000")
     env.pop("MAX_PIXELS", None)  # đo với MAX_PIXELS MẶC ĐỊNH của mã đang đo
+    env.pop("MAX_PIXELS_PROGRESSIVE", None)  # cả trần riêng cho JPEG nhiều lượt quét
     base = f"http://127.0.0.1:{a.port}"
     cmd = [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(a.port), "--workers", "1",
            "--no-access-log", "--no-proxy-headers", "--limit-concurrency", "16"]

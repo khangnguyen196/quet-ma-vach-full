@@ -130,7 +130,7 @@ def test_khach_ngat_giua_chung_khong_500_va_tra_cho(make_app, caplog):
 
 # ---------------- (c2) yêu cầu bị HUỶ (task bị cancel) lúc đang đọc thân -> trả chỗ ----------------
 
-def test_huy_yeu_cau_luc_dang_doc_than_tra_cho(make_app):
+def test_huy_yeu_cau_task_bi_cancel_luc_dang_doc_than_tra_cho(make_app):
     app = make_app(body_timeout_s=GUARD_S)  # hạn đọc thân dài: chỉ việc huỷ mới làm yêu cầu kết thúc
     reading = asyncio.Event()
     msgs = iter([{"type": "http.request", "body": body_head(), "more_body": True}])

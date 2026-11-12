@@ -56,7 +56,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `OCR_OFFLINE` | 0 | 1 = thiếu / sai model thì từ chối khởi động, không tải (Dockerfile bật) |
 | `MAX_BYTES` | 5242880 | trần dung lượng ảnh (5 MB); thân yêu cầu được thêm 64 KB cho phần đầu multipart |
 | `MAX_PIXELS` | 50000000 | trần điểm ảnh (rộng × cao) trước khi giải mã (50 MP: nhận ảnh 48 MP của điện thoại; đo RAM ở mục "RAM ảnh lớn") |
-| `MAX_PIXELS_PROGRESSIVE` | 40000000 | trần RIÊNG cho JPEG progressive (kiểm từ phần đầu file, trước khi giải mã; quá -> 413). JPEG CMYK progressive 50 MP vượt 900 MB bộ nhớ riêng, 40 MP thì 822 MB (mục "RAM ảnh lớn") |
+| `MAX_PIXELS_PROGRESSIVE` | 40000000 | trần RIÊNG cho JPEG nhiều lượt quét: progressive, hoặc lượt quét đầu ít màu hơn ảnh (kiểm từ phần đầu file, trước khi giải mã; quá -> 413). JPEG CMYK progressive 50 MP vượt 900 MB bộ nhớ riêng, 40 MP thì 822 MB (mục "RAM ảnh lớn") |
 | `RATE_LIMIT_PER_MIN` | 20 | lượt `/ocr` mỗi IP trong 60 giây (cửa sổ trượt, trong RAM) |
 | `RATE_LIMIT_MAX_IPS` | 10000 | số IP tối đa giữ trong RAM (dọn IP hết hạn, đầy thì bỏ IP cũ nhất) |
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
@@ -116,7 +116,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 |---|---|
 | 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn; khách ngắt kết nối giữa chừng (1 dòng log, không traceback) |
 | 408 | gửi thân ảnh quá `BODY_TIMEOUT_S` giây (mạng quá chậm / gửi treo) |
-| 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG progressive quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
+| 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG nhiều lượt quét quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
 | 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
 | 422 | yêu cầu không hợp lệ khác |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, có `Retry-After` |
@@ -126,7 +126,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ## Giới hạn và an toàn
 
-- 5 MB / ảnh, 50 MP (JPEG progressive 40 MP), 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
+- 5 MB / ảnh, 50 MP (JPEG nhiều lượt quét 40 MP), 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
 - **Thứ tự trong `/ocr`**: đăng nhập -> giới hạn lượt -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
   `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
   giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
@@ -252,11 +252,28 @@ của Pillow (đọc từ phần đầu file) TRƯỚC `img.load()`; quá -> 413
 RAM giữ như sau ảnh khởi động (349 / 543 MB); CMYK progressive 40 MP vẫn 200 (626 / 819 MB). JPEG thường, PNG, HEIC giữ
 `MAX_PIXELS` = 50 MP (JPEG thường 50 MP riêng 745 MB, không sát ngưỡng nên không hạ trần chung).
 
-**Biên an toàn** (mã cuối): ca nặng nhất được nhận (JPEG CMYK progressive 40 MP, 8 luồng) peak_wset 629 MB, bộ nhớ riêng
-822 MB (cách 900 MB khoảng 78 MB), đo trên Windows 10 máy 8 GB; loại ảnh đã đo: JPEG baseline RGB/CMYK, JPEG progressive
-RGB 4:4:4/CMYK, PNG, HEIC 48 MP. 30 ảnh thật (lượt `may-chu-t8-v3`): peak_wset 549 MB, riêng 743 MB. **Linux / B1s chưa
-đo** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux); B1s 1 GiB gồm cả hệ điều hành + Docker nên có thể cần swap hoặc
-hạ `MAX_PIXELS` / `MAX_PIXELS_PROGRESSIVE`.
+**Vòng 4: JPEG nhiều lượt quét không progressive.** JPEG SOF0 / SOF1 mà lượt quét đầu (SOS) chứa ít màu hơn ảnh
+(mỗi màu một lượt, "non-interleaved") cũng bị libjpeg coi là nhiều lượt quét (`has_multiple_scans`) và giữ hệ số DCT của
+cả ảnh như progressive, nhưng Pillow không đặt cờ progressive cho loại này (CMYK loại này 50 MP ước ~936 MB riêng, RGB
+~840 MB; chưa đo vì máy không có `jpegtran` / `cjpeg`). Nên trần riêng áp cho mọi JPEG **nhiều lượt quét**: cờ progressive
+HOẶC số màu của lượt quét đầu (byte Ns của SOS đầu tiên, dò bằng `_jpeg_first_scan_components`) nhỏ hơn số màu của ảnh
+(`img.layers` = byte Nf của SOF) HOẶC dò không được (an toàn trước). Chỉ dò khi ảnh vượt trần riêng. Câu 413 mới: "Ảnh này
+quá nhiều điểm ảnh cho máy chủ (loại JPEG này tối đa 40.000.000 điểm). Hãy chụp lại bằng camera hoặc chọn ảnh nhỏ hơn."
+Bị chặn trước `load()` (test byte tự ghép trong `tests/test_progressive.py`). 208 ảnh JPEG có sẵn (ảnh đo + ảnh
+`test-ocr`) đều interleaved hoặc progressive, không ảnh thường nào bị chặn nhầm.
+
+**Biên an toàn** (mã cuối; MB ở đây là MiB, chia 1024²). Trần: JPEG nhiều lượt quét (progressive, hoặc lượt quét đầu ít
+màu hơn ảnh) tối đa 40 MP; các loại khác (JPEG thường, PNG, HEIC) 50 MP.
+- Ca nặng nhất được nhận: JPEG nhiều lượt quét tới 40 MP, đo bằng JPEG CMYK progressive 40 MP (8 luồng) peak_wset 629 MB,
+  bộ nhớ riêng 822 MB. JPEG không progressive nhưng nhiều lượt quét ở 40 MP chưa đo, ước tương đương.
+- 78 MB (900 − 822) chỉ là biên so với ngưỡng 900 MB đặt cho đợt này, **chưa phải biên trên B1s**: riêng 30 ảnh thật
+  (lượt `may-chu-t8-v3`) đã peak_wset 549 MB (riêng 743 MB), mà B1s 1 GiB còn phải chứa hệ điều hành + Docker (chưa đo).
+  Đo trên Windows 10 máy 8 GB; **Linux / B1s chưa đo** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux).
+- Khuyến nghị lần đầu lên B1s: `MAX_PIXELS=24000000`, `MAX_PIXELS_PROGRESSIVE=20000000`, bật swap, đo `VmHWM`, rồi mới
+  nâng dần. Ảnh vẫn được thu về 1.600 px nên trần thấp không làm giảm chất lượng đọc chữ, chỉ từ chối ảnh quá to.
+- Loại ảnh đã đo: JPEG baseline RGB/CMYK, JPEG progressive RGB 4:4:4/CMYK, PNG RGB, HEIC 48 MP (ảnh tự vẽ). Chưa đo: PNG
+  RGBA / LA / 16 bit 50 MP (ước như JPEG CMYK baseline, khoảng 745 MB riêng), PNG interlaced, JPEG nhiều lượt quét không
+  progressive, HEIC iPhone thật.
 
 ```powershell
 D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py tao     # tạo ảnh JPEG / PNG ở D:\tmp\may-chu-1\anh-lon (không commit)
