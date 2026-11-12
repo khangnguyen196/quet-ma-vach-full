@@ -303,7 +303,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
             // của trình duyệt này (không để lệch dây chuyền)
             const reason = page.isClosed() ? "trang đã đóng" : "trang vẫn bận";
             out.runs.push(...busyRows(items.slice(k + 1), t.code, reason));
-            console.log(`${name}: ${reason} sau ảnh ${t.code}${reason === "trang vẫn bận" ? ` (chờ ${waitMs / 1000} giây)` : ""}, dừng`);
+            console.log(`${name}: ${reason} (ảnh ${t.code}${reason === "trang vẫn bận" ? `, chờ ${waitMs / 1000} giây` : ""}), bỏ ${items.length - k - 1} ảnh còn lại, dừng`);
             break;
           }
         }
