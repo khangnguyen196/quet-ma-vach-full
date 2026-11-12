@@ -291,3 +291,14 @@ test("trang-thu-check (thu-r1 vòng 2): chờ mỗi ảnh = giới hạn nạp c
   assert.doesNotMatch(src, /runs\.at\(-1\)/, "còn runs.at(-1)");
   assert.doesNotMatch(src, /\b90000\b/, "còn hằng 90000");
 });
+
+test("trang-thu-check (thu-r1 vòng 2): --ref-dir (mặc định D:\\tmp\\ocr-mat\\ket-qua); file tham chiếu hỏng -> lỗi tiếng Việt, không ném", () => {
+  assert.equal(check.parseCheckArgs([]).refDir, "D:\\tmp\\ocr-mat\\ket-qua");
+  assert.equal(check.parseCheckArgs(["--ocr", "r1", "--ref-dir", "D:\\khac\\ket-qua"]).refDir, "D:\\khac\\ket-qua");
+  assert.equal(typeof check.parseRefJson, "function", "chưa có parseRefJson");
+  assert.deepEqual(check.parseRefJson('{"items":[{"ma":"1","top5":[]}]}', "r1.json"), { data: { items: [{ ma: "1", top5: [] }] } });
+  const bad = check.parseRefJson("{hỏng", "D:/x/r1-trinh-duyet-webkit.json");
+  assert.deepEqual(Object.keys(bad), ["error"]);
+  assert.match(bad.error, /^Không đọc được file tham chiếu D:\/x\/r1-trinh-duyet-webkit\.json \(JSON hỏng: .+\), bỏ qua phần so top5\.$/);
+  assert.equal(check.readRefFile("D:/khong-co/khong-co-file-nay.json"), null);
+});

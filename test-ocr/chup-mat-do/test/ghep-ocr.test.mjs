@@ -1,6 +1,12 @@
 // Test đợt ocr-mat vòng 4 (không mạng, không đọc D:\tmp): ghép chữ của 2 OCR (ghep-ocr.mjs).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import * as ghep from "../ghep-ocr.mjs";
 import { pickOrder, mergeLines, mergeOcr, lineKey } from "../ghep-ocr.mjs";
 import { ocrLines, queryFromOcr } from "../t1-ocr.mjs";
 
@@ -88,13 +94,6 @@ test("chỉ có chữ ({ text }) tách theo xuống dòng như ocrLines; ghép A
 });
 
 // ---------- thu-r1 P3 (6): file kết quả hỏng -> câu tiếng Việt kèm tên file, mã thoát 2 ----------
-import * as ghep from "../ghep-ocr.mjs";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-
 test("parseResultJson: JSON hỏng -> lỗi tiếng Việt có tên file, exitCode 2; JSON đúng -> object", () => {
   assert.equal(typeof ghep.parseResultJson, "function", "chưa có parseResultJson");
   assert.deepEqual(ghep.parseResultJson('{"a":1}', "x.json"), { a: 1 });
