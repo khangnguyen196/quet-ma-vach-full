@@ -212,6 +212,26 @@ def test_loi_engine_tra_500_json_khong_lo_chi_tiet(make_app):
     assert r.json() == {"error": "Lỗi máy chủ, thử lại sau."}
 
 
+def test_loi_engine_500_van_co_cors_cho_github_io_va_log_chi_ten_loi(make_app, caplog):
+    caplog.set_level(logging.INFO, logger="ocr_server")
+
+    class Broken(FakeEngine):
+        def run(self, img):
+            raise RuntimeError("chi tiet noi bo /duong/dan/bi-mat")
+
+    app = make_app(engine=Broken())
+    r = post_image(app, jpeg_bytes(), headers={"Origin": ORIGIN}, ip="203.0.113.88")
+    assert r.status_code == 500
+    assert r.json() == {"error": "Lỗi máy chủ, thử lại sau."}
+    assert r.headers.get("access-control-allow-origin") == ORIGIN
+    assert app.state.gate.inside == 0
+    text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert "lỗi máy chủ: RuntimeError" in text
+    for secret in ("chi tiet noi bo", "bi-mat", "203.0.113.88"):
+        assert secret not in text
+    assert not any(rec.exc_info for rec in caplog.records)
+
+
 # ---------------- CORS ----------------
 
 def test_cors_github_io_co_header(make_app):

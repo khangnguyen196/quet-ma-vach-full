@@ -148,6 +148,10 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
             result = await run_in_threadpool(process, eng, data, st.max_pixels)
         except imaging.ImageError as e:
             return error(e.status, e.message)
+        except Exception as e:  # noqa: BLE001 - lỗi lạ (engine…): trả 500 NGAY ở đây để có header CORS
+            # (handler Exception chung nằm ngoài CORSMiddleware nên 500 từ đó không có CORS). Log chỉ tên lỗi.
+            log.error("lỗi máy chủ: %s", type(e).__name__)
+            return error(500, "Lỗi máy chủ, thử lại sau.")
         finally:
             slot.release()  # mọi đường ra (lỗi, 408, 413, 415, ngắt, huỷ) trả chỗ đúng 1 lần
         request.state.nboxes = len(result["items"])

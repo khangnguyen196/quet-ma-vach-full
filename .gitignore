@@ -13,4 +13,5 @@ dist/
 server/.venv/
 __pycache__/
 .pytest_cache/
-server/.env
+server/.env*
+!server/.env.example

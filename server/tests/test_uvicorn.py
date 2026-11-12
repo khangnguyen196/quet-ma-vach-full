@@ -6,7 +6,10 @@ Cấu hình uvicorn ở đây = đúng các cờ của 3 lệnh chạy (chay-thu
 """
 from __future__ import annotations
 
+import json
 import socket
+import subprocess
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -14,7 +17,7 @@ from contextlib import contextmanager
 import httpx
 import uvicorn
 
-from conftest import SERVER, jpeg_bytes, multipart
+from conftest import SERVER, FakeEngine, jpeg_bytes, multipart
 
 # Giống cờ CLI "--no-proxy-headers --limit-concurrency 16" của 3 lệnh chạy
 UVICORN_FLAGS = {"proxy_headers": False, "limit_concurrency": 16}
@@ -67,6 +70,33 @@ def test_x_forwarded_for_khong_lach_duoc_gioi_han_luot_qua_uvicorn_that(make_app
                      for i in (1, 2, 3)]
     assert not port_listening(port), "cổng còn nghe sau khi tắt máy chủ"
     assert codes == [200, 200, 429]
+
+
+def _healthcheck_code() -> str:
+    """Lấy đoạn python -c của HEALTHCHECK trong Dockerfile (dòng CMD ngay sau HEALTHCHECK)."""
+    lines = (SERVER / "Dockerfile").read_text(encoding="utf-8").splitlines()
+    i = next(k for k, line in enumerate(lines) if line.startswith("HEALTHCHECK"))
+    cmd = lines[i + 1].strip()
+    assert cmd.startswith("CMD ")
+    arr = json.loads(cmd[4:])
+    assert arr[:2] == ["python", "-c"]
+    return arr[2]
+
+
+def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
+    code = _healthcheck_code()
+    assert "127.0.0.1:8765/health" in code and "timeout=3" in code
+    loaded = make_app()
+    not_loaded_engine = FakeEngine()
+    not_loaded_engine.loaded = False
+    not_loaded = make_app(engine=not_loaded_engine)
+    results = []
+    for app in (loaded, not_loaded):
+        with real_server(app, **UVICORN_FLAGS) as port:
+            p = subprocess.run([sys.executable, "-c", code.replace("8765", str(port))], capture_output=True, timeout=20)
+            results.append(p.returncode)
+        assert not port_listening(port)
+    assert results == [0, 1]  # model đã nạp -> khỏe; chưa nạp (ok=false) -> không khỏe
 
 
 def test_ba_lenh_chay_deu_co_no_proxy_headers_va_limit_concurrency_16():

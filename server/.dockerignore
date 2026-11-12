@@ -15,3 +15,5 @@ do-anh-lon.py
 chay-thu.ps1
 pytest.ini
 *.md
+# giấy phép phải đi kèm image (Dockerfile COPY LICENSES.md)
+!LICENSES.md

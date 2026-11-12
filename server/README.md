@@ -145,7 +145,10 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 - **CORS**: chỉ khớp chính xác `https://khangnguyen196.github.io` (+ localhost khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization.
 - **Log**: tắt access log của uvicorn (có IP). Log riêng chỉ có thời gian, phương thức, đường dẫn, mã, số byte, số khung chữ, giây.
-  Không IP, không tên file, không chữ OCR.
+  Không IP, không tên file, không chữ OCR. Lỗi lạ trong lúc OCR: `/ocr` tự bắt, log 1 dòng "lỗi máy chủ: <tên lỗi>" (không
+  chi tiết), trả 500 JSON CÓ header CORS (trang trên github.io đọc được câu lỗi). Riêng lỗi 500 lạ ở chỗ khác (ngoài phần
+  `/ocr` đã bọc) đi qua bộ xử lý lỗi chung của Starlette: khách vẫn nhận JSON không traceback, nhưng log `uvicorn.error`
+  trên máy chủ CÓ THỂ in traceback (không có IP, không ra ngoài; chỉ người xem log máy chủ thấy).
 - **HEIC**: dùng `pi-heif` (chỉ đọc; libheif + libde265, LGPLv3), không dùng `pillow-heif` (kèm x265, GPL). Chi tiết `LICENSES.md`.
   Đã thử với 2 ảnh HEIC TỰ VẼ 64 × 48 (`tests/fixtures/khong-xoay.heic`, `xoay6.heic` có orientation 6 / hộp irot):
   `/ocr` trả 200, cỡ đã xoay (48 × 64) đọc được trước khi giải mã, xoay đúng 1 lần (`tests/test_heic.py`).
@@ -230,10 +233,14 @@ D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-x
 
 ## Docker (để sau, chưa build)
 
-`Dockerfile`: `python:3.12-slim`, `pip install --no-cache-dir -r requirements.txt`, bước build kiểm sha256 model + nạp thử
-RapidOCR với `OCR_OFFLINE=1`, chạy bằng người dùng không phải root, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`,
-`OCR_THREADS=1` (B1s 1 vCPU), uvicorn 1 worker `--no-access-log`. Host `0.0.0.0` **chỉ trong container**; trên máy tính dùng
-`chay-thu.ps1` (127.0.0.1). `.dockerignore` bỏ venv, tests, `__pycache__`, `.env*`, công cụ đo.
+`Dockerfile`: `python:3.12-slim`, `pip install --no-cache-dir -r requirements.txt`, bước build kiểm sha256 model, chuyển
+sang người dùng không phải root `ocr` rồi MỚI nạp thử RapidOCR với `OCR_OFFLINE=1` (chứng minh người dùng chạy thật đọc
+được model), `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, `OCR_THREADS=1` (B1s 1 vCPU), `MAX_PIXELS=50000000`,
+`BODY_TIMEOUT_S=30`, `HEALTHCHECK` gọi `/health` bằng Python urllib (hạn 3 giây, cần `"ok": true`; test
+`test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that` chạy đúng câu lệnh đó với uvicorn thật), uvicorn 1 worker
+`--no-access-log --no-proxy-headers --limit-concurrency 16`. Host `0.0.0.0` **chỉ trong container**; trên máy tính dùng
+`chay-thu.ps1` (127.0.0.1). `.dockerignore` bỏ venv, tests, `__pycache__`, `.env*`, công cụ đo, `*.md` trừ `LICENSES.md`
+(được chép vào image).
 
 ## Giấy phép
 

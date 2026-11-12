@@ -78,3 +78,14 @@ và đọc tay các file `LICENSE*` / `MODEL_LICENSES.md` / `LICENSES_bundled.tx
 - `pi_heif-1.4.0`: chỉ kèm `libheif` + `libde265` (+ runtime gcc trên Windows), `LICENSES_bundled.txt` ghi cả hai LGPLv3; bản Linux cũng chỉ có `libheif-*.so` + `libde265-*.so`. Đọc được HEIC, không ghi được (máy chủ chỉ cần đọc).
 
 Không có pi-heif (gói không cài được) thì máy chủ trả 415 "Máy chủ chưa hỗ trợ HEIC" cho ảnh HEIC; JPEG / PNG vẫn chạy.
+
+Ảnh HEIC trong `tests/fixtures/` là hình tự vẽ (không có giấy phép ảnh nào vướng), tạo một lần bằng `pillow-heif` trong venv
+TẠM ngoài repo (`tests/fixtures/tao_heic.py`); `pillow-heif` không nằm trong requirements, không vào image, không phân phối.
+
+## Khi đưa image Docker lên registry công khai
+
+File này được chép vào image (`Dockerfile` `COPY LICENSES.md`, `.dockerignore` có `!LICENSES.md`); thư mục `*.dist-info`
+trong image cũng giữ file LICENSE của từng gói. **Đẩy image lên registry công khai (Docker Hub, GHCR công khai…) là PHÂN
+PHỐI**: khi đó phải kèm văn bản giấy phép và chỉ nơi lấy mã nguồn của các thư viện LGPL nằm trong image: libheif +
+libde265 (LGPL-3.0, trong wheel `pi_heif`), FFmpeg (LGPL, trong wheel `opencv-python-headless`), GEOS (LGPL-2.1, trong
+`shapely`). Chạy image riêng trên máy ảo của mình (không cho người khác tải image) thì không phải phân phối.
