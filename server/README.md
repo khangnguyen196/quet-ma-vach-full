@@ -143,6 +143,8 @@ Mục đích: chống dùng chùa máy chủ OCR. App đăng nhập Google qua S
 `server\chay-thu.ps1` như trên. Thiếu / sai 1 trong 2 biến thì máy chủ không khởi động (câu lỗi chỉ nêu tên biến).
 Dán nhầm khóa BÍ MẬT vào `SUPABASE_PUBLISHABLE_KEY` (tiền tố `sb_secret_`, hoặc JWT có `role = service_role`) cũng không
 khởi động (app trên trình duyệt cũng bỏ qua đăng nhập với khóa như vậy); khi đó đổi khóa bí mật đó trên Supabase.
+Phía app: biến `VITE_*` trong `.env` hoặc GitHub Variables mà chứa khóa bí mật thì `npm run dev` / `npm run build` dừng
+với lỗi chỉ nêu tên biến (plugin `qmv-chan-khoa-bi-mat` trong `vite.config.js`), nên GitHub Actions không deploy khóa đó.
 
 Lưu ý khi dùng `server\.env` với `chay-thu.ps1`:
 - Script in `AUTH_MODE=<giá trị>` lúc chạy: thấy `off` mà định bật đăng nhập thì kiểm lại `-EnvFile` (chạy từ worktree
@@ -153,6 +155,12 @@ Lưu ý khi dùng `server\.env` với `chay-thu.ps1`:
 
 **Chủ dự án tự kiểm với project thật** (máy không làm thay vì không được đọc `server\.env`), chạy từ thư mục chính
 `D:\quet-ma-vach-full` sau khi `main` đã có đợt `dang-nhap`:
+0. Cập nhật thư mục chính (chạy ở `D:\quet-ma-vach-full`):
+   `git switch main ; git pull --ff-only ; npm ci ; D:\tmp\may-chu-1\venv\Scripts\python -m pip install -r server\requirements.txt`
+   (thư mục chính không tự cập nhật khi nhánh lên `origin/main`; `node_modules` ở đó chưa có `@supabase/supabase-js`;
+   venv chưa có PyJWT / cryptography).
+   Kiểm Supabase → Authentication → URL Configuration → Redirect URLs có `https://localhost:5173/` (thiếu thì Supabase
+   đưa về trang Pages, bước 3 thất bại).
 1. `powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1` → thấy `AUTH_MODE=supabase` và 1 dòng log
    `JWKS: n khóa (…)` (ghi lại n và alg: ES256 / RS256, hay "project dùng HS256").
 2. Cửa sổ khác: `curl.exe -i -F "image=@test-ocr\photos\8934572260543\front.jpg" http://127.0.0.1:8765/ocr` → **401**
