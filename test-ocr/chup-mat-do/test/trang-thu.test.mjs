@@ -13,6 +13,12 @@ import { displayName, catalogJson } from "../xuat-danh-muc.mjs";
 
 const PUBLIC = new URL("../../../public/", import.meta.url);
 const read = (rel) => fs.readFileSync(new URL(rel, PUBLIC), "utf8");
+const readOpt = (rel) => (fs.existsSync(new URL(rel, PUBLIC)) ? read(rel) : "");
+// Đợt thu-r1: cấu hình OCR (1a / R1) + phần thuần (chọn theo ?ocr, nhận lỗi bộ nhớ) ở chup-mat-do/ocr-chon.mjs.
+// Import động để file test vẫn chạy (các test cũ vẫn chấm) khi module chưa có.
+const chon = await import("../../../public/chup-mat-do/ocr-chon.mjs").catch(() => ({}));
+/** Mã của trang = chup-mat-do.html + các module JS của trang (t1.mjs, tar.mjs, ocr-chon.mjs). */
+const pageSources = () => read("chup-mat-do.html") + readOpt("chup-mat-do/ocr-chon.mjs");
 
 // ---------- bản trình duyệt trùng bản Node ----------
 const DOCS = [
@@ -57,38 +63,124 @@ test("t1.mjs rowLineInfo và tar.mjs makeTar trùng test-ocr/web-ocr/lib.mjs", (
   assert.deepEqual(tar.makeTar(files), webLib.makeTar(files));
 });
 
-test("t1.mjs, tar.mjs không import gì (module thuần cho trình duyệt)", () => {
-  for (const f of ["chup-mat-do/t1.mjs", "chup-mat-do/tar.mjs"]) assert.doesNotMatch(read(f), /^\s*import\b|\bimport\(/m, f);
+test("t1.mjs, tar.mjs, ocr-chon.mjs không import gì (module thuần cho trình duyệt)", () => {
+  for (const f of ["chup-mat-do/t1.mjs", "chup-mat-do/tar.mjs", "chup-mat-do/ocr-chon.mjs"]) assert.doesNotMatch(read(f), /^\s*import\b|\bimport\(/m, f);
 });
 
 // ---------- trang ----------
-test("chup-mat-do.html: URL CDN có số bản, đúng bộ chế độ cdn (wasm) của assets.js; ngoài CDN chỉ có link OFF + link giấy phép ODbL", () => {
-  const { VERSIONS, MODELS, assetUrls } = globalThis.OcrAssets;
-  const html = read("chup-mat-do.html");
-  const urls = [...new Set(html.match(/https?:\/\/[^\s"'`)<>]+/g))];
-  const cdn = urls.filter((u) => /^https:\/\/(cdn\.jsdelivr\.net|huggingface\.co)\//.test(u));
+test("chup-mat-do.html (+ ocr-chon.mjs): URL CDN = HỢP bộ 1a (cdn, wasm) và bộ R1 của assets.js, đúng hệt; ngoài CDN chỉ có link OFF + link giấy phép ODbL", () => {
+  const { VERSIONS, MODEL_VARIANTS, assetUrls } = globalThis.OcrAssets;
+  const src = pageSources();
+  const urls = [...new Set(src.match(/https?:\/\/[^\s"'`)<>]+/g))];
+  const cdn = urls.filter((u) => /^https:\/\/(cdn\.jsdelivr\.net|huggingface\.co|www\.modelscope\.cn)\//.test(u));
+  const hfModels = [...Object.values(MODEL_VARIANTS.det), ...Object.values(MODEL_VARIANTS.rec)];
+  const r1Onnx = [MODEL_VARIANTS.det.r1.onnxUrl, MODEL_VARIANTS.rec.r1.onnxUrl];
   for (const u of cdn) {
     const url = new URL(u);
     if (url.hostname === "cdn.jsdelivr.net") {
       const m = url.pathname.match(/^\/npm\/((?:@[^/]+\/)?[^/@]+)@([^/]+)(\/|$)/);
       assert.ok(m, `jsDelivr không có số bản: ${u}`);
       assert.equal(m[2], VERSIONS[m[1]], `${m[1]}`);
+    } else if (url.hostname === "www.modelscope.cn") {
+      // ModelScope: đúng onnxUrl ghim tag v3.10.0 của R1_MODELS
+      assert.ok(r1Onnx.includes(u), `ModelScope không phải onnxUrl đã ghim: ${u}`);
+      assert.match(url.pathname, /^\/models\/RapidAI\/RapidOCR\/resolve\/v3\.10\.0\//);
     } else {
       const m = url.pathname.match(/^\/([^/]+\/[^/]+)\/resolve\/([0-9a-f]{40})\//);
-      const model = m && Object.values(MODELS).find((x) => x.repo === m[1]);
-      assert.ok(model && m[2] === model.rev, `HuggingFace không theo mã commit đã ghim: ${u}`);
+      const model = m && hfModels.find((x) => x.repo === m[1]);
+      assert.ok(model && m[2] === model.rev, `HuggingFace không theo repo + mã commit đã ghim: ${u}`);
     }
   }
   const a = assetUrls("cdn", { webgpu: false });
-  const want = [a.paddleSdk, a.ort, a.ortWasmDir, a.opencv, a.clipper, a.jsYaml, a.detOnnx, a.detYml, a.recOnnx, a.recYml];
+  const r = assetUrls("cdn", { det: "r1", rec: "r1" });
+  const want = [...new Set([a.paddleSdk, a.ort, a.ortWasmDir, a.opencv, a.clipper, a.jsYaml, a.detOnnx, a.detYml, a.recOnnx, a.recYml,
+    r.detOnnx, r.detYml, r.recOnnx, r.recYml])];
+  assert.equal(want.length, 14);
   assert.deepEqual([...cdn].sort(), [...want].sort());
   const other = urls.filter((u) => !cdn.includes(u));
   assert.deepEqual(other.sort(), ["https://opendatacommons.org/licenses/odbl/1-0/", "https://world.openfoodfacts.org", "https://world.openfoodfacts.org/product/"]);
 });
 
+test("ocr-chon.mjs: bảng cấu hình 1a / R1 (tên model, URL, tham số, giới hạn thời gian nạp) đúng assets.js; không dùng cls", () => {
+  const { MODELS, MODEL_VARIANTS, PARAM_PRESETS, assetUrls } = globalThis.OcrAssets;
+  assert.equal(typeof chon.OCR_CONFIGS, "object", "chưa có OCR_CONFIGS trong chup-mat-do/ocr-chon.mjs");
+  assert.deepEqual(Object.keys(chon.OCR_CONFIGS), ["1a", "r1"]);
+  assert.equal(chon.DEFAULT_OCR, "1a");
+  const c1 = chon.OCR_CONFIGS["1a"];
+  const a = assetUrls("cdn", { webgpu: false });
+  assert.equal(c1.label, "PaddleOCR.js mobile (1a, mặc định)");
+  assert.equal(c1.detName, MODELS.det.name);
+  assert.equal(c1.recName, MODELS.rec.name);
+  assert.deepEqual([c1.detOnnx, c1.detYml, c1.recOnnx, c1.recYml], [a.detOnnx, a.detYml, a.recOnnx, a.recYml]);
+  assert.deepEqual(c1.params, {});
+  assert.equal(c1.loadTimeoutMs, 120000);
+  const cr = chon.OCR_CONFIGS.r1;
+  const r = assetUrls("cdn", { det: "r1", rec: "r1", params: "r1" });
+  assert.equal(cr.label, "RapidOCR (R1, thử, tải thêm ~31 MB)");
+  assert.equal(cr.detName, "PP-OCRv6_small_det");
+  assert.equal(cr.recName, "PP-OCRv6_small_rec");
+  assert.equal(cr.detName, MODEL_VARIANTS.det.r1.name);
+  assert.equal(cr.recName, MODEL_VARIANTS.rec.r1.name);
+  assert.deepEqual([cr.detOnnx, cr.detYml, cr.recOnnx, cr.recYml], [r.detOnnx, r.detYml, r.recOnnx, r.recYml]);
+  assert.deepEqual(cr.params, PARAM_PRESETS.r1);
+  assert.deepEqual(cr.params, r.runtimeParams);
+  assert.equal(cr.loadTimeoutMs, 180000);
+  // trang trải tham số vào PaddleOCR.create như harness.mjs (...runtimeParams); tên model lấy từ bảng
+  const html = read("chup-mat-do.html");
+  assert.match(html, /textDetectionModelName: cfg\.detName,/);
+  assert.match(html, /textRecognitionModelName: cfg\.recName,/);
+  assert.match(html, /\.\.\.cfg\.params/);
+  // không cls / không bước xoay dòng
+  assert.doesNotMatch(pageSources(), /\bcls\b|textline|orientation/i);
+});
+
+test("ocr-chon.mjs: chọn OCR theo ?ocr (mặc định 1a; giá trị lạ -> 1a có báo), cập nhật tham số URL", () => {
+  assert.equal(typeof chon.pickOcr, "function", "chưa có pickOcr");
+  assert.deepEqual(chon.pickOcr(""), { key: "1a", unknown: null });
+  assert.deepEqual(chon.pickOcr("?x=1"), { key: "1a", unknown: null });
+  assert.deepEqual(chon.pickOcr("?ocr="), { key: "1a", unknown: null });
+  assert.deepEqual(chon.pickOcr("?ocr=1a"), { key: "1a", unknown: null });
+  assert.deepEqual(chon.pickOcr("?ocr=r1"), { key: "r1", unknown: null });
+  assert.deepEqual(chon.pickOcr("?ocr=zz"), { key: "1a", unknown: "zz" });
+  assert.deepEqual(chon.pickOcr("?ocr=R1"), { key: "1a", unknown: "R1" });
+  assert.deepEqual(chon.pickOcr("?ocr=r1x"), { key: "1a", unknown: "r1x" });
+  assert.equal(chon.ocrSearch("", "r1"), "?ocr=r1");
+  assert.equal(chon.ocrSearch("?ocr=r1", "1a"), "?ocr=1a");
+  assert.equal(chon.ocrSearch("?a=1&ocr=zz", "r1"), "?a=1&ocr=r1");
+});
+
+test("ocr-chon.mjs: nhận lỗi thiếu bộ nhớ; câu báo tiếng Việt", () => {
+  assert.equal(typeof chon.isMemoryError, "function", "chưa có isMemoryError");
+  const yes = [new RangeError("Array buffer allocation failed"), new Error("Aborted(OOM)"), new Error("Out of memory"),
+    new Error("failed to allocate a buffer of size 123"), new Error("WebAssembly.Memory(): could not allocate memory"),
+    new Error("memory access out of bounds"), "OOM", { name: "RangeError", message: "x" }];
+  for (const e of yes) assert.equal(chon.isMemoryError(e), true, String(e && e.message ? e.message : e));
+  const no = [new Error("Tải https://x lỗi HTTP 404"), new TypeError("Failed to fetch"), new Error("opencv.js không khởi động sau 120 giây"), null, undefined, 12345, ""];
+  for (const e of no) assert.equal(chon.isMemoryError(e), false, String(e && e.message ? e.message : e));
+  assert.equal(chon.memoryMessage("r1"), "Máy không đủ bộ nhớ để chạy R1. Hãy chọn lại 1a (nhẹ hơn) hoặc đóng bớt tab rồi thử lại.");
+  assert.match(chon.memoryMessage("1a"), /^Máy không đủ bộ nhớ để chạy 1a\./);
+});
+
+test("chup-mat-do.html: ô chọn OCR 2 lựa chọn, đổi thì replaceState; chỉ 1 OCR trong bộ nhớ (dispose); giới hạn thời gian nạp có hủy tải; dấu R1 trong sessionStorage bọc try/catch", () => {
+  const html = read("chup-mat-do.html");
+  assert.match(html, /<select id="ocrPick"[^>]*>\s*<option value="1a">PaddleOCR\.js mobile \(1a, mặc định\)<\/option>\s*<option value="r1">RapidOCR \(R1, thử, tải thêm ~31 MB\)<\/option>\s*<\/select>/);
+  assert.match(html, /history\.replaceState\(/);
+  assert.match(html, /\.dispose\(\)/);
+  assert.match(html, /new AbortController\(\)/);
+  assert.match(html, /cfg\.loadTimeoutMs/);
+  assert.match(html, /Lần trước trang có thể đã bị đóng vì hết bộ nhớ khi chạy R1/);
+  // mọi chỗ dùng sessionStorage nằm trong try { ... }
+  const uses = html.match(/[^\n]*sessionStorage[^\n]*/g) || [];
+  assert.ok(uses.length >= 2, "có ghi + xóa dấu");
+  for (const line of uses) assert.match(line, /try \{/, line.trim());
+  assert.match(html, /OCR đang dùng: /);
+  // chân trang: giấy phép model R1 cạnh dòng của 1a
+  assert.match(html, /PP-OCRv6_small_det và PP-OCRv6_small_rec[^<]*RapidOCR[^<]*Apache-2\.0/);
+});
+
 test("chup-mat-do.html: noindex, không gọi API Open Food Facts, không innerHTML, link sản phẩm mở tab mới an toàn", () => {
   const html = read("chup-mat-do.html");
-  const js = read("chup-mat-do/t1.mjs") + read("chup-mat-do/tar.mjs");
+  const js = read("chup-mat-do/t1.mjs") + read("chup-mat-do/tar.mjs") + readOpt("chup-mat-do/ocr-chon.mjs");
   assert.match(html, /<meta name="robots" content="noindex/);
   for (const s of [html, js]) {
     assert.ok(!s.includes("openfoodfacts.org/api"), "không gọi API OFF");
@@ -104,6 +196,7 @@ test("chup-mat-do.html: noindex, không gọi API Open Food Facts, không innerH
   assert.match(html, /backend: "wasm", wasmPaths: CDN\.ortWasmDir, numThreads: 1/);
   assert.match(html, /ODbL 1\.0/);
   assert.doesNotMatch(html, /localStorage|method:\s*"POST"/);
+  assert.doesNotMatch(js, /localStorage|method:\s*"POST"/);
 });
 
 // ---------- danh mục ----------
@@ -132,7 +225,8 @@ test("xuat-danh-muc: displayName ưu tiên tên tiếng Việt; catalogJson đ�
 });
 
 // ---------- trang-thu-check.mjs (phần thuần) ----------
-import { allowedHost, requestSummary } from "../trang-thu-check.mjs";
+import * as check from "../trang-thu-check.mjs";
+const { allowedHost, requestSummary } = check;
 
 test("trang-thu-check: chỉ cùng tên miền + jsDelivr / HuggingFace; bắt POST và request tới openfoodfacts.org", () => {
   assert.equal(allowedHost("127.0.0.1", "127.0.0.1"), true);
@@ -150,4 +244,33 @@ test("trang-thu-check: chỉ cùng tên miền + jsDelivr / HuggingFace; bắt P
   assert.deepEqual(s.post, ["POST https://example.com/p"]);
   assert.equal(s.openfoodfacts.length, 1);
   assert.deepEqual(s.foreign, ["example.com", "world.openfoodfacts.org"]);
+});
+
+test("trang-thu-check (thu-r1): ModelScope R1 được phép (www.modelscope.cn + máy chủ tải file cdn-lfs-*.modelscope.cn đo ở P1.0), so đuôi an toàn", () => {
+  assert.equal(allowedHost("www.modelscope.cn", "127.0.0.1"), true);
+  assert.equal(allowedHost("cdn-lfs-cn-1.modelscope.cn", "127.0.0.1"), true);
+  for (const h of ["evilmodelscope.cn", "modelscope.cn.evil.com", "www.modelscope.cn.evil.com", "cdn-lfs-cn-1.modelscope.cn.evil.com",
+    "xcdn-lfs-cn-1.modelscope.cn", "modelscope.com", "evil.com"]) assert.equal(allowedHost(h, "127.0.0.1"), false, h);
+});
+
+test("trang-thu-check (thu-r1): --ocr 1a|r1 mở trang với ?ocr=…; không có --ocr thì trang mặc định; request tới R1", () => {
+  assert.equal(typeof check.pageUrl, "function", "chưa có pageUrl");
+  assert.equal(check.parseCheckArgs([]).ocr, null);
+  assert.equal(check.parseCheckArgs(["--ocr", "r1"]).ocr, "r1");
+  assert.equal(check.parseCheckArgs(["--ocr", "1a"]).ocr, "1a");
+  assert.throws(() => check.parseCheckArgs(["--ocr", "zz"]), /--ocr/);
+  assert.match(check.parseCheckArgs(["--all", "--ocr", "r1"]).out, /trang-thu-local-30-r1\.json$/);
+  assert.match(check.parseCheckArgs(["--all"]).out, /trang-thu-local-30\.json$/);
+  assert.equal(check.pageUrl("http://127.0.0.1:1/", null), "http://127.0.0.1:1/chup-mat-do.html");
+  assert.equal(check.pageUrl("http://127.0.0.1:1/", "r1"), "http://127.0.0.1:1/chup-mat-do.html?ocr=r1");
+  const reqs = [
+    { url: "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx", host: "www.modelscope.cn", method: "GET" },
+    { url: "https://cdn-lfs-cn-1.modelscope.cn/prod/x", host: "cdn-lfs-cn-1.modelscope.cn", method: "GET" },
+    { url: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/b8f84f0b80c529de40b4fbb3544b84fa7233a513/inference.yml", host: "huggingface.co", method: "GET" },
+    { url: "https://huggingface.co/api/resolve-cache/models/PaddlePaddle/PP-OCRv6_small_det_onnx/28fe/inference.yml", host: "huggingface.co", method: "GET" },
+    { url: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4/inference.onnx", host: "huggingface.co", method: "GET" },
+    { url: "http://127.0.0.1:1/chup-mat-do.html", host: "127.0.0.1", method: "GET" },
+  ];
+  assert.equal(check.r1Requests(reqs).length, 4);
+  assert.equal(requestSummary(reqs, "127.0.0.1").r1.length, 4);
 });
