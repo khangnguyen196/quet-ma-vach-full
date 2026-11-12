@@ -166,6 +166,12 @@
   function markSet() { try { sessionStorage.setItem(MARK, String(Date.now())); } catch (e) { /* bỏ qua */ } }
   function markClear() { try { sessionStorage.removeItem(MARK); } catch (e) { /* bỏ qua */ } }
   function markTake() { var v = null; try { v = sessionStorage.getItem(MARK); sessionStorage.removeItem(MARK); } catch (e) { v = null; } return v; }
+  // Người dùng tự tải lại / rời trang lúc đang nạp R1 thì có "pagehide": xóa dấu để lần mở sau không báo nhầm. Tab bị
+  // giết vì hết bộ nhớ không có "pagehide" nên dấu còn và vẫn được báo. Quay lại trang từ bộ nhớ đệm (persisted) mà R1
+  // vẫn đang chạy thì ghi lại dấu.
+  var r1Running = false;
+  window.addEventListener("pagehide", function () { markClear(); });
+  window.addEventListener("pageshow", function (ev) { if (ev.persisted && r1Running) markSet(); });
 
   function showNotice(t) {
     $("notice").textContent = t;
@@ -321,7 +327,10 @@
         return { key: cfg.key, cfg: cfg, ocr: ocr, loadSeconds: (performance.now() - t0) / 1000 };
       } catch (e) {
         if (e && e.timeout) {
-          work.then(function (late) { try { late.dispose(); } catch (x) { /* bỏ qua */ } }, function () { /* đã báo hết giờ */ });
+          // dispose() có thể ném ngay hoặc trả Promise bị từ chối: bắt cả hai, không để lỗi "unhandled rejection"
+          work.then(function (late) {
+            Promise.resolve().then(function () { return late.dispose(); }).catch(function () { /* bỏ qua */ });
+          }, function () { /* đã báo hết giờ */ });
         }
         throw e;
       } finally {
@@ -389,7 +398,7 @@
       var cfg = chon.OCR_CONFIGS[selected];
       var isR1 = cfg.key === "r1";
       var phase = "nạp";
-      if (isR1) markSet();
+      if (isR1) { r1Running = true; markSet(); }
       try {
         // chỉ giữ MỘT OCR trong bộ nhớ: đổi OCR thì giải phóng cái cũ rồi mới nạp cái mới
         if (paddle && paddle.key !== cfg.key) {
@@ -435,7 +444,7 @@
         status(text, true);
         state.runs.push({ error: msg(e), shown: text, ocr: cfg.key, phase: phase, memory: memory, timeout: !!(e && e.timeout) });
       } finally {
-        if (isR1) markClear();
+        if (isR1) { r1Running = false; markClear(); }
         setBusy(false);
       }
     }
