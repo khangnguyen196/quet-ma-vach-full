@@ -155,8 +155,18 @@ Lưu ý khi dùng `server\.env` với `chay-thu.ps1`:
 
 **Chủ dự án tự kiểm với project thật** (máy không làm thay vì không được đọc `server\.env`), chạy từ thư mục chính
 `D:\quet-ma-vach-full` sau khi `main` đã có đợt `dang-nhap`:
-0. Cập nhật thư mục chính (chạy ở `D:\quet-ma-vach-full`):
-   `git switch main ; git pull --ff-only ; npm ci ; D:\tmp\may-chu-1\venv\Scripts\python -m pip install -r server\requirements.txt`
+0. Cập nhật thư mục chính (chạy ở `D:\quet-ma-vach-full`).
+   Tắt npm run dev / máy chủ đang chạy ở thư mục chính (Ctrl+C) trước khi chạy npm ci (npm ci xóa node_modules,
+   Windows khóa file nếu đang chạy).
+   Chạy từng dòng; dòng nào báo lỗi thì dừng, không chạy dòng sau:
+   ```
+   git switch main
+   git pull --ff-only
+   git log -1 --oneline
+   npm ci
+   D:\tmp\may-chu-1\venv\Scripts\python -m pip install -r server\requirements.txt
+   ```
+   Dòng `git log -1 --oneline` phải thấy commit của đợt dang-nhap (vd "docs(dang-nhap): …").
    (thư mục chính không tự cập nhật khi nhánh lên `origin/main`; `node_modules` ở đó chưa có `@supabase/supabase-js`;
    venv chưa có PyJWT / cryptography).
    Kiểm Supabase → Authentication → URL Configuration → Redirect URLs có `https://localhost:5173/` (thiếu thì Supabase
