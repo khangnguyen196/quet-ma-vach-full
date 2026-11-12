@@ -247,6 +247,23 @@ def test_cors_loi_413_van_co_header_cho_github_io(make_app):
     assert r.status_code == 413 and r.headers.get("access-control-allow-origin") == ORIGIN
 
 
+def test_cors_429_503_cho_trang_doc_retry_after(make_app):
+    """Retry-After không thuộc nhóm header trình duyệt cho trang khác tên miền đọc mặc định: phải có
+    Access-Control-Expose-Headers: Retry-After ở 429 / 503 (trang github.io mới đọc được số giây chờ)."""
+    def exposed(r):
+        return {h.strip().lower() for h in r.headers.get("access-control-expose-headers", "").split(",")}
+
+    app = make_app(rate_limit_per_min=1)
+    assert post_image(app, jpeg_bytes(), headers={"Origin": ORIGIN}).status_code == 200
+    r429 = post_image(app, jpeg_bytes(), headers={"Origin": ORIGIN})
+    assert r429.status_code == 429 and "retry-after" in r429.headers and "retry-after" in exposed(r429)
+    eng = FakeEngine()
+    eng.loaded = False
+    r503 = post_image(make_app(engine=eng), jpeg_bytes(), headers={"Origin": ORIGIN})
+    assert r503.status_code == 503 and "retry-after" in r503.headers and "retry-after" in exposed(r503)
+    assert r503.headers.get("access-control-allow-origin") == ORIGIN
+
+
 @pytest.mark.parametrize("origin", ["https://evil.example", "null", "https://khangnguyen196.github.io.evil.example",
                                     "http://khangnguyen196.github.io", "http://localhost:5173"])
 def test_cors_origin_la_khong_co_header(make_app, origin):
