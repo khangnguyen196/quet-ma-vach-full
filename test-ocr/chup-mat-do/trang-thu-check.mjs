@@ -1,12 +1,13 @@
 // P5 vòng 5 (+ vòng 6): kiểm trang thử chup-mat-do.html bằng Playwright (Chromium + WebKit).
 //
 //   node chup-mat-do/trang-thu-check.mjs [--no-build] [--browsers chromium,webkit | --browser webkit] [--all] [--gap <giây>]
-//                                         [--base <url>] [--out <file.json>] [--ocr 1a|r1]
+//                                         [--base <url>] [--out <file.json>] [--ocr 1a|r1] [--ref-dir <thư mục>]
 //
 // - Đợt thu-r1: --ocr 1a|r1 mở chup-mat-do.html?ocr=<…> (không có --ocr = trang mặc định, không tham số). Ghi request tới
 //   R1 (ModelScope / repo PP-OCRv6 trên HuggingFace) lúc mở trang (trước lần bấm đầu: phải 0) và cả lượt (--ocr 1a hoặc
-//   mặc định: phải 0). Top5 so với kết quả đã đo: 1a / mặc định -> t1.json; r1 -> D:\tmp\ocr-mat\ket-qua\
-//   r1-trinh-duyet-<trình duyệt>.json (R1-trình-duyệt của đợt ocr-mat).
+//   mặc định: phải 0). Top5 so với kết quả đã đo: 1a / mặc định -> t1.json; r1 -> <--ref-dir, mặc định
+//   D:\tmp\ocr-mat\ket-qua>\r1-trinh-duyet-<trình duyệt>.json (R1-trình-duyệt của đợt ocr-mat). File tham chiếu hỏng thì
+//   vs1a / vsRef = { ref, error: câu tiếng Việt }, lượt vẫn xong và vẫn ghi file kết quả.
 // - Mặc định: npm run build (trong worktree), phục vụ dist/ bằng máy chủ tĩnh 127.0.0.1 (cổng ngẫu nhiên).
 //   Vòng 6: --base <url> (vd https://khangnguyen196.github.io/quet-ma-vach-full/) thì KHÔNG build, KHÔNG dựng server,
 //   mở thẳng địa chỉ đó.
@@ -39,6 +40,7 @@ const ROOT = path.join(HERE, "..", "..");
 const DIST = path.join(ROOT, "dist");
 const PHOTOS = "D:\\quet-ma-vach-full\\test-ocr\\photos";
 const K = "D:\\tmp\\chup-mat-do\\ket-qua";
+const REF_DIR = "D:\\tmp\\ocr-mat\\ket-qua"; // mặc định của --ref-dir: r1-trinh-duyet-<trình duyệt>.json (đợt ocr-mat)
 const READ_MS = 60000; // thời gian đọc chữ + tìm cho 1 ảnh (đo: lớn nhất ~10 giây)
 const TEST_TITLE = "Thử nhận ra sản phẩm";
 
@@ -63,7 +65,28 @@ export function parseCheckArgs(argv) {
   const ocr = opt("--ocr", null);
   if (ocr != null && ocr !== "1a" && ocr !== "r1") throw new Error(`--ocr phải là 1a hoặc r1: ${ocr}`);
   const defOut = (base ? "trang-thu-pages" : all ? "trang-thu-local-30" : "trang-thu-local") + (ocr ? `-${ocr}` : "") + ".json";
-  return { base, build: !base && !argv.includes("--no-build"), all, gapSeconds, browsers, ocr, out: opt("--out", path.join(K, defOut)) };
+  return { base, build: !base && !argv.includes("--no-build"), all, gapSeconds, browsers, ocr, refDir: opt("--ref-dir", REF_DIR), out: opt("--out", path.join(K, defOut)) };
+}
+
+/** Đọc chữ JSON của file tham chiếu: { data } hoặc { error: câu tiếng Việt } (không ném, lượt kiểm vẫn xong). */
+export function parseRefJson(text, file) {
+  try {
+    return { data: JSON.parse(text) };
+  } catch (e) {
+    return { error: `Không đọc được file tham chiếu ${file} (JSON hỏng: ${e.message}), bỏ qua phần so top5.` };
+  }
+}
+
+/** Đọc file tham chiếu: không có file -> null; có -> như parseRefJson (lỗi đọc file cũng thành { error }). */
+export function readRefFile(file) {
+  if (!fs.existsSync(file)) return null;
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    return { error: `Không đọc được file tham chiếu ${file} (${e.message}), bỏ qua phần so top5.` };
+  }
+  return parseRefJson(text, file);
 }
 
 /** Địa chỉ trang thử: có ocr thì thêm ?ocr=<…>, không có thì trang mặc định (không tham số). */
@@ -202,7 +225,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   report.base = base;
   const own = new URL(base).hostname;
-  const t1ref = fs.existsSync(path.join(K, "t1.json")) ? JSON.parse(fs.readFileSync(path.join(K, "t1.json"), "utf8")) : null;
+  const t1file = readRefFile(path.join(K, "t1.json")); // null / { data } / { error }
   const pw = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE || "D:\\tmp\\pw\\node_modules\\playwright\\index.mjs").href);
 
   for (const name of args.browsers) {
@@ -279,13 +302,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       out.requests = requestSummary(reqs, own);
       out.stats = runStats(out.runs);
+      // so top5 với kết quả đã đo; file tham chiếu hỏng thì ghi { ref, error }, lượt vẫn xong và vẫn ghi file kết quả
       if (args.ocr === "r1") {
-        const f = path.join("D:\\tmp\\ocr-mat\\ket-qua", `r1-trinh-duyet-${name}.json`);
-        const ref = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")).items : null;
-        if (ref) out.vsRef = { ref: f, ...compareTop5(out.runs, ref) };
+        const f = path.join(args.refDir, `r1-trinh-duyet-${name}.json`);
+        const rf = readRefFile(f);
+        if (rf?.error) out.vsRef = { ref: f, error: rf.error };
+        else if (rf && !Array.isArray(rf.data?.items)) out.vsRef = { ref: f, error: `File tham chiếu ${f} không có danh sách items, bỏ qua phần so top5.` };
+        else if (rf) out.vsRef = { ref: f, ...compareTop5(out.runs, rf.data.items) };
       } else {
-        const ref = t1ref?.tools?.[`1a-${name}`]?.items;
-        if (ref) out.vs1a = { ref: `t1.json tools["1a-${name}"]`, ...compareTop5(out.runs, ref) };
+        const refName = `t1.json tools["1a-${name}"]`;
+        const ref = t1file?.data?.tools?.[`1a-${name}`]?.items;
+        if (t1file?.error) out.vs1a = { ref: refName, error: t1file.error };
+        else if (ref) out.vs1a = { ref: refName, ...compareTop5(out.runs, ref) };
       }
       await ctx.close();
       out.sw = await swStep(browser, base);
