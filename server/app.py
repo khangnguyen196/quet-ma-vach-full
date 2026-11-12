@@ -145,7 +145,7 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
                 return error(400, "Kết nối bị ngắt khi đang gửi ảnh.")
             request.state.nbytes = nbytes
             await slot.acquire()  # chờ khóa OCR (ảnh đã nằm trong RAM, đã tính vào chỗ đã giành)
-            result = await run_in_threadpool(process, eng, data, st.max_pixels)
+            result = await run_in_threadpool(process, eng, data, st.max_pixels, st.max_pixels_progressive)
         except imaging.ImageError as e:
             return error(e.status, e.message)
         except Exception as e:  # noqa: BLE001 - lỗi lạ (engine…): trả 500 NGAY ở đây để có header CORS
@@ -160,10 +160,10 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
     return app
 
 
-def process(engine, data, max_pixels: int) -> dict:
+def process(engine, data, max_pixels: int, max_pixels_progressive: int | None = None) -> dict:
     """Chạy trong threadpool: giải mã + thu nhỏ + OCR. Tọa độ theo ảnh SAU khi thu nhỏ (width, height)."""
     t0 = time.perf_counter()
-    img, (ow, oh) = imaging.decode(data, max_pixels)
+    img, (ow, oh) = imaging.decode(data, max_pixels, max_pixels_progressive=max_pixels_progressive)
     t1 = time.perf_counter()
     items = engine.run(img)
     t2 = time.perf_counter()

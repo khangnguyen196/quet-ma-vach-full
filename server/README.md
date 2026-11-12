@@ -56,6 +56,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `OCR_OFFLINE` | 0 | 1 = thiếu / sai model thì từ chối khởi động, không tải (Dockerfile bật) |
 | `MAX_BYTES` | 5242880 | trần dung lượng ảnh (5 MB); thân yêu cầu được thêm 64 KB cho phần đầu multipart |
 | `MAX_PIXELS` | 50000000 | trần điểm ảnh (rộng × cao) trước khi giải mã (50 MP: nhận ảnh 48 MP của điện thoại; đo RAM ở mục "RAM ảnh lớn") |
+| `MAX_PIXELS_PROGRESSIVE` | 40000000 | trần RIÊNG cho JPEG progressive (kiểm từ phần đầu file, trước khi giải mã; quá -> 413). JPEG CMYK progressive 50 MP vượt 900 MB bộ nhớ riêng, 40 MP thì 822 MB (mục "RAM ảnh lớn") |
 | `RATE_LIMIT_PER_MIN` | 20 | lượt `/ocr` mỗi IP trong 60 giây (cửa sổ trượt, trong RAM) |
 | `RATE_LIMIT_MAX_IPS` | 10000 | số IP tối đa giữ trong RAM (dọn IP hết hạn, đầy thì bỏ IP cũ nhất) |
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
@@ -115,7 +116,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 |---|---|
 | 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn; khách ngắt kết nối giữa chừng (1 dòng log, không traceback) |
 | 408 | gửi thân ảnh quá `BODY_TIMEOUT_S` giây (mạng quá chậm / gửi treo) |
-| 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, bom điểm ảnh của Pillow |
+| 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG progressive quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
 | 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
 | 422 | yêu cầu không hợp lệ khác |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, có `Retry-After` |
@@ -125,7 +126,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ## Giới hạn và an toàn
 
-- 5 MB / ảnh, 50 MP, 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
+- 5 MB / ảnh, 50 MP (JPEG progressive 40 MP), 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
 - **Thứ tự trong `/ocr`**: đăng nhập -> giới hạn lượt -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
   `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
   giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
@@ -236,7 +237,7 @@ D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-x
 
 `Dockerfile`: `python:3.12-slim`, `pip install --no-cache-dir -r requirements.txt`, bước build kiểm sha256 model, chuyển
 sang người dùng không phải root `ocr` rồi MỚI nạp thử RapidOCR với `OCR_OFFLINE=1` (chứng minh người dùng chạy thật đọc
-được model), `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, `OCR_THREADS=1` (B1s 1 vCPU), `MAX_PIXELS=50000000`,
+được model), `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, `OCR_THREADS=1` (B1s 1 vCPU), `MAX_PIXELS=50000000`, `MAX_PIXELS_PROGRESSIVE=40000000`,
 `BODY_TIMEOUT_S=30`, `HEALTHCHECK` gọi `/health` bằng Python urllib (hạn 3 giây, cần `"ok": true`; test
 `test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that` chạy đúng câu lệnh đó với uvicorn thật), uvicorn 1 worker
 `--no-access-log --no-proxy-headers --limit-concurrency 16`. Host `0.0.0.0` **chỉ trong container**; trên máy tính dùng

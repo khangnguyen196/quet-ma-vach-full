@@ -64,7 +64,7 @@ def detect_format(data):
 _PIL_FORMATS = {"jpeg": ["JPEG"], "png": ["PNG"], "heic": ["HEIF"]}
 
 
-def decode(data, max_pixels: int):
+def decode(data, max_pixels: int, max_pixels_progressive: int | None = None):
     """bytes-like (bytes / bytearray) -> (ảnh PIL RGB đã thu nhỏ, (rộng gốc, cao gốc) sau khi xoay theo EXIF).
 
     Điểm ảnh ra GIỐNG HỆT chuỗi cũ exif_transpose(img).convert("RGB") rồi thu BICUBIC, nhưng ít bản chép hơn (RAM):
@@ -72,6 +72,7 @@ def decode(data, max_pixels: int):
       hoán vị điểm ảnh, đổi màu làm từng điểm, nên đổi trước hay sau cho cùng kết quả (test so từng byte);
     - xoay TẠI CHỖ (exif_transpose in_place=True): không có tag xoay thì không chép gì, có thì chỉ 1 bản mới thay bản cũ.
 
+    max_pixels_progressive: trần riêng cho JPEG progressive (None = chỉ dùng max_pixels).
     Ném ImageError: 415 (không phải ảnh / chưa hỗ trợ HEIC / ảnh hỏng), 413 (quá nhiều điểm ảnh)."""
     kind = detect_format(data)
     if kind is None:
@@ -87,6 +88,12 @@ def decode(data, max_pixels: int):
             w, h = img.size
             if w <= 0 or h <= 0 or w * h > max_pixels:
                 raise too_big
+            # JPEG progressive: libjpeg giữ hệ số DCT của CẢ ảnh lúc giải mã (2 byte / điểm / kênh) -> trần riêng thấp hơn,
+            # kiểm từ phần đầu file (Pillow đặt info["progressive"] khi thấy SOF2 / SOF6 / SOF10 / SOF14), TRƯỚC load().
+            if (max_pixels_progressive is not None and kind == "jpeg" and w * h > max_pixels_progressive
+                    and (img.info.get("progressive") or img.info.get("progression"))):
+                raise ImageError(413, f"Ảnh JPEG progressive quá nhiều điểm ảnh (loại này tối đa {max_pixels_progressive:,}"
+                                      " điểm). Hãy chụp nhỏ hơn hoặc lưu lại thành JPEG thường.".replace(",", "."))
             img.load()
             if img.mode != "RGB":
                 img = img.convert("RGB")  # giữ info (kể cả EXIF) nên bước xoay dưới vẫn đọc được tag xoay
