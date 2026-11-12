@@ -16,7 +16,9 @@
 //   đa imageWaitMs = giới hạn nạp của OCR trên trang (ocr-chon.mjs: 1a 120 giây, R1 180 giây) + 60 giây đọc chữ (mọi
 //   ảnh, vì sau ảnh lỗi trang nạp lại OCR); lấy đúng kết quả của lần bấm (runs[chỉ số trước khi bấm]). Ảnh lỗi phía bộ
 //   kiểm: chờ trang hết bận (tối đa imageWaitMs), kết quả muộn ghi vào lateRun nhưng ảnh vẫn tính lỗi; trang vẫn bận thì
-//   các ảnh còn lại ghi lỗi "trang vẫn bận sau ảnh <mã>" (seconds null, không tính giây) và dừng trình duyệt đó. Ghi top5, mã đúng ở vị trí 1 / trong 5
+//   các ảnh còn lại ghi lỗi "trang vẫn bận sau ảnh <mã>" (seconds null, không tính giây) và dừng trình duyệt đó. Vòng 4:
+//   trang đóng / sập giữa chừng thì các ảnh còn lại cũng ghi lỗi ("trang đã đóng" / "trang bị sập", seconds null), n
+//   luôn đủ số ảnh. Ghi top5, mã đúng ở vị trí 1 / trong 5
 //   đầu, giây. --gap <giây>: giãn giữa 2 ảnh (mặc định 0; Pages dùng 5).
 // - Ghi mọi request: không có request tới openfoodfacts.org; không có POST; chỉ cùng tên miền + jsDelivr / HuggingFace
 //   (gồm máy chủ tải file của HuggingFace *.hf.co / *.huggingface.co).
@@ -103,6 +105,17 @@ export function pickImages(truth, hasPhoto, all) {
 /** Các ảnh còn lại khi trang vẫn bận (hoặc đã đóng) sau ảnh `code`: ghi lỗi, seconds null (không đo, không tính giây). */
 export function busyRows(items, code, reason = "trang vẫn bận") {
   return items.map((t) => ({ code: t.code, seconds: null, error: `${reason} sau ảnh ${code}`, top1: false, inTop5: false }));
+}
+
+/** Vòng 4: lỗi của ảnh `code` là trang / trình duyệt đã đóng hoặc sập -> các ảnh còn lại ghi lỗi "trang đã đóng"
+ *  (qua busyRows, n vẫn đủ số ảnh); lỗi khác -> null (vòng lặp chạy tiếp như cũ). */
+export function stopRows(rowError, rest, code) {
+  return rowError && /closed|crash/i.test(rowError) ? busyRows(rest, code, "trang đã đóng") : null;
+}
+
+/** Vòng 4: lý do khi chờ trang hết bận không được: sập (sự kiện "crash" của trang) / đã đóng / vẫn bận. */
+export function busyReason(crashed, closed) {
+  return crashed ? "trang bị sập" : closed ? "trang đã đóng" : "trang vẫn bận";
 }
 
 /** Thống kê một trình duyệt: x/n vị trí 1 và 5 đầu (ảnh lỗi tính sai), giây ảnh đầu (gồm tải PaddleOCR) tách riêng,
@@ -253,6 +266,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       });
       page.on("console", (m) => { if (m.type() === "error") out.consoleErrors.push(m.text().slice(0, 300)); });
       page.on("pageerror", (e) => out.consoleErrors.push(`pageerror: ${e.message}`.slice(0, 300)));
+      let crashed = false; // vòng 4: trang sập (vd hết bộ nhớ) -> lý do "trang bị sập"
+      page.on("crash", () => { crashed = true; });
       out.url = pageUrl(base, args.ocr);
       await page.goto(out.url);
       await page.waitForFunction(() => window.__chupMatDo && "ready" in window.__chupMatDo, null, { timeout: 60000 });
@@ -283,7 +298,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         }
         out.runs.push(row);
         console.log(`${name} ${t.code}: ${row.error ? `LỖI ${row.error}` : `${row.seconds.toFixed(1)} s (đọc ${row.ocrSeconds?.toFixed(1)} s${row.loadSeconds != null ? `, tải ${row.loadSeconds.toFixed(1)} s` : ""}), rank ${row.rank ?? "-"}, ${row.lines} dòng`}`);
-        if (row.error && /closed|crash/i.test(row.error)) break;
+        const stopped = stopRows(row.error, items.slice(k + 1), t.code);
+        if (stopped) {
+          // trang / trình duyệt đã đóng hoặc sập: các ảnh còn lại ghi lỗi (seconds null), n vẫn đủ số ảnh
+          out.runs.push(...stopped);
+          console.log(`${name}: trang đã đóng (ảnh ${t.code}), bỏ ${stopped.length} ảnh còn lại, dừng`);
+          break;
+        }
         if (row.error && !gotRun) {
           // Ảnh lỗi phía bộ kiểm (hết giờ…): chờ trang hết bận để kết quả muộn của ảnh này không bị đếm cho ảnh sau.
           // Kết quả muộn chỉ ghi lại (lateRun), ảnh này VẪN tính lỗi.
@@ -301,7 +322,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           if (!idle) {
             // trang vẫn bận (hoặc đã đóng): các ảnh còn lại ghi lỗi, seconds null (không tính giây), dừng vòng lặp
             // của trình duyệt này (không để lệch dây chuyền)
-            const reason = page.isClosed() ? "trang đã đóng" : "trang vẫn bận";
+            const reason = busyReason(crashed, page.isClosed());
             out.runs.push(...busyRows(items.slice(k + 1), t.code, reason));
             console.log(`${name}: ${reason} (ảnh ${t.code}${reason === "trang vẫn bận" ? `, chờ ${waitMs / 1000} giây` : ""}), bỏ ${items.length - k - 1} ảnh còn lại, dừng`);
             break;
