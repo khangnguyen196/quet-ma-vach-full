@@ -1,11 +1,13 @@
 """Đo RAM đỉnh của máy chủ OCR khi nhận ẢNH LỚN (ảnh tổng hợp ~50 MP, nhẹ < 5 MB). Chỉ để đo, không thuộc app.
 Chỉ dùng thư viện đã có trong venv (Pillow, psutil của requirements-dev.txt).
 
-    # 1) tạo 4 ảnh (không commit; mặc định D:\\tmp\\may-chu-1\\anh-lon)
+    # 1) tạo 6 ảnh JPEG / PNG (không commit; mặc định D:\\tmp\\may-chu-1\\anh-lon) + ảnh HEIC bằng venv tạm có pillow-heif
     python do-anh-lon.py tao [--dir D:\\tmp\\may-chu-1\\anh-lon]
+    D:\\tmp\\may-chu-1\\venv-heic-tao\\Scripts\\python do-anh-lon.py tao --heic
     # 2) đo 1 ảnh, 1 số luồng mỗi lệnh (--repeat lần, mỗi lần 1 máy chủ mới; mặc định 2, ghi số lớn nhất)
     python do-anh-lon.py do --image jpeg-rgb --threads 8 --out D:\\tmp\\may-chu-1\\ket-qua\\anh-lon\\moi-t8-jpeg-rgb.json
         [--code-dir <thư mục server cần đo, mặc định thư mục chứa file này>] [--port 8765] [--warm <ảnh khởi động>]
+        [--real-before 5]  (gửi thêm 5 ảnh front.jpg thật khác nhau trước ảnh lớn: ca "ảnh lớn đến sau nhiều ảnh thường")
 
 Mỗi lần "do": bật uvicorn trên 127.0.0.1 (cùng cờ như chay-thu.ps1), chờ /health, gửi 1 ảnh khởi động (ảnh thật
 front.jpg, để bộ nhớ của onnxruntime đã nở như lúc chạy thật), rồi gửi ĐÚNG 1 ảnh lớn, rồi TẮT máy chủ (kể cả khi lỗi)
@@ -33,23 +35,46 @@ D = r"D:\tmp\may-chu-1"
 DEFAULT_DIR = Path(D) / "anh-lon"
 DEFAULT_WARM = Path(r"D:\quet-ma-vach-full\test-ocr\photos\8934572260543\front.jpg")
 W, H = 8000, 6250  # 50.000.000 điểm (ảnh 48 MP của điện thoại ~8064 × 6048 = 48,8 MP)
+HW, HH = 8000, 6000  # HEIC 48 MP (iPhone "HEIF Max" 48 MP ~8064 × 6048)
 IMAGES = {
     "jpeg-rgb": "jpeg-rgb-50mp.jpg",          # (i) JPEG RGB, không tag xoay
     "jpeg-rgb-xoay6": "jpeg-rgb-50mp-xoay6.jpg",  # (ii) JPEG RGB, orientation 6
     "jpeg-cmyk-xoay6": "jpeg-cmyk-50mp-xoay6.jpg",  # (iii) JPEG CMYK, orientation 6
     "png-rgb": "png-rgb-50mp.png",            # (iv) PNG RGB
+    # vòng 3: JPEG progressive (libjpeg giữ hệ số DCT cả ảnh lúc giải mã, 2 byte / điểm / kênh) + HEIC 48 MP
+    "jpeg-rgb-prog-xoay6": "jpeg-rgb-444-prog-50mp-xoay6.jpg",  # (v) JPEG RGB progressive, 4:4:4, orientation 6
+    "jpeg-cmyk-prog-xoay6": "jpeg-cmyk-prog-50mp-xoay6.jpg",    # (vi) JPEG CMYK progressive, orientation 6
+    "heic-xoay6": "heic-48mp-xoay6.heic",     # (vii) HEIC 8000 × 6000, orientation 6 (lệnh "tao --heic")
+    # chọn trần riêng cho JPEG progressive: ảnh nặng nhất (CMYK progressive, orientation 6) ở 40 / 30 MP
+    "jpeg-cmyk-prog-xoay6-40mp": "jpeg-cmyk-prog-40mp-xoay6.jpg",  # 8000 × 5000
+    "jpeg-cmyk-prog-xoay6-30mp": "jpeg-cmyk-prog-30mp-xoay6.jpg",  # 7500 × 4000
 }
+CAP_SIZES = {"jpeg-cmyk-prog-xoay6-40mp": (8000, 5000), "jpeg-cmyk-prog-xoay6-30mp": (7500, 4000)}
+HEIC_KEYS = {"heic-xoay6"}
 MAX_FILE = 5 * 1024 * 1024
 
 
-def gradient_rgb():
+def gradient_rgb(w=W, h=H):
     from PIL import Image
 
     g = Image.linear_gradient("L")  # 256 × 256, đen -> trắng theo chiều dọc
-    r = g.resize((W, H))
-    gg = g.rotate(90).resize((W, H))
-    b = Image.new("L", (W, H), 90)
+    r = g.resize((w, h))
+    gg = g.rotate(90).resize((w, h))
+    b = Image.new("L", (w, h), 90)
     return Image.merge("RGB", (r, gg, b))
+
+
+def describe(out_dir: Path, keys):
+    from PIL import Image
+
+    for key in keys:
+        p = out_dir / IMAGES[key]
+        with Image.open(p) as im:
+            prog = " progressive" if (im.info.get("progressive") or im.info.get("progression")) else ""
+            info = f"{im.format}{prog} {im.mode} {im.size[0]}×{im.size[1]} orientation={im.getexif().get(0x0112, 1)}"
+        size = p.stat().st_size
+        flag = "" if size < MAX_FILE else "  QUÁ 5 MB, không dùng được"
+        print(f"{key}: {p} {size / 1024 / 1024:.2f} MB, {info}{flag}", flush=True)
 
 
 def make_images(out_dir: Path):
@@ -61,18 +86,34 @@ def make_images(out_dir: Path):
     rgb = gradient_rgb()
     rgb.save(out_dir / IMAGES["jpeg-rgb"], "JPEG", quality=90)
     rgb.save(out_dir / IMAGES["jpeg-rgb-xoay6"], "JPEG", quality=90, exif=exif6.tobytes())
-    rgb.convert("CMYK").save(out_dir / IMAGES["jpeg-cmyk-xoay6"], "JPEG", quality=90, exif=exif6.tobytes())
+    rgb.save(out_dir / IMAGES["jpeg-rgb-prog-xoay6"], "JPEG", quality=90, progressive=True, subsampling=0,
+             exif=exif6.tobytes())
+    cmyk = rgb.convert("CMYK")
+    del rgb
+    cmyk.save(out_dir / IMAGES["jpeg-cmyk-xoay6"], "JPEG", quality=90, exif=exif6.tobytes())
+    cmyk.save(out_dir / IMAGES["jpeg-cmyk-prog-xoay6"], "JPEG", quality=90, progressive=True, exif=exif6.tobytes())
+    del cmyk
     # PNG: dải màu chỉ theo chiều ngang (mọi hàng giống nhau) để file nhỏ
     row = Image.linear_gradient("L").rotate(90).resize((W, 1))
     Image.merge("RGB", (row, row.point(lambda v: 255 - v), Image.new("L", (W, 1), 60))).resize((W, H)).save(
         out_dir / IMAGES["png-rgb"], "PNG", optimize=False)
-    for key, name in IMAGES.items():
-        p = out_dir / name
-        with Image.open(p) as im:
-            info = f"{im.format} {im.mode} {im.size[0]}×{im.size[1]} orientation={im.getexif().get(0x0112, 1)}"
-        size = p.stat().st_size
-        flag = "" if size < MAX_FILE else "  QUÁ 5 MB, không dùng được"
-        print(f"{key}: {p} {size / 1024 / 1024:.2f} MB, {info}{flag}")
+    for key, (w, h) in CAP_SIZES.items():
+        gradient_rgb(w, h).convert("CMYK").save(out_dir / IMAGES[key], "JPEG", quality=90, progressive=True,
+                                                exif=exif6.tobytes())
+    describe(out_dir, [k for k in IMAGES if k not in HEIC_KEYS])
+
+
+def make_heic(out_dir: Path):
+    """Chạy bằng venv TẠM có pillow-heif (như tests/fixtures/tao_heic.py; KHÔNG vào requirements, không phân phối)."""
+    import pillow_heif
+    from PIL import Image
+
+    pillow_heif.register_heif_opener()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    exif6 = Image.Exif()
+    exif6[0x0112] = 6  # pillow-heif chuyển thành hộp irot, libheif xoay lúc đọc
+    gradient_rgb(HW, HH).save(out_dir / IMAGES["heic-xoay6"], format="HEIF", quality=80, exif=exif6.tobytes())
+    describe(out_dir, sorted(HEIC_KEYS))
 
 
 def multipart_body(data: bytes, filename: str):
@@ -193,14 +234,29 @@ def measure(a, runs: list):
             out["warm"] = {"status": st, "seconds": round(secs, 2), **{k: v for k, v in tracker.result(a.interval).items() if k != "pid"}}
             print(f"[{a.image} t{a.threads}] ảnh khởi động: HTTP {st}, {secs:.1f} s, RSS đỉnh {out['warm']['peakMB']} MB, "
                   f"peak_wset {out['warm']['peakWsetMB']} MB, riêng đỉnh {out['warm']['peakPrivateMB']} MB", flush=True)
+            if a.real_before > 0:
+                photos = sorted(p for p in DEFAULT_WARM.parent.parent.glob("*/front.jpg") if p != Path(a.warm))
+                real = []
+                for p in photos[:a.real_before]:
+                    st, j, secs = post_image(base, p, a.timeout)
+                    real.append({"status": st, "seconds": round(secs, 2)})
+                tracker.sample()
+                out["realBefore"] = {"count": len(real), "statuses": [r["status"] for r in real],
+                                     **{k: v for k, v in tracker.result(a.interval).items() if k != "pid"}}
+                print(f"[{a.image} t{a.threads}] {len(real)} ảnh thật trước ảnh lớn: HTTP {out['realBefore']['statuses']}, "
+                      f"peak_wset {out['realBefore']['peakWsetMB']} MB, riêng đỉnh {out['realBefore']['peakPrivateMB']} MB",
+                      flush=True)
             st, j, secs = post_image(base, img, a.timeout)
             tracker.sample()
             res = tracker.result(a.interval)
             out["big"] = {"status": st, "seconds": round(secs, 2), "error": j.get("error"),
+                          # phía máy chủ: ms = giải mã + thu nhỏ + OCR, msOcr = riêng OCR
+                          "serverMs": j.get("ms"), "serverMsOcr": j.get("msOcr"),
                           "size": [j.get("width"), j.get("height"), j.get("origWidth"), j.get("origHeight")],
                           "boxes": len(j.get("items", [])) if isinstance(j.get("items"), list) else None,
                           **{k: v for k, v in res.items() if k != "pid"}}
-            print(f"[{a.image} t{a.threads}] ảnh lớn: HTTP {st}, {secs:.1f} s, cỡ {out['big']['size']}, "
+            print(f"[{a.image} t{a.threads}] ảnh lớn: HTTP {st}, {secs:.1f} s (máy chủ {j.get('ms')} ms, OCR "
+                  f"{j.get('msOcr')} ms), cỡ {out['big']['size']}, "
                   f"RSS đỉnh {res['peakMB']} MB, peak_wset {res['peakWsetMB']} MB, riêng đỉnh {res['peakPrivateMB']} MB, "
                   f"VmHWM {res['vmHwmMB']}", flush=True)
         finally:
@@ -224,7 +280,7 @@ def write_runs(path, runs):
     """Ghi mọi lần chạy + số lớn nhất của ảnh lớn qua các lần (Windows thiếu RAM có thể cắt working set -> lấy lớn nhất)."""
     big = [r["big"] for r in runs if "big" in r]
     mx = {k: max((b[k] for b in big if b.get(k) is not None), default=None)
-          for k in ("peakMB", "peakWsetMB", "peakPrivateMB", "vmHwmMB", "seconds")}
+          for k in ("peakMB", "peakWsetMB", "peakPrivateMB", "vmHwmMB", "seconds", "serverMs", "serverMsOcr")}
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"runs": runs, "maxBig": mx, "statuses": [b["status"] for b in big]}, f, ensure_ascii=False, indent=1)
 
@@ -234,6 +290,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("tao")
     t.add_argument("--dir", default=str(DEFAULT_DIR))
+    t.add_argument("--heic", action="store_true", help="chỉ tạo ảnh HEIC (cần venv tạm có pillow-heif)")
     d = sub.add_parser("do")
     d.add_argument("--image", required=True, choices=sorted(IMAGES))
     d.add_argument("--threads", type=int, default=8)
@@ -242,12 +299,13 @@ def main():
     d.add_argument("--code-dir", default=str(HERE))
     d.add_argument("--port", type=int, default=8765)
     d.add_argument("--warm", default=str(DEFAULT_WARM))
+    d.add_argument("--real-before", type=int, default=0, help="số ảnh front.jpg thật gửi thêm trước ảnh lớn")
     d.add_argument("--interval", type=float, default=0.05)
     d.add_argument("--timeout", type=float, default=180)
     d.add_argument("--repeat", type=int, default=2, help="số lần đo lại (mỗi lần 1 máy chủ mới), ghi số lớn nhất")
     a = ap.parse_args()
     if a.cmd == "tao":
-        make_images(Path(a.dir))
+        (make_heic if a.heic else make_images)(Path(a.dir))
     else:
         runs = []
         for k in range(a.repeat):
