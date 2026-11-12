@@ -86,3 +86,36 @@ test("chỉ có chữ ({ text }) tách theo xuống dòng như ocrLines; ghép A
   const k = { items: [{ text: "OMACHI", conf: 0.6, box: box(0, 0, 100, 40) }, { text: "Bò hầm", conf: null, box: box(0, 60, 100, 90) }] };
   assert.deepEqual(queryFromOcr(mergeOcr(k, k)), queryFromOcr(k));
 });
+
+// ---------- thu-r1 P3 (6): file kết quả hỏng -> câu tiếng Việt kèm tên file, mã thoát 2 ----------
+import * as ghep from "../ghep-ocr.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+test("parseResultJson: JSON hỏng -> lỗi tiếng Việt có tên file, exitCode 2; JSON đúng -> object", () => {
+  assert.equal(typeof ghep.parseResultJson, "function", "chưa có parseResultJson");
+  assert.deepEqual(ghep.parseResultJson('{"a":1}', "x.json"), { a: 1 });
+  assert.throws(() => ghep.parseResultJson("{hỏng", "ket-qua/x.json"), (e) => {
+    assert.match(e.message, /^File kết quả ket-qua\/x\.json không đọc được \(JSON hỏng: /);
+    assert.equal(e.exitCode, 2);
+    return true;
+  });
+});
+
+test("ghep-ocr.mjs (dòng lệnh): file kết quả --x hỏng -> báo tiếng Việt kèm tên file, mã thoát 2", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ghep-hong-"));
+  try {
+    fs.writeFileSync(path.join(dir, "x.json"), "{ không phải JSON", "utf8");
+    fs.writeFileSync(path.join(dir, "y.json"), JSON.stringify({ dir: dir, scale: 1, summary: {}, items: [] }), "utf8");
+    const script = fileURLToPath(new URL("../ghep-ocr.mjs", import.meta.url));
+    const r = spawnSync(process.execPath, [script, "--x", "x", "--y", "y", "--name", "thu", "--ket-qua", dir, "--out-root", dir], { encoding: "utf8" });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /File kết quả .*x\.json không đọc được \(JSON hỏng: /);
+    assert.ok(!fs.existsSync(path.join(dir, "ghep-thu")), "không tạo thư mục ghép khi file kết quả hỏng");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
