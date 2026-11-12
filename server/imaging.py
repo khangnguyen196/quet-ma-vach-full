@@ -63,6 +63,61 @@ def detect_format(data):
 
 _PIL_FORMATS = {"jpeg": ["JPEG"], "png": ["PNG"], "heic": ["HEIF"]}
 
+# Marker JPEG KHÔNG có 2 byte độ dài theo sau: TEM (0x01), RST0..RST7 (0xD0..0xD7), SOI (0xD8).
+_JPEG_NO_LENGTH = {0x01, *range(0xD0, 0xD8), 0xD8}
+# Marker mà Pillow coi là không có độ dài còn libjpeg báo lỗi (JPG, JPGn, EOI): hai bên có thể dò lệch -> không đoán.
+_JPEG_ODD = {0xC8, *range(0xF0, 0xFE), 0xD9}
+
+
+def _jpeg_first_scan_components(data) -> int | None:
+    """Số màu trong lượt quét đầu (byte Ns của SOS đầu tiên), dò các đoạn từ SOI tới SOS như libjpeg / Pillow đọc.
+
+    Bỏ byte 0xFF đệm và byte rác ngoài marker (như Pillow / libjpeg), marker không độ dài thì bỏ qua, marker có độ dài
+    thì nhảy theo 2 byte big-endian. Hết dữ liệu, độ dài sai, marker lạ hoặc không thấy SOS -> None (người gọi coi như
+    "nhiều lượt quét" cho an toàn). Chỉ đọc theo chỉ số trên bytes / bytearray, không chép dữ liệu."""
+    n = len(data)
+    i = 2  # sau SOI (detect_format đã kiểm FF D8 FF)
+    while i < n:
+        if data[i] != 0xFF:  # byte rác giữa các đoạn: Pillow / libjpeg bỏ qua
+            i += 1
+            continue
+        while i < n and data[i] == 0xFF:  # byte 0xFF đệm
+            i += 1
+        if i >= n:
+            return None
+        m = data[i]
+        i += 1
+        if m == 0x00 or m in _JPEG_NO_LENGTH:  # FF 00 là rác; TEM / RSTn / SOI không có độ dài
+            continue
+        if m in _JPEG_ODD:
+            return None
+        if i + 2 > n:
+            return None
+        length = (data[i] << 8) | data[i + 1]
+        if length < 2 or i + length > n:
+            return None
+        if m == 0xDA:  # SOS: ngay sau 2 byte độ dài là Ns
+            return data[i + 2] if length >= 3 else None
+        i += length
+    return None
+
+
+def _jpeg_multi_scan(img, data) -> bool:
+    """JPEG có phải loại "nhiều lượt quét" (libjpeg giữ hệ số DCT của CẢ ảnh, 2 byte / điểm / màu) không.
+
+    libjpeg (jdinput.c) bật has_multiple_scans khi progressive HOẶC lượt quét đầu chứa ít màu hơn ảnh
+    (comps_in_scan < num_components, JPEG "non-interleaved", mỗi màu một lượt): phải đọc xong mọi lượt mới ghép được
+    điểm ảnh nên giữ hệ số của cả ảnh, tốn RAM như progressive, mà Pillow chỉ đặt cờ progressive cho SOF2/6/10/14.
+    Số màu của ảnh lấy từ img.layers = byte Nf trong SOF mà Pillow đã đọc (cũng là cái quyết định mode L / RGB / CMYK).
+    Dò không được (Ns None) hoặc thiếu số màu -> True (an toàn trước)."""
+    if img.info.get("progressive") or img.info.get("progression"):
+        return True
+    layers = getattr(img, "layers", None)
+    ns = _jpeg_first_scan_components(data)
+    if ns is None or not isinstance(layers, int) or layers <= 0:
+        return True
+    return ns < layers
+
 
 def decode(data, max_pixels: int, max_pixels_progressive: int | None = None):
     """bytes-like (bytes / bytearray) -> (ảnh PIL RGB đã thu nhỏ, (rộng gốc, cao gốc) sau khi xoay theo EXIF).
@@ -72,7 +127,8 @@ def decode(data, max_pixels: int, max_pixels_progressive: int | None = None):
       hoán vị điểm ảnh, đổi màu làm từng điểm, nên đổi trước hay sau cho cùng kết quả (test so từng byte);
     - xoay TẠI CHỖ (exif_transpose in_place=True): không có tag xoay thì không chép gì, có thì chỉ 1 bản mới thay bản cũ.
 
-    max_pixels_progressive: trần riêng cho JPEG progressive (None = chỉ dùng max_pixels).
+    max_pixels_progressive: trần riêng cho JPEG nhiều lượt quét (progressive, hoặc lượt quét đầu ít màu hơn ảnh;
+    None = chỉ dùng max_pixels).
     Ném ImageError: 415 (không phải ảnh / chưa hỗ trợ HEIC / ảnh hỏng), 413 (quá nhiều điểm ảnh)."""
     kind = detect_format(data)
     if kind is None:
@@ -88,12 +144,13 @@ def decode(data, max_pixels: int, max_pixels_progressive: int | None = None):
             w, h = img.size
             if w <= 0 or h <= 0 or w * h > max_pixels:
                 raise too_big
-            # JPEG progressive: libjpeg giữ hệ số DCT của CẢ ảnh lúc giải mã (2 byte / điểm / kênh) -> trần riêng thấp hơn,
-            # kiểm từ phần đầu file (Pillow đặt info["progressive"] khi thấy SOF2 / SOF6 / SOF10 / SOF14), TRƯỚC load().
+            # JPEG nhiều lượt quét (progressive, hoặc lượt quét đầu ít màu hơn ảnh): libjpeg giữ hệ số DCT của CẢ ảnh lúc
+            # giải mã (2 byte / điểm / màu) -> trần riêng thấp hơn, kiểm từ phần đầu file TRƯỚC load() (xem _jpeg_multi_scan).
+            # Chỉ dò khi ảnh vượt trần riêng, ảnh nhỏ không tốn thêm việc.
             if (max_pixels_progressive is not None and kind == "jpeg" and w * h > max_pixels_progressive
-                    and (img.info.get("progressive") or img.info.get("progression"))):
-                raise ImageError(413, f"Ảnh JPEG progressive quá nhiều điểm ảnh (loại này tối đa {max_pixels_progressive:,}"
-                                      " điểm). Hãy chụp nhỏ hơn hoặc lưu lại thành JPEG thường.".replace(",", "."))
+                    and _jpeg_multi_scan(img, data)):
+                raise ImageError(413, f"Ảnh này quá nhiều điểm ảnh cho máy chủ (loại JPEG này tối đa {max_pixels_progressive:,}"
+                                      " điểm). Hãy chụp lại bằng camera hoặc chọn ảnh nhỏ hơn.".replace(",", "."))
             img.load()
             if img.mode != "RGB":
                 img = img.convert("RGB")  # giữ info (kể cả EXIF) nên bước xoay dưới vẫn đọc được tag xoay
