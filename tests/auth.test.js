@@ -80,6 +80,16 @@ describe("secretEnvNames(env) (vite.config.js chặn build)", () => {
     assert.deepEqual(auth.secretEnvNames({ SUPABASE_SECRET: "sb_secret_GIA", vite_x: "sb_secret_GIA" }), []);
   });
 
+  test("object giống config.env thật của Vite (BASE_URL, MODE, DEV, PROD, SSR) → chỉ tên biến VITE_ xấu", () => {
+    assert.deepEqual(
+      auth.secretEnvNames({
+        BASE_URL: "./", MODE: "production", DEV: false, PROD: true, SSR: false,
+        VITE_SUPABASE_PUBLISHABLE_KEY: "sb_secret_GIA"
+      }),
+      ["VITE_SUPABASE_PUBLISHABLE_KEY"]
+    );
+  });
+
   test("2 biến xấu → cả 2 tên, sắp theo tên", () => {
     assert.deepEqual(
       auth.secretEnvNames({
@@ -199,17 +209,50 @@ describe("renderAuthBox(view) (src/render.js)", () => {
       assert.ok(!html.includes('role="alert"') && !html.includes("aria-live"), mode);
     }
   });
+
+  test("signedIn: email được escape (không chèn thẻ HTML từ email)", async () => {
+    const { renderAuthBox } = await import("../src/render.js");
+    const html = renderAuthBox({ visible: true, mode: "signedIn", email: "<b>x</b>@a.b", error: "", busy: false });
+    assert.ok(html.includes("&lt;b&gt;"), html);
+    assert.ok(!html.includes("<b>"), html);
+  });
 });
 
 describe("authMessage(view) (chữ cho #authMsg)", () => {
-  test("có lỗi → { text: lỗi, hidden: false } (chữ thô, main.js đặt bằng textContent)", () => {
-    assert.deepEqual(auth.authMessage({ visible: true, mode: "signedOut", error: "<b>lỗi</b>" }), { text: "<b>lỗi</b>", hidden: false });
+  test("có lỗi → chuỗi lỗi (chữ thô, main.js đặt bằng textContent; #authMsg luôn hiện, không dùng hidden)", () => {
+    assert.equal(auth.authMessage({ visible: true, mode: "signedOut", error: "<b>lỗi</b>" }), "<b>lỗi</b>");
   });
 
-  test("không lỗi / khối ẩn / null → { text: '', hidden: true }", () => {
+  test("không lỗi / khối ẩn / null → chuỗi rỗng", () => {
     for (const v of [{ visible: true, mode: "signedOut", error: "" }, { visible: false, mode: "hidden", error: "x" }, null, undefined]) {
-      assert.deepEqual(auth.authMessage(v), { text: "", hidden: true }, JSON.stringify(v));
+      assert.equal(auth.authMessage(v), "", JSON.stringify(v));
     }
+  });
+});
+
+describe("authErrorAfterSession({ urlError, hasSession, failed }) (câu lỗi sau getSession)", () => {
+  const URL_ERR = "Chưa đăng nhập: đã hủy, hoặc email này chưa có trong danh sách thử của app.";
+  const FAIL = "Đăng nhập không thành công. Thử lại sau.";
+
+  test("chưa có phiên + lỗi từ địa chỉ → câu lỗi từ địa chỉ (kể cả khi getSession lỗi)", () => {
+    assert.equal(auth.authErrorAfterSession({ urlError: URL_ERR, hasSession: false, failed: false }), URL_ERR);
+    assert.equal(auth.authErrorAfterSession({ urlError: URL_ERR, hasSession: false, failed: true }), URL_ERR);
+  });
+
+  test("đang có phiên → bỏ câu lỗi từ địa chỉ (không hiện 'Chưa đăng nhập' khi đã đăng nhập)", () => {
+    assert.equal(auth.authErrorAfterSession({ urlError: URL_ERR, hasSession: true, failed: false }), "");
+  });
+
+  test("getSession lỗi, không có lỗi từ địa chỉ → câu lỗi chung", () => {
+    assert.equal(auth.authErrorAfterSession({ urlError: "", hasSession: false, failed: true }), FAIL);
+    assert.equal(auth.authErrorAfterSession({ urlError: URL_ERR, hasSession: true, failed: true }), FAIL);
+  });
+
+  test("không lỗi gì / thiếu tham số → rỗng", () => {
+    assert.equal(auth.authErrorAfterSession({ urlError: "", hasSession: false, failed: false }), "");
+    assert.equal(auth.authErrorAfterSession({ urlError: "", hasSession: true, failed: false }), "");
+    assert.equal(auth.authErrorAfterSession({}), "");
+    assert.equal(auth.authErrorAfterSession(), "");
   });
 });
 
