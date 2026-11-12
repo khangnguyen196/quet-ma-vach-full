@@ -1,8 +1,12 @@
 // P5 vòng 5 (+ vòng 6): kiểm trang thử chup-mat-do.html bằng Playwright (Chromium + WebKit).
 //
 //   node chup-mat-do/trang-thu-check.mjs [--no-build] [--browsers chromium,webkit | --browser webkit] [--all] [--gap <giây>]
-//                                         [--base <url>] [--out <file.json>]
+//                                         [--base <url>] [--out <file.json>] [--ocr 1a|r1]
 //
+// - Đợt thu-r1: --ocr 1a|r1 mở chup-mat-do.html?ocr=<…> (không có --ocr = trang mặc định, không tham số). Ghi request tới
+//   R1 (ModelScope / repo PP-OCRv6 trên HuggingFace) lúc mở trang (trước lần bấm đầu: phải 0) và cả lượt (--ocr 1a hoặc
+//   mặc định: phải 0). Top5 so với kết quả đã đo: 1a / mặc định -> t1.json; r1 -> D:\tmp\ocr-mat\ket-qua\
+//   r1-trinh-duyet-<trình duyệt>.json (R1-trình-duyệt của đợt ocr-mat).
 // - Mặc định: npm run build (trong worktree), phục vụ dist/ bằng máy chủ tĩnh 127.0.0.1 (cổng ngẫu nhiên).
 //   Vòng 6: --base <url> (vd https://khangnguyen196.github.io/quet-ma-vach-full/) thì KHÔNG build, KHÔNG dựng server,
 //   mở thẳng địa chỉ đó.
@@ -46,8 +50,15 @@ export function parseCheckArgs(argv) {
   if (!Number.isFinite(gapSeconds) || gapSeconds < 0) throw new Error(`--gap phải là số giây ≥ 0: ${opt("--gap")}`);
   const all = argv.includes("--all");
   const browsers = (argv.includes("--browser") ? opt("--browser") : opt("--browsers", "chromium,webkit")).split(",").filter(Boolean);
-  const defOut = base ? "trang-thu-pages.json" : all ? "trang-thu-local-30.json" : "trang-thu-local.json";
-  return { base, build: !base && !argv.includes("--no-build"), all, gapSeconds, browsers, out: opt("--out", path.join(K, defOut)) };
+  const ocr = opt("--ocr", null);
+  if (ocr != null && ocr !== "1a" && ocr !== "r1") throw new Error(`--ocr phải là 1a hoặc r1: ${ocr}`);
+  const defOut = (base ? "trang-thu-pages" : all ? "trang-thu-local-30" : "trang-thu-local") + (ocr ? `-${ocr}` : "") + ".json";
+  return { base, build: !base && !argv.includes("--no-build"), all, gapSeconds, browsers, ocr, out: opt("--out", path.join(K, defOut)) };
+}
+
+/** Địa chỉ trang thử: có ocr thì thêm ?ocr=<…>, không có thì trang mặc định (không tham số). */
+export function pageUrl(base, ocr) {
+  return base + "chup-mat-do.html" + (ocr ? `?ocr=${encodeURIComponent(ocr)}` : "");
 }
 
 /** Ảnh thử theo thứ tự truth.csv, bỏ mã không có ảnh; mặc định 3 ảnh đầu, all = mọi ảnh. */
@@ -90,9 +101,17 @@ export function cacheCheck(urls, base) {
   return { total: urls.length, chupMatDo, ocrThu, foreign, ok: !chupMatDo.length && !ocrThu.length && !foreign.length };
 }
 
-/** Host được phép: cùng tên miền (127.0.0.1), jsDelivr, HuggingFace (cả máy chủ tải file). */
+/** Host được phép: cùng tên miền (127.0.0.1), jsDelivr, HuggingFace (cả máy chủ tải file), ModelScope của R1: đúng
+ *  www.modelscope.cn + máy chủ tải file cdn-lfs-*.modelscope.cn (đo ở thu-r1 P1.0: www.modelscope.cn trả 302 sang
+ *  cdn-lfs-cn-1.modelscope.cn). So cả tên miền (neo đầu + cuối), không so chuỗi con. */
 export function allowedHost(host, own) {
-  return host === own || host === "cdn.jsdelivr.net" || host === "huggingface.co" || /(^|\.)huggingface\.co$/.test(host) || /(^|\.)hf\.co$/.test(host);
+  return host === own || host === "cdn.jsdelivr.net" || host === "huggingface.co" || /(^|\.)huggingface\.co$/.test(host) || /(^|\.)hf\.co$/.test(host) ||
+    host === "www.modelscope.cn" || /^cdn-lfs(-[a-z0-9]+)*\.modelscope\.cn$/.test(host);
+}
+
+/** Request tới R1: ModelScope hoặc repo PP-OCRv6 trên HuggingFace. */
+export function r1Requests(reqs) {
+  return reqs.filter((r) => /(^|\.)modelscope\.cn$/.test(r.host) || /PP-OCRv6/.test(r.url));
 }
 
 /** Tóm tắt request: số request, POST, request tới openfoodfacts.org, host lạ. */
@@ -103,6 +122,7 @@ export function requestSummary(reqs, own) {
     post: reqs.filter((r) => r.method !== "GET" && r.method !== "HEAD").map((r) => `${r.method} ${r.url}`),
     openfoodfacts: reqs.filter((r) => /openfoodfacts\.org$/.test(r.host)).map((r) => r.url),
     foreign: hosts.filter((h) => !allowedHost(h, own)),
+    r1: r1Requests(reqs).map((r) => r.url),
   };
 }
 
@@ -194,9 +214,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       });
       page.on("console", (m) => { if (m.type() === "error") out.consoleErrors.push(m.text().slice(0, 300)); });
       page.on("pageerror", (e) => out.consoleErrors.push(`pageerror: ${e.message}`.slice(0, 300)));
-      await page.goto(base + "chup-mat-do.html");
+      out.url = pageUrl(base, args.ocr);
+      await page.goto(out.url);
       await page.waitForFunction(() => window.__chupMatDo && "ready" in window.__chupMatDo, null, { timeout: 60000 });
-      out.ready = await page.evaluate(() => ({ ready: window.__chupMatDo.ready, error: window.__chupMatDo.error || null, title: document.title }));
+      await sleep(1000);
+      out.ready = await page.evaluate(() => ({ ready: window.__chupMatDo.ready, error: window.__chupMatDo.error || null, title: document.title, ocr: window.__chupMatDo.ocr ?? null, select: document.getElementById("ocrPick")?.value ?? null, notice: document.getElementById("notice")?.textContent || "" }));
+      out.r1RequestsOnOpen = r1Requests(reqs).length; // trước lần bấm đầu: phải 0 (kể cả ?ocr=r1)
       for (const [k, t] of items.entries()) {
         if (k > 0 && args.gapSeconds > 0) await sleep(args.gapSeconds * 1000);
         const row = { code: t.code };
@@ -209,7 +232,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           await page.waitForFunction((n) => window.__chupMatDo.runs.length > n, before, { timeout: PER_IMAGE_MS, polling: 250 });
           const r = await page.evaluate(() => JSON.parse(JSON.stringify(window.__chupMatDo.runs.at(-1))));
           const rank = rankOf(r.top5 || [], t.code);
-          Object.assign(row, { seconds: (Date.now() - a) / 1000, ocrSeconds: r.ocrSeconds ?? null, loadSeconds: r.loadSeconds ?? null, searchMs: r.searchMs ?? null, lines: r.lines ?? null, top5: r.top5 || [], rank, top1: rank === 1, inTop5: rank != null, error: r.error || null, shownHits: await page.locator("#hits li").count() });
+          Object.assign(row, { ocr: r.ocr ?? null, modelLoadSeconds: r.modelLoadSeconds ?? null, timing: await page.locator("#timing").textContent().catch(() => null), seconds: (Date.now() - a) / 1000, ocrSeconds: r.ocrSeconds ?? null, loadSeconds: r.loadSeconds ?? null, searchMs: r.searchMs ?? null, lines: r.lines ?? null, top5: r.top5 || [], rank, top1: rank === 1, inTop5: rank != null, error: r.error || null, shownHits: await page.locator("#hits li").count() });
         } catch (e) {
           Object.assign(row, { seconds: (Date.now() - a) / 1000, error: String(e.message || e).slice(0, 300), top1: false, inTop5: false });
         }
@@ -219,8 +242,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       out.requests = requestSummary(reqs, own);
       out.stats = runStats(out.runs);
-      const ref = t1ref?.tools?.[`1a-${name}`]?.items;
-      if (ref) out.vs1a = { ref: `t1.json tools["1a-${name}"]`, ...compareTop5(out.runs, ref) };
+      if (args.ocr === "r1") {
+        const f = path.join("D:\\tmp\\ocr-mat\\ket-qua", `r1-trinh-duyet-${name}.json`);
+        const ref = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")).items : null;
+        if (ref) out.vsRef = { ref: f, ...compareTop5(out.runs, ref) };
+      } else {
+        const ref = t1ref?.tools?.[`1a-${name}`]?.items;
+        if (ref) out.vs1a = { ref: `t1.json tools["1a-${name}"]`, ...compareTop5(out.runs, ref) };
+      }
       await ctx.close();
       out.sw = await swStep(browser, base);
       console.log(`${name} service worker: ${JSON.stringify(out.sw)}`);
@@ -240,7 +269,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await browser?.close().catch(() => {});
       out.finishedAt = new Date().toISOString();
     }
-    console.log(`${name}: stats ${JSON.stringify(out.stats)}; vs1a ${JSON.stringify(out.vs1a)}; requests ${JSON.stringify(out.requests)}; app ${JSON.stringify(out.app)}`);
+    console.log(`${name}: url ${out.url}; ready ${JSON.stringify(out.ready)}; R1 request lúc mở trang ${out.r1RequestsOnOpen}; stats ${JSON.stringify(out.stats)}; vs1a ${JSON.stringify(out.vs1a)}; vsRef ${JSON.stringify(out.vsRef)}; requests ${JSON.stringify(out.requests)}; app ${JSON.stringify(out.app)}`);
   }
   server?.close();
   report.finishedAt = new Date().toISOString();

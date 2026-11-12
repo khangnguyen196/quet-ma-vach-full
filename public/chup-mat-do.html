@@ -12,6 +12,9 @@
   Thư viện + model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định như test-ocr/web-ocr/assets.js chế độ cdn (như
   ocr-thu.html); chỉ dùng wasm (như lúc đo 1a). Ảnh chỉ xử lý trong trình duyệt; trang KHÔNG gọi openfoodfacts.org.
   Luật T1: chup-mat-do/t1.mjs (bản JS của test-ocr/chup-mat-do/lib.mjs + vn-data.mjs).
+  Đợt thu-r1: ô chọn OCR (?ocr=1a|r1, mặc định 1a). R1 = PP-OCRv6 small của RapidOCR 3.10.0 (ONNX từ ModelScope tag
+  v3.10.0, yml HuggingFace ghim) chạy bằng cùng PaddleOCR.js, tham số như lần đo ocr-mat; chỉ tải khi chọn R1 và bấm.
+  Bảng cấu hình + phần thuần: chup-mat-do/ocr-chon.mjs. Chỉ giữ MỘT OCR trong bộ nhớ (đổi OCR thì dispose() cái cũ).
 -->
 <style>
   :root {
@@ -50,11 +53,20 @@
 <main>
   <h1>Thử nhận ra sản phẩm từ ảnh mặt trước</h1>
   <p class="small">Trang thử riêng, không thuộc app. Ảnh chỉ xử lý trong máy, không gửi đi đâu. Lần đầu bấm
-    "Nhận ra sản phẩm" sẽ tải khoảng 18–20 MB thư viện và model (jsDelivr, HuggingFace), nên dùng Wi-Fi.</p>
+    "Nhận ra sản phẩm" sẽ tải khoảng 18–20 MB thư viện và model (jsDelivr, HuggingFace), nên dùng Wi-Fi. Chọn R1 (thử)
+    thì tải thêm khoảng 31 MB model (ModelScope) và cần nhiều bộ nhớ hơn.</p>
+  <p id="notice" class="small err" role="alert" hidden></p>
 
   <div class="row">
     <label class="btn">Chụp ảnh<input type="file" id="pickCamera" accept="image/*" capture="environment" hidden disabled></label>
     <label class="btn secondary">Chọn từ thư viện<input type="file" id="pickLibrary" accept="image/*" hidden disabled></label>
+  </div>
+  <div class="row">
+    <label for="ocrPick">OCR đọc chữ:</label>
+    <select id="ocrPick" disabled>
+      <option value="1a">PaddleOCR.js mobile (1a, mặc định)</option>
+      <option value="r1">RapidOCR (R1, thử, tải thêm ~31 MB)</option>
+    </select>
   </div>
   <p id="imgInfo" class="small">Chưa chọn ảnh. Chụp thẳng, gần, đủ sáng mặt trước bao bì (chỗ có tên sản phẩm).</p>
 
@@ -81,6 +93,8 @@
     <p>Đọc chữ: PaddleOCR.js 0.4.2 (Apache-2.0), model PP-OCRv5_mobile_det và latin_PP-OCRv5_mobile_rec của
       PaddlePaddle trên HuggingFace (Apache-2.0); onnxruntime-web 1.24.3 (MIT), OpenCV.js 4.10.0 (Apache-2.0),
       clipper-lib 6.4.2 (Boost Software License), js-yaml 4.3.2 (MIT).</p>
+    <p>R1 (thử): model PP-OCRv6_small_det và PP-OCRv6_small_rec (PP-OCRv6 small, PaddlePaddle), bản ONNX của RapidOCR 3.10.0
+      (RapidAI, trên ModelScope) + file inference.yml của PaddlePaddle trên HuggingFace: Apache-2.0.</p>
   </footer>
 </main>
 
@@ -88,18 +102,15 @@
 (function () {
   "use strict";
 
-  // Thư viện + model: đúng bản cố định của test-ocr/web-ocr/assets.js chế độ cdn (test trang-thu.test.mjs kiểm).
+  // Thư viện: đúng bản cố định của test-ocr/web-ocr/assets.js chế độ cdn (test trang-thu.test.mjs kiểm).
+  // Model (1a / R1): bảng OCR_CONFIGS trong chup-mat-do/ocr-chon.mjs.
   var CDN = {
     paddleSdk: "https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/dist/index.mjs",
     ortWasm: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.wasm.min.mjs",
     ortWasmDir: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/",
     opencv: "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
     clipper: "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js",
-    jsYaml: "https://cdn.jsdelivr.net/npm/js-yaml@4.3.2/dist/js-yaml.mjs",
-    detOnnx: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
-    detYml: "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.yml",
-    recOnnx: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.onnx",
-    recYml: "https://huggingface.co/PaddlePaddle/latin_PP-OCRv5_mobile_rec_onnx/resolve/89d3a50e2c27e2e7cceeab0e944c25c807d5db4f/inference.yml"
+    jsYaml: "https://cdn.jsdelivr.net/npm/js-yaml@4.3.2/dist/js-yaml.mjs"
   };
   var PRODUCT_PAGE = "https://world.openfoodfacts.org/product/"; // chỉ là link cho người dùng bấm, trang không gọi
   var MAX_SIDE = 1600; // giống lúc đo 1a: thu cạnh dài về 1600 px
@@ -142,18 +153,40 @@
   });
   document.head.appendChild(map);
 
-  async function fetchBytes(url) {
-    var r = await fetch(url);
+  async function fetchBytes(url, signal) {
+    var r = await fetch(url, { signal: signal });
     if (!r.ok) throw new Error("Tải " + url + " lỗi HTTP " + r.status);
     return new Uint8Array(await r.arrayBuffer());
   }
 
+  // Dấu "đang chạy R1" (bộ lưu tạm của tab, mọi chỗ dùng đều bọc try/catch): ghi trước khi nạp / chạy R1, xóa khi xong
+  // hoặc lỗi. Tab bị đóng vì hết bộ nhớ thì dấu còn lại; mở lại trang thấy dấu thì báo rồi xóa (cố hết sức: trình duyệt
+  // có thể xóa bộ lưu tạm của tab khi tab sập, khi đó không báo được).
+  var MARK = "chupMatDo.dangChayR1";
+  function markSet() { try { sessionStorage.setItem(MARK, String(Date.now())); } catch (e) { /* bỏ qua */ } }
+  function markClear() { try { sessionStorage.removeItem(MARK); } catch (e) { /* bỏ qua */ } }
+  function markTake() { var v = null; try { v = sessionStorage.getItem(MARK); sessionStorage.removeItem(MARK); } catch (e) { v = null; } return v; }
+
+  function showNotice(t) {
+    $("notice").textContent = t;
+    $("notice").hidden = !t;
+  }
+
   async function main() {
+    var notices = [];
+    if (markTake()) notices.push("Lần trước trang có thể đã bị đóng vì hết bộ nhớ khi chạy R1. Nên dùng 1a, hoặc đóng bớt tab trước khi thử lại R1.");
+    showNotice(notices.join(" "));
     if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports("importmap"))) {
       throw new Error("Trình duyệt này chưa hỗ trợ import map (cần Safari 16.4+ / Chrome 89+).");
     }
     var t1 = await import("./chup-mat-do/t1.mjs");
     var tar = await import("./chup-mat-do/tar.mjs");
+    var chon = await import("./chup-mat-do/ocr-chon.mjs");
+    var pick = chon.pickOcr(location.search);
+    if (pick.unknown != null) notices.push("Không có OCR \"" + pick.unknown + "\" (chỉ có 1a, r1): dùng 1a (mặc định).");
+    showNotice(notices.join(" "));
+    var selected = pick.key;
+    $("ocrPick").value = selected;
     status("Đang tải danh mục sản phẩm…");
     var cat;
     try {
@@ -170,9 +203,9 @@
     $("catInfo").textContent = products.length + " sản phẩm, xuất ngày " + cat.meta.ngayXuat;
 
     var canvas = null;
-    var paddle = null; // { ocr, loadSeconds }
+    var paddle = null; // OCR đang trong bộ nhớ (chỉ MỘT): { key, cfg, ocr, loadSeconds }
     var busy = false;
-    var state = { ready: true, runs: [] };
+    var state = { ready: true, runs: [], ocr: selected, loaded: null };
     window.__chupMatDo = state;
 
     function setBusy(b) {
@@ -180,6 +213,27 @@
       $("run").disabled = b || !canvas;
       $("pickCamera").disabled = b;
       $("pickLibrary").disabled = b;
+      $("ocrPick").disabled = b; // đang chạy thì khóa ô chọn OCR
+    }
+
+    $("ocrPick").addEventListener("change", function () {
+      var v = $("ocrPick").value;
+      if (busy || !chon.OCR_CONFIGS[v]) { $("ocrPick").value = selected; return; }
+      selected = v;
+      state.ocr = v;
+      try { history.replaceState(history.state, "", location.pathname + chon.ocrSearch(location.search, v) + location.hash); } catch (e) { /* bỏ qua */ }
+      var cfg = chon.OCR_CONFIGS[v];
+      status("Đã chọn " + cfg.name + "." + (paddle && paddle.key === v ? "" : " Bấm \"Nhận ra sản phẩm\" sẽ tải model (" + cfg.sizeNote + ")."));
+    });
+
+    // Giải phóng OCR đang giữ (SDK có dispose(): nhả 2 phiên onnxruntime của det / rec). Lỗi khi giải phóng thì bỏ qua.
+    async function freePaddle() {
+      var p = paddle;
+      paddle = null;
+      state.loaded = null;
+      if (p && p.ocr && typeof p.ocr.dispose === "function") {
+        try { await p.ocr.dispose(); } catch (e) { /* bỏ qua */ }
+      }
     }
 
     async function loadImage(file) {
@@ -225,26 +279,54 @@
     $("pickCamera").addEventListener("change", onPick);
     $("pickLibrary").addEventListener("change", onPick);
 
-    async function loadPaddle() {
+    // Nạp một OCR theo bảng cấu hình, có giới hạn thời gian (cfg.loadTimeoutMs). SDK không nhận AbortSignal, nhưng mọi
+    // file model đi qua fetch riêng của trang (tarFetch) nên hết giờ thì AbortController hủy các lượt tải đang chạy;
+    // nếu SDK vẫn nạp xong muộn thì giải phóng ngay.
+    async function loadPaddle(cfg) {
       var t0 = performance.now();
-      var mod = await import("@paddleocr/paddleocr-js");
-      var tarFetch = async function (url) {
-        if (url === "tar:det" || url === "tar:rec") {
-          var k = url.slice(4);
-          var parts = await Promise.all([fetchBytes(CDN[k + "Onnx"]), fetchBytes(CDN[k + "Yml"])]);
-          return new Response(tar.makeTar([{ name: "inference.onnx", data: parts[0] }, { name: "inference.yml", data: parts[1] }]));
-        }
-        return fetch(url);
-      };
-      var ocr = await mod.PaddleOCR.create({
-        textDetectionModelName: "PP-OCRv5_mobile_det",
-        textDetectionModelAsset: { url: "tar:det" },
-        textRecognitionModelName: "latin_PP-OCRv5_mobile_rec",
-        textRecognitionModelAsset: { url: "tar:rec" },
-        ortOptions: { backend: "wasm", wasmPaths: CDN.ortWasmDir, numThreads: 1, proxy: false },
-        fetch: tarFetch
+      var ctrl = new AbortController();
+      var timer = null;
+      var timeout = new Promise(function (ok, fail) {
+        timer = setTimeout(function () {
+          ctrl.abort();
+          var e = new Error("Tải " + cfg.name + " quá " + Math.round(cfg.loadTimeoutMs / 1000) + " giây nên đã dừng tải (mạng chậm?). " +
+            (cfg.key === "r1" ? "Thử lại khi có Wi-Fi, hoặc chọn lại 1a (nhẹ hơn)." : "Thử lại khi có Wi-Fi."));
+          e.timeout = true;
+          fail(e);
+        }, cfg.loadTimeoutMs);
       });
-      return { ocr: ocr, loadSeconds: (performance.now() - t0) / 1000 };
+      var work = (async function () {
+        var mod = await import("@paddleocr/paddleocr-js");
+        var tarFetch = async function (url) {
+          if (url === "tar:det" || url === "tar:rec") {
+            var k = url.slice(4);
+            var parts = await Promise.all([fetchBytes(cfg[k + "Onnx"], ctrl.signal), fetchBytes(cfg[k + "Yml"], ctrl.signal)]);
+            return new Response(tar.makeTar([{ name: "inference.onnx", data: parts[0] }, { name: "inference.yml", data: parts[1] }]));
+          }
+          return fetch(url, { signal: ctrl.signal });
+        };
+        return mod.PaddleOCR.create({
+          textDetectionModelName: cfg.detName,
+          textDetectionModelAsset: { url: "tar:det" },
+          textRecognitionModelName: cfg.recName,
+          textRecognitionModelAsset: { url: "tar:rec" },
+          ortOptions: { backend: "wasm", wasmPaths: CDN.ortWasmDir, numThreads: 1, proxy: false },
+          fetch: tarFetch,
+          // tham số chạy: 1a {} = mặc định SDK; R1 = PARAM_PRESETS.r1 của assets.js, trải vào như harness.mjs
+          ...cfg.params
+        });
+      })();
+      try {
+        var ocr = await Promise.race([work, timeout]);
+        return { key: cfg.key, cfg: cfg, ocr: ocr, loadSeconds: (performance.now() - t0) / 1000 };
+      } catch (e) {
+        if (e && e.timeout) {
+          work.then(function (late) { try { late.dispose(); } catch (x) { /* bỏ qua */ } }, function () { /* đã báo hết giờ */ });
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     function renderHits(hits, info) {
@@ -293,9 +375,9 @@
         ol.appendChild(li);
       });
       $("noHit").hidden = hits.length > 0;
-      $("timing").textContent = "Đọc chữ " + info.ocrSeconds.toFixed(1) + " giây" +
-        (info.loadSeconds != null ? " (tải PaddleOCR lần đầu " + info.loadSeconds.toFixed(1) + " giây)" : "") +
-        ", tìm " + info.searchMs.toFixed(1) + " ms, " + info.lines + " dòng chữ (" + info.boxes + " khung).";
+      $("timing").textContent = "OCR đang dùng: " + info.ocrName + ". Đọc chữ " + info.ocrSeconds.toFixed(1) + " giây; tải model " +
+        info.modelLoadSeconds.toFixed(1) + " giây (lần nạp gần nhất" + (info.loadSeconds != null ? ", vừa nạp ở lần bấm này" : "") + ")" +
+        "; tìm " + info.searchMs.toFixed(1) + " ms, " + info.lines + " dòng chữ (" + info.boxes + " khung).";
       $("ocrText").textContent = info.text || "(không đọc được chữ nào)";
       $("query").textContent = "Từ dùng để tìm: " + (info.query || "(không có)");
       $("result").hidden = false;
@@ -304,18 +386,25 @@
     async function run() {
       if (busy || !canvas) return;
       setBusy(true);
+      var cfg = chon.OCR_CONFIGS[selected];
+      var isR1 = cfg.key === "r1";
+      var phase = "nạp";
+      if (isR1) markSet();
       try {
+        // chỉ giữ MỘT OCR trong bộ nhớ: đổi OCR thì giải phóng cái cũ rồi mới nạp cái mới
+        if (paddle && paddle.key !== cfg.key) {
+          status("Đang giải phóng " + paddle.cfg.name + "…");
+          await freePaddle();
+        }
         var fresh = false;
         if (!paddle) {
-          status("Đang tải PaddleOCR (thư viện + model, lần đầu ~18–20 MB)…");
-          try {
-            paddle = await loadPaddle();
-          } catch (e) {
-            throw new Error("Không tải được PaddleOCR. Kiểm mạng, tải lại trang rồi thử lại. (Chi tiết: " + msg(e) + ")");
-          }
+          status("Đang tải " + cfg.name + " (thư viện + model, " + cfg.sizeNote + ")…");
+          paddle = await loadPaddle(cfg);
+          state.loaded = cfg.key;
           fresh = true;
         }
-        status("Đang đọc chữ…");
+        phase = "đọc";
+        status("Đang đọc chữ (" + cfg.name + ")…");
         var t0 = performance.now();
         var items = t1.ocrItems(await paddle.ocr.predict(canvas));
         var ocrSeconds = (performance.now() - t0) / 1000;
@@ -325,7 +414,8 @@
         var hits = q.length ? t1.bm25Search(index, q, 5) : [];
         var searchMs = performance.now() - t2;
         var info = {
-          ocrSeconds: ocrSeconds, loadSeconds: fresh ? paddle.loadSeconds : null, searchMs: searchMs,
+          ocr: cfg.key, ocrName: cfg.name,
+          ocrSeconds: ocrSeconds, loadSeconds: fresh ? paddle.loadSeconds : null, modelLoadSeconds: paddle.loadSeconds, searchMs: searchMs,
           lines: lines.length, boxes: items.length, text: lines.map(function (l) { return l.text; }).join("\n"),
           query: q.join(" "), top5: hits.map(function (h) { return h.code; })
         };
@@ -333,16 +423,26 @@
         renderHits(hits, info);
         status(lines.length ? "Xong. Chọn đúng sản phẩm trong danh sách (nếu có)." : "Không đọc được chữ nào trong ảnh. Thử chụp gần hơn, thẳng hơn, đủ sáng.");
       } catch (e) {
-        status(/^Không /.test(msg(e)) ? msg(e) : "Lỗi: " + msg(e), true);
-        state.runs.push({ error: msg(e) });
+        // sau lỗi: giải phóng thể hiện, trang vẫn dùng được (chọn lại 1a chạy được)
+        await freePaddle();
+        var memory = chon.isMemoryError(e);
+        var text;
+        if (memory) text = chon.memoryMessage(cfg.key);
+        else if (e && e.timeout) text = msg(e);
+        else if (phase === "nạp") text = "Không tải được PaddleOCR. Kiểm mạng, tải lại trang rồi thử lại. (OCR: " + cfg.name + "; chi tiết: " + msg(e) + ")";
+        else text = "Lỗi khi đọc chữ bằng " + cfg.name + ": " + msg(e);
+        $("result").hidden = true;
+        status(text, true);
+        state.runs.push({ error: msg(e), shown: text, ocr: cfg.key, phase: phase, memory: memory, timeout: !!(e && e.timeout) });
       } finally {
+        if (isR1) markClear();
         setBusy(false);
       }
     }
     $("run").addEventListener("click", run);
 
     setBusy(false);
-    status("Sẵn sàng. Chụp hoặc chọn 1 ảnh mặt trước sản phẩm.");
+    status("Sẵn sàng (OCR: " + chon.OCR_CONFIGS[selected].name + "). Chụp hoặc chọn 1 ảnh mặt trước sản phẩm.");
   }
 
   main().catch(function (e) {
