@@ -32,12 +32,24 @@ function jwtPayload(token) {
 
 /**
  * Khóa BÍ MẬT dán nhầm vào chỗ publishable key: tiền tố "sb_secret_", hoặc JWT có role service_role.
- * Repo công khai và bản build gửi khóa cho mọi trình duyệt: khóa bí mật không bao giờ được vào app.
+ * Repo công khai và bản build gửi biến VITE_* cho mọi trình duyệt, nên: build (vite.config.js, secretEnvNames) dừng
+ * với lỗi nếu biến VITE_* chứa khóa bí mật; app cũng bỏ qua khóa này nếu lọt (authConfig); máy chủ không khởi động.
  */
 export function isSecretKey(key) {
   const k = String(key ?? "").trim();
   if (k.startsWith("sb_secret_")) return true;
   return jwtPayload(k)?.role === "service_role";
+}
+
+/**
+ * TÊN các biến bắt đầu "VITE_" (Vite chép nguyên giá trị vào JS) đang chứa khóa bí mật (isSecretKey), sắp theo tên.
+ * Chỉ trả tên, KHÔNG BAO GIỜ trả giá trị (vite.config.js đưa tên vào câu lỗi). env rỗng / undefined → [].
+ */
+export function secretEnvNames(env) {
+  if (!env || typeof env !== "object") return [];
+  return Object.keys(env)
+    .filter((name) => name.startsWith("VITE_") && isSecretKey(env[name]))
+    .sort();
 }
 
 /**
@@ -121,6 +133,15 @@ export function authErrorFromUrl(url) {
 export function emailOf(session) {
   const email = session?.user?.email;
   return typeof email === "string" ? email : "";
+}
+
+/**
+ * Chữ cho phần tử thông báo cố định #authMsg (main.js chỉ đổi textContent + hidden, không thay phần tử):
+ * { text, hidden }. Không có lỗi / khối ẩn → { text: "", hidden: true }.
+ */
+export function authMessage(view) {
+  const text = view?.visible ? String(view.error || "") : "";
+  return { text, hidden: !text };
 }
 
 /**

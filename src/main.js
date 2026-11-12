@@ -6,7 +6,7 @@ import {
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox
 } from "./render.js";
-import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView } from "./auth.js";
+import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
   getAllergyProfile, setAllergyProfile, importPantryData, isAllergyProfileKey
@@ -706,12 +706,20 @@ compareForm.addEventListener("submit", async (ev) => {
 // Thiếu biến VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY → không hiện khối, không tải thư viện.
 // Thư viện @supabase/supabase-js chỉ import động khi có biến; chỉ dùng phần auth.
 const authBox = $("#authBox");
+const authBody = $("#authBody"); // vẽ lại theo trạng thái
+const authMsg = $("#authMsg"); // dòng thông báo cố định: chỉ đổi chữ + hidden, không bao giờ thay phần tử
 // Vite thay 2 biến này bằng chuỗi cố định lúc build: thiếu biến thì điều kiện luôn sai và Rollup bỏ hẳn
 // import("@supabase/supabase-js") (bản build không có file thư viện nào). authConfig() vẫn kiểm kỹ (https…) lúc chạy.
 const loadSupabase = (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
   ? () => import("@supabase/supabase-js")
   : null;
-const authCfg = loadSupabase ? authConfig(import.meta.env) : null;
+// Chỉ truyền đúng 2 biến (không truyền cả import.meta.env) để Vite không nhúng mọi biến VITE_* vào bản build.
+const authCfg = loadSupabase
+  ? authConfig({
+    VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
+    VITE_SUPABASE_PUBLISHABLE_KEY: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+  })
+  : null;
 if (loadSupabase && !authCfg) {
   // có biến nhưng sai (URL không https, hoặc dán nhầm khóa BÍ MẬT sb_secret_ / service_role): không bật đăng nhập
   console.warn("Đăng nhập: biến VITE_SUPABASE_* không hợp lệ (cần URL https và publishable key, không phải khóa bí mật). Bỏ qua đăng nhập.");
@@ -722,7 +730,11 @@ const authListeners = new Set(); // khu thử dev (dev-ocr.js) nghe đăng nhậ
 
 function setAuth(patch) {
   authState = { ...authState, ...patch };
-  authBox.innerHTML = renderAuthBox(authView(authState));
+  const view = authView(authState);
+  authBody.innerHTML = renderAuthBox(view);
+  const msg = authMessage(view);
+  if (authMsg.textContent !== msg.text) authMsg.textContent = msg.text; // chữ không đổi thì không đọc lại
+  authMsg.hidden = msg.hidden;
   authBox.hidden = !authCfg;
   for (const fn of authListeners) {
     try { fn(!!authState.session); } catch (e) { console.error(e); }
@@ -739,6 +751,8 @@ async function initAuth() {
   } catch (e) {
     console.error(e);
     setAuth({ loading: false, unavailable: true, error: "Không tải được phần đăng nhập (kiểm tra mạng rồi tải lại trang)." });
+    // Không đổi được mã nữa: vẫn xóa ?code= / ?error= / #access_token… khỏi thanh địa chỉ.
+    if (hasAuthParams(location.href)) history.replaceState(history.state, "", cleanAuthParams(location.href));
     return;
   }
   try {
@@ -746,9 +760,11 @@ async function initAuth() {
       auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true, autoRefreshToken: true }
     });
     // Không gọi hàm supabase khác bên trong callback này (thư viện khuyên vậy để tránh kẹt khóa).
-    // Có phiên (đăng nhập xong / làm mới token) thì xóa câu lỗi cũ (vd lần trước hủy đăng nhập).
-    authClient.auth.onAuthStateChange((_event, session) => {
-      setAuth(session ? { loading: false, session, error: "" } : { loading: false, session });
+    // Vừa đăng nhập xong / mở trang đã có phiên thì xóa câu lỗi cũ (vd lần trước hủy đăng nhập). Sự kiện khác
+    // (TOKEN_REFRESHED…) giữ câu lỗi (vd "Chưa đăng xuất được").
+    authClient.auth.onAuthStateChange((event, session) => {
+      const clearError = session && (event === "SIGNED_IN" || event === "INITIAL_SESSION");
+      setAuth(clearError ? { loading: false, session, error: "" } : { loading: false, session });
     });
     // getSession() chờ thư viện đổi ?code= lấy phiên (detectSessionInUrl) xong mới trả về.
     const { data, error } = await authClient.auth.getSession();

@@ -51,6 +51,47 @@ describe("authConfig(env)", () => {
   });
 });
 
+describe("secretEnvNames(env) (vite.config.js chặn build)", () => {
+  test("env rỗng / undefined / null → []", () => {
+    assert.deepEqual(auth.secretEnvNames({}), []);
+    assert.deepEqual(auth.secretEnvNames(undefined), []);
+    assert.deepEqual(auth.secretEnvNames(null), []);
+  });
+
+  test("publishable key, JWT anon, URL → []", () => {
+    assert.deepEqual(auth.secretEnvNames({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_x" }), []);
+    assert.deepEqual(auth.secretEnvNames({ VITE_SUPABASE_PUBLISHABLE_KEY: jwtOf({ iss: "supabase", role: "anon" }) }), []);
+  });
+
+  test("sb_secret_… → [tên biến], không trả giá trị", () => {
+    const names = auth.secretEnvNames({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: "sb_secret_GIA_DE_THU" });
+    assert.deepEqual(names, ["VITE_SUPABASE_PUBLISHABLE_KEY"]);
+    assert.ok(!JSON.stringify(names).includes("GIA_DE_THU"));
+  });
+
+  test("JWT giả role service_role → [tên biến]", () => {
+    assert.deepEqual(
+      auth.secretEnvNames({ VITE_SUPABASE_PUBLISHABLE_KEY: jwtOf({ iss: "supabase", role: "service_role", ref: "GIA" }) }),
+      ["VITE_SUPABASE_PUBLISHABLE_KEY"]
+    );
+  });
+
+  test("biến không bắt đầu VITE_ chứa sb_secret_ → [] (Vite không nhúng)", () => {
+    assert.deepEqual(auth.secretEnvNames({ SUPABASE_SECRET: "sb_secret_GIA", vite_x: "sb_secret_GIA" }), []);
+  });
+
+  test("2 biến xấu → cả 2 tên, sắp theo tên", () => {
+    assert.deepEqual(
+      auth.secretEnvNames({
+        VITE_Z_KEY: "sb_secret_GIA_1",
+        VITE_SUPABASE_URL: URL_OK,
+        VITE_A_KEY: jwtOf({ role: "service_role", ref: "GIA" })
+      }),
+      ["VITE_A_KEY", "VITE_Z_KEY"]
+    );
+  });
+});
+
 /** JWT giả (chữ ký rác): chỉ để kiểm phần payload. */
 function jwtOf(payload) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
@@ -149,12 +190,26 @@ describe("authErrorFromUrl(url)", () => {
 });
 
 describe("renderAuthBox(view) (src/render.js)", () => {
-  test("dòng thông báo lỗi có role=status + aria-live=polite, lỗi được escape", async () => {
+  test("không chèn câu lỗi (câu lỗi nằm ở #authMsg cố định), không role=alert / aria-live", async () => {
     const { renderAuthBox } = await import("../src/render.js");
-    const html = renderAuthBox({ visible: true, mode: "signedOut", email: "", error: "<b>lỗi</b>", busy: false });
-    assert.match(html, /<p class="auth-msg warn" role="status" aria-live="polite">&lt;b&gt;lỗi&lt;\/b&gt;<\/p>/);
-    assert.ok(!html.includes('role="alert"'));
-    assert.ok(!renderAuthBox({ visible: true, mode: "signedOut", email: "", error: "", busy: false }).includes("auth-msg"));
+    for (const mode of ["loading", "unavailable", "signedOut", "signedIn"]) {
+      const html = renderAuthBox({ visible: true, mode, email: "ai@example.com", error: "<b>lỗi</b>", busy: false });
+      assert.ok(!html.includes("lỗi"), mode);
+      assert.ok(!html.includes("auth-msg"), mode);
+      assert.ok(!html.includes('role="alert"') && !html.includes("aria-live"), mode);
+    }
+  });
+});
+
+describe("authMessage(view) (chữ cho #authMsg)", () => {
+  test("có lỗi → { text: lỗi, hidden: false } (chữ thô, main.js đặt bằng textContent)", () => {
+    assert.deepEqual(auth.authMessage({ visible: true, mode: "signedOut", error: "<b>lỗi</b>" }), { text: "<b>lỗi</b>", hidden: false });
+  });
+
+  test("không lỗi / khối ẩn / null → { text: '', hidden: true }", () => {
+    for (const v of [{ visible: true, mode: "signedOut", error: "" }, { visible: false, mode: "hidden", error: "x" }, null, undefined]) {
+      assert.deepEqual(auth.authMessage(v), { text: "", hidden: true }, JSON.stringify(v));
+    }
   });
 });
 

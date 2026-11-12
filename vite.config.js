@@ -3,6 +3,7 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import fs from "node:fs";
 import path from "node:path";
 import { buildServiceWorker, precacheList, versionOf } from "./tools/sw-build.mjs";
+import { secretEnvNames } from "./src/auth.js";
 
 /** Mọi file trong thư mục public/ (đường dẫn dạng "icons/icon-192.png"), đọc thẳng từ đĩa. */
 function listPublicFiles(dir, prefix = "") {
@@ -40,11 +41,29 @@ function serviceWorkerPlugin() {
   };
 }
 
+/**
+ * Plugin chặn khóa BÍ MẬT (đợt dang-nhap): Vite chép nguyên giá trị biến VITE_* vào JS, repo công khai và bản build lên
+ * GitHub Pages. Dán nhầm sb_secret_… / JWT service_role vào .env hay GitHub Variables thì dev / build / preview DỪNG,
+ * câu lỗi chỉ nêu TÊN biến, không bao giờ in giá trị. Không đặt apply: chạy cả dev, build, preview.
+ */
+function blockSecretKeysPlugin() {
+  return {
+    name: "qmv-chan-khoa-bi-mat",
+    configResolved(config) {
+      const bad = secretEnvNames(config.env);
+      if (bad.length) {
+        throw new Error("Biến " + bad.join(", ") + " đang chứa khóa BÍ MẬT của Supabase (sb_secret_… hoặc service_role). "
+          + "Chỉ dùng publishable key. Đổi khóa bí mật này trên Supabase rồi sửa biến.");
+      }
+    }
+  };
+}
+
 // basicSsl tạo chứng chỉ HTTPS tự ký để mở camera khi test trên điện thoại.
 // host: true để điện thoại cùng Wi-Fi vào được bằng IP máy tính.
 // base: "./" để file build dùng đường dẫn tương đối, chạy được ở GitHub Pages (https://<tên>.github.io/<repo>/).
 export default defineConfig({
   base: "./",
-  plugins: [basicSsl(), serviceWorkerPlugin()],
+  plugins: [blockSecretKeysPlugin(), basicSsl(), serviceWorkerPlugin()],
   server: { host: true, port: 5173 }
 });
