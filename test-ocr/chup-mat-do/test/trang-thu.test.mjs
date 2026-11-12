@@ -299,12 +299,25 @@ test("trang-thu-check (thu-r1 vòng 3): ảnh bị bỏ vì trang vẫn bận gh
   assert.equal(s.restMaxSeconds, 20);
   assert.equal(s.errors, 2);
   assert.equal(typeof check.busyRows, "function", "chưa có busyRows");
+  // vòng 4: ghép 2 bước (busyRows thật -> runStats), không viết tay dòng bị bỏ
+  const joined = check.runStats([{ seconds: 10 }, { seconds: 20 }, ...check.busyRows([{ code: "a" }], "X")]);
+  assert.equal(joined.restMedianSeconds, 20, "busyRows + runStats: trung vị");
+  assert.equal(joined.restMaxSeconds, 20, "busyRows + runStats: lớn nhất");
   assert.deepEqual(check.busyRows([{ code: "a" }, { code: "b" }], "X"), [
     { code: "a", seconds: null, error: busy, top1: false, inTop5: false },
     { code: "b", seconds: null, error: busy, top1: false, inTop5: false },
   ]);
+  assert.deepEqual(check.busyRows([{ code: "a" }], "X", "trang đã đóng"), [
+    { code: "a", seconds: null, error: "trang đã đóng sau ảnh X", top1: false, inTop5: false },
+  ]);
   const src = fs.readFileSync(new URL("../trang-thu-check.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(src, /seconds: 0, error: `trang vẫn bận/, "dòng trang vẫn bận còn seconds: 0");
+  // (a) không còn dòng bị bỏ ghi seconds: 0 (viết tay hay qua ${reason})
+  assert.doesNotMatch(src, /seconds:\s*0\s*,\s*error:\s*`(trang vẫn bận|\$\{reason\})/, "dòng ảnh bị bỏ còn seconds: 0");
+  // (b) mọi chỗ ghi ảnh bị bỏ đi qua busyRows: có out.runs.push(...busyRows( ; ngoài thân busyRows không tự viết "sau ảnh ${"
+  assert.match(src, /out\.runs\.push\(\.\.\.busyRows\(/, "chỗ trang vẫn bận không đi qua busyRows");
+  const body = src.match(/export function busyRows\([^)]*\) \{\n[\s\S]*?\n\}\n/);
+  assert.ok(body, "không tìm thấy thân busyRows");
+  assert.ok(!src.replace(body[0], "").includes("sau ảnh ${"), "còn chỗ tự viết \"sau ảnh ${\" ngoài busyRows");
 });
 
 test("trang-thu-check (thu-r1 vòng 2): --ref-dir (mặc định D:\\tmp\\ocr-mat\\ket-qua); file tham chiếu hỏng -> lỗi tiếng Việt, không ném", () => {
