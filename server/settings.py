@@ -6,6 +6,9 @@ Supabase thì câu lỗi chỉ nêu TÊN biến, không in giá trị.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import os
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -66,6 +69,28 @@ def normalize_supabase_url(url: str) -> str:
     return str(url or "").strip().rstrip("/")
 
 
+def _b64url_json(part: str):
+    """Giải 1 phần base64url của JWT ra JSON; lỗi gì cũng trả None (coi như không phải JWT)."""
+    try:
+        raw = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, binascii.Error):
+        return None
+
+
+def is_secret_key(key: str) -> bool:
+    """Khóa BÍ MẬT dán nhầm vào chỗ publishable key: tiền tố "sb_secret_", hoặc JWT (3 phần) có role = service_role.
+    Repo công khai và app gửi khóa này cho trình duyệt: không bao giờ được dùng khóa bí mật."""
+    key = str(key or "").strip()
+    if key.startswith("sb_secret_"):
+        return True
+    parts = key.split(".")
+    if len(parts) != 3:
+        return False
+    payload = _b64url_json(parts[1])
+    return isinstance(payload, dict) and payload.get("role") == "service_role"
+
+
 def supabase_config_problem(url: str, key: str) -> str | None:
     """Câu lỗi (tiếng Việt, CHỈ có tên biến, không có giá trị) nếu cấu hình Supabase thiếu / sai; đủ thì None."""
     url = normalize_supabase_url(url)
@@ -82,6 +107,9 @@ def supabase_config_problem(url: str, key: str) -> str | None:
         ok = False
     if not ok:
         return "Biến SUPABASE_URL phải là địa chỉ https://… của project Supabase (Project URL)."
+    if is_secret_key(key):
+        return ("Biến SUPABASE_PUBLISHABLE_KEY đang là khóa BÍ MẬT (secret / service_role), không phải publishable key. "
+                "Thay bằng publishable key (Supabase → Project Settings → API Keys) và đổi khóa bí mật vừa lộ.")
     return None
 
 

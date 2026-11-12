@@ -98,6 +98,8 @@ _opener = urllib.request.build_opener(_NoRedirect)
 def http_get_json(url: str, headers: dict, timeout: float, max_bytes: int):
     """GET -> (mã HTTP, JSON đã đọc hoặc None nếu không phải JSON). Lỗi mạng / hết giờ / quá max_bytes -> UpstreamError."""
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "qmv-ocr-server", **headers})
+    # Lưu ý: timeout của urllib tính theo TỪNG lần đọc / kết nối của socket, không phải tổng thời gian cả yêu cầu
+    # (máy chủ nhả từng chút có thể kéo dài hơn timeout; rủi ro thấp vì chỉ gọi đúng địa chỉ Supabase đã cấu hình).
     try:
         try:
             resp = _opener.open(req, timeout=timeout)

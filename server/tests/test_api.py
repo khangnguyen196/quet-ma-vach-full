@@ -421,7 +421,7 @@ def test_auth_bien_moi_truong_supabase_lam_app_khong_tao_duoc(monkeypatch):
     from settings import SettingsError, load_settings
 
     monkeypatch.setenv("AUTH_MODE", "supabase")  # thiếu SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY
-    with pytest.raises((SettingsError, auth.AuthConfigError)):
+    with pytest.raises(SettingsError):  # load_settings từ chối trước create_app
         app_module.create_app(load_settings())
 
 

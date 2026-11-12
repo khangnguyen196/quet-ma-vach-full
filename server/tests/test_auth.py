@@ -135,9 +135,11 @@ def make_sb_app(fake=None, clock=None, **kw):
     return app_module.create_app(s, engine=FakeEngine(), verifier=v)
 
 
-async def _apost(app, token=None, ip="198.51.100.7", raw_auth=None):
+async def _apost(app, token=None, ip="198.51.100.7", raw_auth=None, origin=None):
     body, ctype = multipart([("image", "anh.jpg", jpeg_bytes())])
     headers = {"content-type": ctype}
+    if origin is not None:
+        headers["origin"] = origin
     if raw_auth is not None:
         headers["authorization"] = raw_auth
     elif token is not None:
@@ -271,6 +273,11 @@ def test_jwk_oct_khong_bao_gio_duoc_dung():
     fake = FakeSupabase(jwks=(200, jwks))
     tok = hand_token({"alg": "ES256", "typ": "JWT", "kid": "oct-1"}, claims(), secret=secret)
     assert_401(post(make_sb_app(fake), tok))
+    # bắt lỗi thật: khóa oct không bao giờ lọt vào bảng khóa (token ES256 ở trên 401 cả khi oct lọt, vì alg không trùng)
+    keys = auth.parse_jwks(jwks)
+    assert "oct-1" not in keys
+    assert set(keys) == {"ec-1", "rsa-1"}
+    assert "oct-1" not in auth.parse_jwks({"keys": [{"kty": "oct", "kid": "oct-1", "k": b64(secret), "alg": "HS256"}]})
 
 
 @pytest.mark.parametrize("bad", [
@@ -488,6 +495,37 @@ def test_auth_off_khong_doc_token():
     assert post(a, raw_auth="Bearer rac.rac.rac").status_code == 200
 
 
+class _BoomVerifier:
+    """Bộ kiểm ném lỗi lạ (không phải AuthError), câu lỗi có cả token: log không được chép câu này."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def verify(self, token):
+        self.calls += 1
+        raise ValueError("loi la khi kiem " + token + " " + EMAIL)
+
+
+def test_loi_la_khi_kiem_token_500_co_cors_log_khong_co_token(caplog):
+    import app as app_module
+
+    caplog.set_level(logging.DEBUG)
+    boom = _BoomVerifier()
+    s = make_settings(auth_mode="supabase", supabase_url=SB_URL, supabase_publishable_key=PUB_KEY)
+    a = app_module.create_app(s, engine=FakeEngine(), verifier=boom)
+    tok = es256()
+    origin = "https://khangnguyen196.github.io"
+    r = post(a, tok, origin=origin)
+    assert boom.calls == 1
+    assert r.status_code == 500, r.text
+    assert r.json() == {"error": "Lỗi khi kiểm đăng nhập trên máy chủ."}
+    assert r.headers.get("access-control-allow-origin") == origin
+    assert "ValueError" in caplog.text
+    for secret in (tok, EMAIL, SUB, "loi la khi kiem"):
+        assert secret not in caplog.text
+        assert secret not in r.text
+
+
 # ---------------- log ----------------
 
 def test_log_khong_co_token_sub_email(caplog):
@@ -581,6 +619,40 @@ def test_supabase_du_bien_khoi_dong_duoc_url_bo_gach_cuoi():
     assert v.user_url == SB_URL + "/auth/v1/user"
 
 
+SECRET_KEYS = [
+    "sb_secret_KHOA-BI-MAT-GIA-cua-test",
+    "  sb_secret_co-khoang-trang  ",
+    hand_token({"alg": "HS256", "typ": "JWT"}, {"iss": "supabase", "ref": "duanthu-abcdefgh", "role": "service_role"}),
+]
+
+
+@pytest.mark.parametrize("key", SECRET_KEYS, ids=["sb-secret", "sb-secret-khoang-trang", "jwt-service-role"])
+def test_supabase_nham_khoa_bi_mat_khong_khoi_dong_cau_loi_khong_co_gia_tri(key):
+    import app as app_module
+
+    with pytest.raises(SettingsError) as e:
+        load_settings({"AUTH_MODE": "supabase", "SUPABASE_URL": SB_URL, "SUPABASE_PUBLISHABLE_KEY": key})
+    msg = str(e.value)
+    assert "SUPABASE_PUBLISHABLE_KEY" in msg
+    assert key.strip() not in msg and "sb_secret_KHOA" not in msg and "duanthu-abcdefgh" not in msg
+    # bỏ qua load_settings (Settings dựng tay) -> create_app vẫn từ chối
+    s = make_settings(auth_mode="supabase", supabase_url=SB_URL, supabase_publishable_key=key)
+    with pytest.raises(auth.AuthConfigError) as e2:
+        app_module.create_app(s, engine=FakeEngine())
+    assert key.strip() not in str(e2.value)
+
+
+@pytest.mark.parametrize("key", [
+    PUB_KEY,
+    hand_token({"alg": "HS256", "typ": "JWT"}, {"iss": "supabase", "ref": "duanthu-abcdefgh", "role": "anon"}),
+    "a.b.c",  # 3 phần nhưng không giải được: không coi là JWT
+    "sb_secretX",  # không đúng tiền tố "sb_secret_"
+], ids=["publishable", "jwt-anon-cu", "3-phan-hong", "gan-giong-tien-to"])
+def test_supabase_khoa_cong_khai_van_khoi_dong(key):
+    s = load_settings({"AUTH_MODE": "supabase", "SUPABASE_URL": SB_URL, "SUPABASE_PUBLISHABLE_KEY": key})
+    assert s.supabase_publishable_key == key
+
+
 def test_settings_khong_doc_jwt_secret_hay_service_role():
     import inspect
 
@@ -598,15 +670,27 @@ def test_settings_khong_doc_jwt_secret_hay_service_role():
 
 # ---------------- urllib thật với http.server cục bộ ----------------
 
+REDIRECT_TARGET = "/jwks-chuyen-huong.json"
+
+
 class _Handler(http.server.BaseHTTPRequestHandler):
     delay = 0.0
     seen = []
+    jwks_mode = "ok"  # ok | redirect (302 tới JWKS hợp lệ ở đường khác) | big (JWKS hợp lệ nhưng > 64 KB)
 
     def do_GET(self):  # noqa: N802
         type(self).seen.append((self.path, self.headers.get("apikey"), self.headers.get("authorization")))
         if self.delay:
             time.sleep(self.delay)
-        if self.path == "/auth/v1/.well-known/jwks.json":
+        if self.path == "/auth/v1/.well-known/jwks.json" and self.jwks_mode == "redirect":
+            self.send_response(302)
+            self.send_header("Location", REDIRECT_TARGET)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path == "/auth/v1/.well-known/jwks.json" and self.jwks_mode == "big":
+            body = json.dumps({**JWKS, "dem": "x" * (auth.JWKS_MAX_BYTES + 1024)}).encode()
+        elif self.path in ("/auth/v1/.well-known/jwks.json", REDIRECT_TARGET):
             body = json.dumps(JWKS).encode()
         elif self.path == "/auth/v1/user":
             body = json.dumps({"id": SUB}).encode()
@@ -627,8 +711,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def _local_server(delay=0.0):
-    handler = type("H", (_Handler,), {"delay": delay, "seen": []})
+def _local_server(delay=0.0, jwks_mode="ok"):
+    handler = type("H", (_Handler,), {"delay": delay, "seen": [], "jwks_mode": jwks_mode})
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     srv.daemon_threads = True
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -670,3 +754,43 @@ def test_urllib_that_het_gio_503():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_urllib_that_jwks_chuyen_huong_302_khong_theo_503():
+    """JWKS trả 302 tới một JWKS hợp lệ ở đường khác: KHÔNG đi theo (chỉ nói chuyện với đúng địa chỉ đã cấu hình)."""
+    srv, handler = _local_server(jwks_mode="redirect")
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        v = auth.SupabaseVerifier(base, PUB_KEY)
+        with pytest.raises(UPSTREAM):
+            v.warm_up()
+        v2 = auth.SupabaseVerifier(base, PUB_KEY)
+        with pytest.raises(auth.AuthError) as e:
+            v2.verify(es256(claims(iss=base + "/auth/v1")))
+        assert e.value.status == 503
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    paths = [p for p, _, _ in handler.seen]
+    assert REDIRECT_TARGET not in paths
+    assert paths == ["/auth/v1/.well-known/jwks.json", "/auth/v1/.well-known/jwks.json"]
+
+
+def test_urllib_that_jwks_qua_64_kb_503():
+    """JWKS hợp lệ nhưng thân > 64 KB: dừng đọc, coi như lỗi (không phân tích phần đã đọc)."""
+    srv, handler = _local_server(jwks_mode="big")
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        with pytest.raises(UPSTREAM):
+            auth.default_fetch_jwks(base + "/auth/v1/.well-known/jwks.json")
+        v = auth.SupabaseVerifier(base, PUB_KEY)
+        with pytest.raises(UPSTREAM):
+            v.warm_up()
+        v2 = auth.SupabaseVerifier(base, PUB_KEY)
+        with pytest.raises(auth.AuthError) as e:
+            v2.verify(es256(claims(iss=base + "/auth/v1")))
+        assert e.value.status == 503
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert len(handler.seen) == 3

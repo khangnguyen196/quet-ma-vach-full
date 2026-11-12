@@ -132,6 +132,10 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
             user_id = await auth.check_request(st.auth_mode, request, request.app.state.verifier)
         except auth.AuthError as e:
             return error(e.status, e.message, e.headers)
+        except Exception as e:  # noqa: BLE001 - lỗi lạ khi kiểm token (PyJWT / cryptography…): 500 NGAY ở đây để có
+            # header CORS (handler Exception chung nằm ngoài CORSMiddleware). Log chỉ tên lỗi: câu lỗi có thể chứa token.
+            log.error("lỗi khi kiểm đăng nhập: %s", type(e).__name__)
+            return error(500, "Lỗi khi kiểm đăng nhập trên máy chủ.")
         if user_id is not None:
             ok, retry = request.app.state.user_limiter.check(user_id)
             if not ok:

@@ -55,6 +55,8 @@ $env:PYTHONUTF8 = "1"
 $env:OCR_THREADS = "$Threads"
 $env:CORS_ALLOW_LOCALHOST = "1"
 if (-not $env:AUTH_MODE) { $env:AUTH_MODE = "off" }
+# Chỉ in AUTH_MODE (không bí mật) để thấy ngay khi quên -EnvFile mà máy chủ âm thầm chạy off. KHÔNG in biến nào khác.
+Write-Host "AUTH_MODE=$($env:AUTH_MODE)"
 
 $py = Join-Path $Venv "Scripts\python.exe"
 if (-not (Test-Path $py)) {
