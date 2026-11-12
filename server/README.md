@@ -120,6 +120,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 | 422 | yêu cầu không hợp lệ khác |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, có `Retry-After` |
 | 501 | `AUTH_MODE=supabase` lọt vào hàm kiểm (bình thường đã từ chối khởi động) |
+| 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi) |
 | 503 | hàng đợi đầy hoặc chưa nạp xong model, có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
 
 ## Giới hạn và an toàn
@@ -159,7 +160,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả (66 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (149 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (2 test)
 ```
 
