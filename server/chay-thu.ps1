@@ -1,12 +1,42 @@
 ﻿# Chạy thử máy chủ OCR trên máy tính: CHỈ 127.0.0.1:8765 (không mở ra mạng ngoài, không 0.0.0.0).
-#   powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 [-Venv D:\tmp\may-chu-1\venv] [-Threads 8]
+#   powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 [-Venv D:\tmp\may-chu-1\venv] [-Threads 8] [-NoEnvFile] [-EnvFile <đường dẫn>]
 # Tắt: Ctrl+C trong cửa sổ này. File lưu UTF-8 có BOM để PowerShell 5.1 đọc đúng chữ Việt.
+# Có server\.env (hoặc -EnvFile) thì đọc các dòng KEY=VALUE, CHỈ đặt biến chưa có trong môi trường, không in tên / giá trị
+# nào ra màn hình. -NoEnvFile: bỏ qua file.
 param(
   [string]$Venv = "D:\tmp\may-chu-1\venv",
   [int]$Threads = 8,
-  [int]$Port = 8765
+  [int]$Port = 8765,
+  [switch]$NoEnvFile,
+  [string]$EnvFile = ""
 )
 $ErrorActionPreference = "Stop"
+
+# Đọc file .env: bỏ dòng trống / dòng #, bỏ BOM, bỏ dấu nháy bao ngoài giá trị; tên biến sai dạng thì bỏ dòng.
+# Không bao giờ ghi đè biến đã có trong môi trường, không in gì về nội dung file.
+if (-not $NoEnvFile) {
+  if (-not $EnvFile) { $EnvFile = Join-Path $PSScriptRoot ".env" }
+  if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+    $n = 0
+    foreach ($line in [IO.File]::ReadAllLines($EnvFile, [Text.Encoding]::UTF8)) {
+      $t = $line.TrimStart([char]0xFEFF).Trim()
+      if ($t -eq "" -or $t.StartsWith("#")) { continue }
+      $i = $t.IndexOf("=")
+      if ($i -lt 1) { continue }
+      $key = $t.Substring(0, $i).Trim()
+      if ($key -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+      $val = $t.Substring($i + 1).Trim()
+      if ($val.Length -ge 2 -and (($val.StartsWith('"') -and $val.EndsWith('"')) -or ($val.StartsWith("'") -and $val.EndsWith("'")))) {
+        $val = $val.Substring(1, $val.Length - 2)
+      }
+      if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($key, "Process"))) {
+        [Environment]::SetEnvironmentVariable($key, $val, "Process")
+        $n++
+      }
+    }
+    Write-Host "Đã đọc file .env ($n biến mới)."
+  }
+}
 
 # Mọi cache / file tạm ở ổ D (ổ C gần đầy)
 $root = "D:\tmp\may-chu-1"

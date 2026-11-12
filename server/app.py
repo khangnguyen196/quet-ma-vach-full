@@ -46,14 +46,19 @@ def error(status: int, message: str, headers=None) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status, headers=headers)
 
 
-def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
-    """engine: đối tượng có .run(img) -> list, .loaded, .info (test truyền engine giả); None = nạp RapidOCR lúc khởi động."""
+def create_app(settings: Settings | None = None, engine=None, verifier=None) -> FastAPI:
+    """engine: đối tượng có .run(img) -> list, .loaded, .info (test truyền engine giả); None = nạp RapidOCR lúc khởi động.
+    verifier: bộ kiểm token (test truyền bản có hàm tải giả); None = tự tạo khi AUTH_MODE=supabase."""
     settings = settings or load_settings()
-    auth.check_startup(settings.auth_mode)  # supabase / giá trị lạ -> ném lỗi, không khởi động
+    auth.check_startup(settings)  # supabase thiếu / sai biến, giá trị lạ -> ném lỗi, không khởi động
     setup_logging()
+    if verifier is None:
+        verifier = auth.make_verifier(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if settings.auth_mode == "supabase" and app.state.verifier is not None:
+            await run_in_threadpool(auth.warm_up_log, app.state.verifier)  # 1 dòng log "JWKS: n khóa (…)"
         if app.state.engine is None:
             from ocr_engine import OcrEngine
 
@@ -67,7 +72,10 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
     app = FastAPI(title="OCR R1", version=SERVER_VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine = engine
     app.state.settings = settings
+    app.state.verifier = verifier
     app.state.limiter = SlidingWindowLimiter(settings.rate_limit_per_min, settings.rate_limit_max_ips)
+    # giới hạn theo người dùng (user id của Supabase), cộng thêm với giới hạn theo IP
+    app.state.user_limiter = SlidingWindowLimiter(settings.rate_limit_user_per_min, settings.rate_limit_max_users)
     app.state.gate = ConcurrencyGate(settings.max_concurrent, settings.queue_max)
 
     app.add_middleware(
@@ -114,14 +122,21 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
     @app.post("/ocr")
     async def ocr(request: Request):
         st: Settings = request.app.state.settings
-        try:
-            auth.check_request(st.auth_mode, request)
-        except auth.AuthError as e:
-            return error(e.status, e.message)
+        # Thứ tự: giới hạn IP -> kiểm token -> giới hạn theo người dùng -> model -> hàng đợi -> đọc ảnh.
+        # IP trước để ai gửi dồn dập token rác không làm máy chủ gọi Supabase liên tục.
         ok, retry = request.app.state.limiter.check(client_ip(request, st.trust_proxy, st.proxy_count))
         if not ok:
             return error(429, f"Gửi quá nhiều ảnh (tối đa {st.rate_limit_per_min} ảnh mỗi phút). Thử lại sau {retry} giây.",
                          {"Retry-After": str(retry)})
+        try:
+            user_id = await auth.check_request(st.auth_mode, request, request.app.state.verifier)
+        except auth.AuthError as e:
+            return error(e.status, e.message, e.headers)
+        if user_id is not None:
+            ok, retry = request.app.state.user_limiter.check(user_id)
+            if not ok:
+                return error(429, f"Tài khoản này gửi quá nhiều ảnh (tối đa {st.rate_limit_user_per_min} ảnh mỗi phút). "
+                                  f"Thử lại sau {retry} giây.", {"Retry-After": str(retry)})
         eng = request.app.state.engine
         if eng is None or not getattr(eng, "loaded", False):
             return error(503, "Máy chủ chưa nạp xong model OCR.", {"Retry-After": str(QUEUE_RETRY_AFTER)})

@@ -8,6 +8,9 @@ starlette==1.10.0
 uvicorn==0.54.0
 python-multipart==0.0.33
 pillow==13.0.0
+# Đăng nhập (AUTH_MODE=supabase, đợt dang-nhap): kiểm chữ ký token ES256 / RS256 bằng khóa công khai JWKS.
+PyJWT==2.15.1
+cryptography==50.0.2
 # HEIC: pi-heif (chỉ đọc, libheif + libde265 LGPLv3, không kèm x265 GPL như pillow-heif). Xem LICENSES.md.
 pi_heif==1.4.0
 # gói kéo theo (ghim để cài lại ra đúng kết quả)
@@ -15,6 +18,7 @@ annotated-doc==0.0.6
 annotated-types==0.8.0
 anyio==4.16.0
 certifi==2026.10.23
+cffi==2.1.1
 charset-normalizer==3.5.2
 click==8.5.1
 colorama==0.4.6
@@ -29,6 +33,7 @@ opentelemetry-api==1.45.2
 packaging==26.3
 protobuf==7.36.2
 pyclipper==1.4.0
+pycparser==3.12
 pydantic==2.14.3
 pydantic_core==2.50.4
 PyYAML==6.0.3

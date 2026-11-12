@@ -397,28 +397,31 @@ def test_auth_off_cho_qua(make_app):
 
 @pytest.mark.parametrize("mode", ["supabase", "Supabase", "on", "none", "OFF "])
 def test_auth_khac_off_tu_choi_khoi_dong(make_app, mode):
+    # dang-nhap: "supabase" thiếu SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY -> từ chối khởi động, câu nêu tên biến
     with pytest.raises(auth.AuthConfigError) as e:
         make_app(auth_mode=mode)
     if mode == "supabase":
-        assert "chưa cài đặt, làm ở đợt dang-nhap" in str(e.value)
+        assert "SUPABASE_URL" in str(e.value) and "SUPABASE_PUBLISHABLE_KEY" in str(e.value)
 
 
-def test_auth_supabase_neu_lot_vao_ham_kiem_thi_501(make_app):
+@pytest.mark.parametrize("auth_header", [None, "Bearer a.b.c"])
+def test_auth_supabase_neu_lot_vao_ham_kiem_khi_cau_hinh_sai_khong_bao_gio_200(make_app, auth_header):
     app = make_app()
     from dataclasses import replace
 
-    app.state.settings = replace(app.state.settings, auth_mode="supabase")  # giả như lọt qua bước khởi động
-    r = post_image(app, jpeg_bytes())
-    assert r.status_code == 501
-    assert "dang-nhap" in r.json()["error"]
+    app.state.settings = replace(app.state.settings, auth_mode="supabase")  # giả như lọt qua bước khởi động (không có bộ kiểm)
+    r = post_image(app, jpeg_bytes(), headers={"authorization": auth_header} if auth_header else None)
+    assert r.status_code != 200
+    assert r.status_code == 500
+    assert r.json()["error"] == "Cấu hình đăng nhập sai trên máy chủ."
 
 
 def test_auth_bien_moi_truong_supabase_lam_app_khong_tao_duoc(monkeypatch):
     import app as app_module
-    from settings import load_settings
+    from settings import SettingsError, load_settings
 
-    monkeypatch.setenv("AUTH_MODE", "supabase")
-    with pytest.raises(auth.AuthConfigError):
+    monkeypatch.setenv("AUTH_MODE", "supabase")  # thiếu SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY
+    with pytest.raises((SettingsError, auth.AuthConfigError)):
         app_module.create_app(load_settings())
 
 

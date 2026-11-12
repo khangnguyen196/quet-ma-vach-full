@@ -57,6 +57,10 @@ và đọc tay các file `LICENSE*` / `MODEL_LICENSES.md` / `LICENSES_bundled.tx
 | protobuf | 7.36.2 | 3-Clause BSD License | |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | |
 | six | 1.17.0 | MIT | |
+| PyJWT | 2.15.1 | MIT | đăng nhập (đợt `dang-nhap`, cài 12/11/2026): đọc / kiểm token Supabase |
+| cryptography | 50.0.2 | Apache-2.0 OR BSD-3-Clause | kiểm chữ ký ES256 / RS256; `licenses/LICENSE.APACHE`, `LICENSE.BSD`; wheel Windows có OpenSSL liên kết tĩnh trong `_rust.pyd` (`openssl_version_text()` = OpenSSL 4.0.3; OpenSSL 3 trở đi giấy phép Apache-2.0) |
+| cffi | 2.1.1 | MIT-0 | cryptography kéo theo |
+| pycparser | 3.12 | BSD-3-Clause | cffi kéo theo |
 
 ## Gói chỉ để test / đo (`requirements-dev.txt`, không vào Docker image)
 

@@ -5,7 +5,8 @@ Máy chủ nhỏ (FastAPI + uvicorn) chạy **RapidOCR R1** bằng Python, đún
 Nhận 1 ảnh mặt trước bao bì, trả các khung chữ để T1 (tìm sản phẩm) dùng.
 
 **KHÔNG thuộc app**: không nằm trong bản build GitHub Pages (`npm run build` không đụng tới `server/`), không thêm gì vào
-`package.json` của app. **Chưa đưa lên Azure, chưa có đăng nhập** (`AUTH_MODE=supabase` làm ở đợt `dang-nhap`).
+`package.json` của app. **Chưa đưa lên Azure.** Đăng nhập: `AUTH_MODE=supabase` kiểm token Supabase (đợt `dang-nhap`,
+mục "Đăng nhập" dưới đây); mặc định `off`.
 **Dockerfile chưa build** (máy không có Docker), mới kiểm bằng đọc.
 
 ## Cài (Windows, mọi thứ ở ổ D)
@@ -41,7 +42,10 @@ powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1            # 127.0.
 powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 -Threads 1 # giống máy 1 vCPU
 ```
 
-Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy
+Có `server\.env` thì script đọc các dòng `KEY=VALUE` trước (bỏ dòng trống / `#`, bỏ BOM, bỏ dấu nháy bao ngoài), CHỈ đặt
+biến chưa có trong môi trường, không in tên hay giá trị nào (chỉ in số biến đã đặt). `-NoEnvFile`: bỏ qua file;
+`-EnvFile <đường dẫn>`: đọc file khác (vd chạy từ worktree: `-EnvFile D:\quet-ma-vach-full\server\.env`).
+Sau đó `AUTH_MODE` vẫn trống thì đặt `off`. Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy
 `uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log --no-proxy-headers --limit-concurrency 16`.
 **Chỉ 127.0.0.1** (không 0.0.0.0, không mở ra mạng ngoài). Tắt: Ctrl+C. Kiểm đã tắt:
 `Get-NetTCPConnection -LocalPort 8765 -State Listen` không ra gì.
@@ -64,7 +68,11 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `BODY_TIMEOUT_S` | 30 | đọc thân ảnh tối đa bấy nhiêu giây (số thực > 0); quá -> 408, trả chỗ |
 | `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình) |
 | `PROXY_COUNT` | 1 | lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI của `X-Forwarded-For` (phần bên trái khách tự ghi được, không tin) |
-| `AUTH_MODE` | off | `off` cho qua; `supabase` chưa làm -> từ chối khởi động ("chưa cài đặt, làm ở đợt dang-nhap"); giá trị lạ -> từ chối khởi động |
+| `AUTH_MODE` | off | `off` cho qua (chạy thử, test); `supabase` = `/ocr` phải có token đăng nhập Supabase (mục "Đăng nhập"), thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` -> từ chối khởi động (câu lỗi chỉ nêu tên biến, không in giá trị); giá trị lạ -> từ chối khởi động |
+| `SUPABASE_URL` | (trống) | Project URL `https://<ref>.supabase.co` (phải https) |
+| `SUPABASE_PUBLISHABLE_KEY` | (trống) | publishable key: khóa CÔNG KHAI (app trên trình duyệt cũng có). Máy chủ KHÔNG dùng JWT secret / service_role |
+| `RATE_LIMIT_USER_PER_MIN` | 10 | lượt `/ocr` mỗi người dùng (user id) trong 60 giây, cộng thêm với giới hạn theo IP |
+| `RATE_LIMIT_MAX_USERS` | 10000 | số người dùng tối đa giữ trong RAM |
 | `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng) |
 
 ## API
@@ -119,15 +127,49 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 | 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG nhiều lượt quét quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
 | 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
 | 422 | yêu cầu không hợp lệ khác |
-| 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, có `Retry-After` |
-| 501 | `AUTH_MODE=supabase` lọt vào hàm kiểm (bình thường đã từ chối khởi động) |
-| 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi) |
-| 503 | hàng đợi đầy hoặc chưa nạp xong model, có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
+| 401 | (`AUTH_MODE=supabase`) thiếu token, token sai / hết hạn / alg không nhận; có `WWW-Authenticate: Bearer` |
+| 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, hoặc quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng; có `Retry-After` |
+| 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi); cấu hình đăng nhập sai lọt qua bước khởi động ("Cấu hình đăng nhập sai trên máy chủ.", không bao giờ cho qua) |
+| 503 | hàng đợi đầy, chưa nạp xong model, hoặc (`AUTH_MODE=supabase`) chưa kiểm được token vì Supabase lỗi / không trả lời; có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
+
+## Đăng nhập (`AUTH_MODE=supabase`, đợt `dang-nhap`)
+
+Mục đích: chống dùng chùa máy chủ OCR. App đăng nhập Google qua Supabase rồi gửi access token trong header
+`Authorization: Bearer <token>`; máy chủ kiểm token, không lưu gì về người dùng (không email, không token trong log).
+
+**Bật**: điền `server/.env` (chép từ `.env.example`): `AUTH_MODE=supabase`, `SUPABASE_URL=https://<ref>.supabase.co`,
+`SUPABASE_PUBLISHABLE_KEY=<publishable key>` (khóa công khai, lấy ở Supabase → Project Settings → API Keys). Rồi chạy
+`server\chay-thu.ps1` như trên. Thiếu / sai 1 trong 2 biến thì máy chủ không khởi động (câu lỗi chỉ nêu tên biến).
+Lúc khởi động máy chủ tải JWKS 1 lần và ghi 1 dòng log `JWKS: n khóa (ES256 …)` (không có địa chỉ); tải lỗi thì vẫn
+khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. KHÔNG cần (và không bao giờ đọc) JWT secret / service_role.
+
+**Hai đường kiểm** (chọn theo `alg` trong phần đầu token, đọc chưa kiểm, chỉ để chọn đường):
+
+| alg của token | Cách kiểm |
+|---|---|
+| `ES256`, `RS256` (có `kid`) | Kiểm chữ ký **tại máy** bằng khóa công khai JWKS (`<SUPABASE_URL>/auth/v1/.well-known/jwks.json`, urllib, hạn giờ 5 giây, đọc tối đa 64 KB, giữ trong RAM 10 phút). Thuật toán lấy THEO KHÓA (`kty` / `crv` / `alg` của JWK: EC P-256 -> ES256, RSA -> RS256; khóa `oct` không bao giờ dùng), phải trùng `alg` của token. Bắt buộc `exp`, `sub`, `aud = authenticated`, `iss = <SUPABASE_URL>/auth/v1`, lệch giờ tối đa 30 giây; `is_anonymous = true` -> 401. `kid` lạ -> tải lại JWKS tối đa 1 lần mỗi 60 giây (có khóa, nhiều yêu cầu cùng lúc chỉ tải 1 lần), vẫn không có -> 401 |
+| `HS256` (project còn dùng khóa đối xứng cũ) | Máy chủ không có secret nên hỏi Supabase `GET /auth/v1/user` (header `apikey` = publishable key, hạn giờ 5 giây). 200 + có `id` -> hợp lệ, user id lấy TỪ PHẢN HỒI; 401 / 403 -> 401. Kết quả hợp lệ lưu tạm trong RAM: khóa = sha256(token), hạn = min(60 giây, `exp` của token), tối đa 1.000 mục; kết quả sai không lưu |
+| khác (`none`, `HS384`, `HS512`, `PS*`, lạ) | 401 ngay, không gọi mạng |
+
+- **401** (`WWW-Authenticate: Bearer`): thiếu header, không phải `Bearer <token>`, token dài hơn 4.096 ký tự / không đủ 3
+  phần, chữ ký sai, hết hạn, sai `iss` / `aud`, thiếu `sub`, tài khoản ẩn danh.
+- **429**: quá `RATE_LIMIT_USER_PER_MIN` (mặc định 10) ảnh / phút cho MỘT người dùng (đếm theo user id, độc lập với IP;
+  giới hạn theo IP vẫn chạy trước).
+- **503** (`Retry-After: 5`): tải JWKS lỗi mạng / 5xx / JSON hỏng, hoặc `/auth/v1/user` trả 429 / 5xx / lỗi mạng / hết
+  giờ. **Không bao giờ cho qua khi chưa kiểm được.** Tải JWKS lỗi thì 5 giây sau mới thử lại (giữa chừng trả 503 ngay).
+- **Thứ tự**: giới hạn IP -> kiểm token -> giới hạn người dùng -> model đã nạp -> hàng đợi -> đọc ảnh. IP trước để token rác
+  gửi dồn dập không làm máy chủ gọi Supabase liên tục; token sai không bị tính vào lượt của người dùng.
+- Gọi mạng (JWKS, `/user`) chạy trong threadpool, không chặn vòng sự kiện.
+- **Giới hạn đã biết**: token đã đăng xuất (hoặc tài khoản bị xoá) VẪN qua tới khi token hết hạn (~1 giờ, mặc định của
+  Supabase) với đường JWKS, vì kiểm tại máy không hỏi Supabase; đường `/user` thì chậm tối đa 60 giây (lưu tạm).
+- Test: `tests/test_auth.py` (khóa ES256 / RS256 tự sinh, JWKS / `/user` giả, đồng hồ giả, 2 test urllib thật với
+  `http.server` trên 127.0.0.1; không test nào gọi Internet).
 
 ## Giới hạn và an toàn
 
-- 5 MB / ảnh, 50 MP (JPEG nhiều lượt quét 40 MP), 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
-- **Thứ tự trong `/ocr`**: đăng nhập -> giới hạn lượt -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
+- 5 MB / ảnh, 50 MP (JPEG nhiều lượt quét 40 MP), 20 ảnh / phút / IP (+ 10 ảnh / phút / người dùng khi `AUTH_MODE=supabase`), 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
+- **Thứ tự trong `/ocr`**: giới hạn lượt theo IP -> kiểm token (chỉ `AUTH_MODE=supabase`) -> giới hạn lượt theo người
+  dùng (chỉ `supabase`) -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
   `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
   giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
   1 lần (`try/finally`, `ratelimit.Slot.release`). Vì vậy RAM cho ảnh đang nhận có trần: tối đa 5 ảnh × 5 MB, dù gửi
@@ -162,7 +204,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (199 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (309 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (2 test)
 ```
 
