@@ -145,7 +145,8 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
   localhost kèm `X-Forwarded-For` khác nhau mỗi lần là lách được giới hạn lượt (đã thử: 3 lần đều 200). Với cờ này,
   `TRUST_PROXY` của app là công tắc DUY NHẤT để dùng `X-Forwarded-For`. Test: `tests/test_uvicorn.py` (chạy uvicorn thật).
 - **CORS**: chỉ khớp chính xác `https://khangnguyen196.github.io` (+ localhost khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
-  không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization.
+  không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;
+  `Access-Control-Expose-Headers: Retry-After` (trang github.io đọc được số giây chờ của 429 / 503).
 - **Log**: tắt access log của uvicorn (có IP). Log riêng chỉ có thời gian, phương thức, đường dẫn, mã, số byte, số khung chữ, giây.
   Không IP, không tên file, không chữ OCR. Lỗi lạ trong lúc OCR: `/ocr` tự bắt, log 1 dòng "lỗi máy chủ: <tên lỗi>" (không
   chi tiết), trả 500 JSON CÓ header CORS (trang trên github.io đọc được câu lỗi). Riêng lỗi 500 lạ ở chỗ khác (ngoài phần

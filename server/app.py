@@ -77,6 +77,7 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
+        expose_headers=["Retry-After"],  # trang khác tên miền mới đọc được số giây chờ của 429 / 503
     )
 
     @app.middleware("http")
