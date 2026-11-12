@@ -8,3 +8,9 @@ dist/
 .claude/settings.local.json
 # Worktree do bộ điều phối /dot tạo cho mỗi đợt
 .claude/worktrees/
+
+# Máy chủ OCR (server/): venv, file tạm của Python / pytest, cấu hình riêng
+server/.venv/
+__pycache__/
+.pytest_cache/
+server/.env
