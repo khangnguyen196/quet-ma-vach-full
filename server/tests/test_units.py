@@ -180,7 +180,7 @@ def test_tran_so_ip_va_don_ip_het_han():
 
 def test_settings_mac_dinh_va_loi():
     s = load_settings({})
-    assert (s.ocr_threads, s.max_bytes, s.max_pixels, s.rate_limit_per_min, s.max_concurrent, s.queue_max) == (8, 5 * 1024 * 1024, 60_000_000, 20, 1, 4)
+    assert (s.ocr_threads, s.max_bytes, s.max_pixels, s.rate_limit_per_min, s.max_concurrent, s.queue_max) == (8, 5 * 1024 * 1024, 50_000_000, 20, 1, 4)
     assert s.auth_mode == "off" and s.cors_allow_localhost is False and s.trust_proxy is False
     assert s.allowed_origins == ("https://khangnguyen196.github.io",)
     with pytest.raises(SettingsError):

@@ -87,22 +87,26 @@ async function main() {
   };
   const py = path.join(venv, "Scripts", "python.exe");
   const t0 = performance.now();
-  const server = spawn(py, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", String(PORT), "--workers", "1", "--no-access-log", "--no-proxy-headers", "--limit-concurrency", "16"],
-    { cwd: HERE, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const logStream = fs.createWriteStream(logFile);
   let serverLog = "";
-  const onData = (b) => { const s = b.toString("utf8"); serverLog += s; logStream.write(s); };
-  server.stdout.on("data", onData);
-  server.stderr.on("data", onData);
   let exited = false;
-  server.on("exit", () => { exited = true; });
-  const rss = spawn(py, [path.join(HERE, "do_rss.py"), "--pid", String(server.pid), "--out", rssFile, "--interval", "0.2"],
-    { env, stdio: "ignore", windowsHide: true });
-  const rssDone = new Promise((r) => rss.on("exit", r));
-
+  let spawnError = null;
+  const server = spawn(py, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", String(PORT), "--workers", "1", "--no-access-log", "--no-proxy-headers", "--limit-concurrency", "16"],
+    { cwd: HERE, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  // try/finally NGAY sau khi bật máy chủ: lỗi ở bất kỳ bước nào sau đây (kể cả bật do_rss.py) vẫn tắt máy chủ
+  let rss = null;
+  let rssDone = Promise.resolve();
   const rows = [];
   let loadWall = null;
   try {
+    server.on("error", (e) => { spawnError = e; exited = true; });
+    server.on("exit", () => { exited = true; });
+    const onData = (b) => { const s = b.toString("utf8"); serverLog += s; logStream.write(s); };
+    server.stdout.on("data", onData);
+    server.stderr.on("data", onData);
+    rss = spawn(py, [path.join(HERE, "do_rss.py"), "--pid", String(server.pid), "--out", rssFile, "--interval", "0.2"],
+      { env, stdio: "ignore", windowsHide: true });
+    rssDone = new Promise((r) => { rss.on("exit", r); rss.on("error", (e) => { console.error(`do_rss.py không chạy được: ${e.message}`); r(); }); });
     for (let i = 0; i < 1200 && !exited; i++) {  // chờ tối đa 120 giây
       try {
         const h = await (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(1000) })).json();
@@ -110,6 +114,7 @@ async function main() {
       } catch { /* chưa lên */ }
       await sleep(100);
     }
+    if (spawnError) throw new Error(`Không bật được máy chủ: ${spawnError.message}`);
     if (loadWall == null) throw new Error(`Máy chủ không lên được. Log:\n${serverLog.slice(-2000)}`);
     console.log(`Máy chủ lên sau ${loadWall.toFixed(2)} giây (OCR_THREADS=${threads}).`);
 
@@ -129,9 +134,11 @@ async function main() {
       console.log(`${String(k + 1).padStart(2)}/30 ${code} ${j.items.length} khung, khách ${client.toFixed(2)} s, máy chủ ${(j.ms / 1000).toFixed(2)} s (OCR ${(j.msOcr / 1000).toFixed(2)} s)`);
     }
   } finally {
-    if (!exited) server.kill();
+    if (!exited) { try { server.kill(); } catch { /* đã tắt */ } }
     for (let i = 0; i < 100 && !exited; i++) await sleep(100);
+    for (let i = 0; i < 100 && (await portOpen()); i++) await sleep(100);  // python thật là tiến trình con của python.exe venv: chờ cổng đóng
     await Promise.race([rssDone, sleep(5000)]);
+    if (rss && rss.exitCode == null) { try { rss.kill(); } catch { /* đã tắt */ } }
     logStream.end();
     console.log(`Máy chủ đã tắt: ${exited ? "có" : "KHÔNG (kiểm tay)"}; cổng ${PORT} còn nghe: ${(await portOpen()) ? "CÓ" : "không"}.`);
   }
@@ -177,7 +184,8 @@ async function main() {
   const loadLog = /nạp model ([\d.]+) giây/.exec(serverLog);
   const out = {
     name, threads, at: new Date().toISOString(), loadWallSeconds: loadWall, loadModelSeconds: loadLog ? Number(loadLog[1]) : null,
-    rssPeakMB: rssJ?.peakMB ?? null, rssSamples: rssJ?.samples ?? null,
+    rssPeakMB: rssJ?.peakMB ?? null, peakWsetMB: rssJ?.peakWsetMB ?? null, peakPrivateMB: rssJ?.peakPrivateMB ?? null,
+    vmHwmMB: rssJ?.vmHwmMB ?? null, rssSamples: rssJ?.samples ?? null,
     seconds: {
       client: { median: median(client), max: maxOf(client) }, server: { median: median(srv), max: maxOf(srv) }, ocr: { median: median(ocr), max: maxOf(ocr) },
     },
@@ -196,9 +204,12 @@ async function main() {
   console.log(`Chữ trùng R1 Python (box ≤ ${BOX_TOL} px, conf ≤ ${CONF_TOL}): ${textSame}/30`);
   for (const x of textCmp.filter((y) => !y.same)) console.log(`  LỆCH chữ ${x.ma}: ${x.diffs.slice(0, 5).join("; ")}`);
   console.log(`Giây/ảnh khách: trung vị ${f(out.seconds.client.median)}, lớn nhất ${f(out.seconds.client.max)}; máy chủ (ms): ${f(out.seconds.server.median)} / ${f(out.seconds.server.max)}; OCR: ${f(out.seconds.ocr.median)} / ${f(out.seconds.ocr.max)}`);
-  console.log(`Nạp: lên sau ${f(loadWall)} s (model ${f(out.loadModelSeconds)} s); RSS đỉnh ${rssJ?.peakMB ?? "?"} MB (${rssJ?.samples ?? 0} mẫu / 0,2 s)`);
+  console.log(`Nạp: lên sau ${f(loadWall)} s (model ${f(out.loadModelSeconds)} s); RSS đỉnh ${rssJ?.peakMB ?? "?"} MB (${rssJ?.samples ?? 0} mẫu / 0,2 s); `
+    + `peak_wset ${rssJ?.peakWsetMB ?? "?"} MB; riêng đỉnh ${rssJ?.peakPrivateMB ?? "?"} MB; VmHWM ${rssJ?.vmHwmMB ?? "-"}`);
   console.log(`Ghi: ${outFile}`);
-  const okAll = A.summary.top1 === 13 && A.summary.top5 === 22 && textSame === 30 && cmpA.same === 30 && rssJ && rssJ.peakMB < 900;
+  const memPeak = Math.max(rssJ?.peakMB ?? Infinity, rssJ?.peakWsetMB ?? 0, rssJ?.vmHwmMB ?? 0);
+  const okAll = A.summary.top1 === 13 && A.summary.top5 === 22 && sumB.top1 === 13 && sumB.top5 === 22 && sameAB === 30
+    && textSame === 30 && cmpA.same === 30 && rssJ && memPeak < 900;
   if (!okAll) process.exitCode = 1;
 }
 

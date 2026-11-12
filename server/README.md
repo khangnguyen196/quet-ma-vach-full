@@ -55,7 +55,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `OCR_THREADS` | 8 | luồng onnxruntime (intra_op); inter_op luôn 1 |
 | `OCR_OFFLINE` | 0 | 1 = thiếu / sai model thì từ chối khởi động, không tải (Dockerfile bật) |
 | `MAX_BYTES` | 5242880 | trần dung lượng ảnh (5 MB); thân yêu cầu được thêm 64 KB cho phần đầu multipart |
-| `MAX_PIXELS` | 60000000 | trần điểm ảnh (rộng × cao) trước khi giải mã |
+| `MAX_PIXELS` | 50000000 | trần điểm ảnh (rộng × cao) trước khi giải mã (50 MP: nhận ảnh 48 MP của điện thoại; đo RAM ở mục "RAM ảnh lớn") |
 | `RATE_LIMIT_PER_MIN` | 20 | lượt `/ocr` mỗi IP trong 60 giây (cửa sổ trượt, trong RAM) |
 | `RATE_LIMIT_MAX_IPS` | 10000 | số IP tối đa giữ trong RAM (dọn IP hết hạn, đầy thì bỏ IP cũ nhất) |
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
@@ -124,7 +124,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ## Giới hạn và an toàn
 
-- 5 MB / ảnh, 60 MP, 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4.
+- 5 MB / ảnh, 50 MP, 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
 - **Thứ tự trong `/ocr`**: đăng nhập -> giới hạn lượt -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
   `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
   giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
@@ -169,11 +169,49 @@ node server\do-30-anh.mjs --threads 1 --name may-chu-t1
 
 Công cụ tự bật uvicorn trên 127.0.0.1:8765 (cổng phải đang trống), gửi tuần tự 30 ảnh `front.jpg` (mã của `truth.csv` có
 ảnh, thứ tự `truth.csv`), rồi TẮT máy chủ (kể cả khi lỗi) và in cổng còn nghe hay không. Trong lượt đo đặt
-`RATE_LIMIT_PER_MIN=1000` (30 ảnh liền nhau chạm trần 20 / phút). RAM đỉnh đo bằng `do_rss.py` (psutil, mỗi 0,2 giây).
+`RATE_LIMIT_PER_MIN=1000` (30 ảnh liền nhau chạm trần 20 / phút). RAM đỉnh đo bằng `do_rss.py` (psutil): RSS lấy mẫu mỗi
+0,2 giây, cộng `peak_wset` (Windows, đỉnh thật không hụt vì lấy mẫu), `peak_pagefile` (Windows, bộ nhớ riêng đã cấp) và
+`VmHWM` (Linux); cộng cả tiến trình con (python.exe của venv trên Windows chỉ là tiến trình mồi).
 Chấm 2 đường: (A) như ocr-mat (`t1-ocr.mjs`: `{ text, conf, box }`), (B) như trang thử (`public/chup-mat-do/t1.mjs` trên
 `poly` / `score`, danh mục `public/chup-mat-do/danh-muc-vn.json`). So từng khung với `D:\tmp\ocr-mat\ocr\r1-nocls-v4`
 (chữ trùng, box ≤ 0,5 px, conf ≤ 1e-4) và câu tìm + top5 với `D:\tmp\ocr-mat\ket-qua\r1-nocls-v4.json`.
 Kết quả ở `D:\tmp\may-chu-1\ket-qua\` (không commit); số đã đo ghi ở `PLAN.md` mục 8 (đợt may-chu-1).
+
+## RAM ảnh lớn (`MAX_PIXELS`)
+
+Giải mã (`imaging.decode`) giữ ĐÚNG điểm ảnh như chuỗi cũ `exif_transpose(img).convert("RGB")` rồi thu BICUBIC (test
+`tests/test_imaging.py` so từng byte ở mode RGB / RGBA / L / P / CMYK, hướng EXIF 1..8), nhưng ít bản chép hơn: đổi màu
+trước và chỉ khi `mode != "RGB"`, rồi xoay tại chỗ (`exif_transpose(..., in_place=True)`; không có tag xoay thì không chép).
+Pillow giữ ảnh RGB / CMYK 4 byte / điểm, nên ảnh 50 MP ~191 MB mỗi bản: mã cũ tới 3 bản cùng lúc, mã mới 1 bản (không xoay)
+hoặc 2 bản trong lúc xoay.
+
+Đo bằng `do-anh-lon.py` (12/11/2026, Windows 10, máy 8 GB đang chạy app khác, Python 3.12, venv như trên): 4 ảnh tổng hợp
+8000 × 6250 = 50 MP (JPEG RGB không xoay 1,05 MB; JPEG RGB orientation 6 1,05 MB; JPEG CMYK orientation 6 2,71 MB; PNG RGB
+0,15 MB), mỗi ảnh / mỗi số luồng 1 lệnh, mỗi lệnh 2 lần (mỗi lần 1 máy chủ mới: 1 ảnh khởi động `front.jpg` rồi đúng 1 ảnh
+lớn), ghi số lớn nhất. MB = MiB. **peak_wset** = đỉnh working set thật do Windows ghi (không hụt vì lấy mẫu); **RSS đỉnh** =
+lấy mẫu mỗi 0,05 giây; **riêng đỉnh** = `peak_pagefile` (bộ nhớ riêng đã cấp, gồm cả phần onnxruntime giữ chỗ mà chưa dùng,
+nên luôn cao hơn; ~540 MB ngay sau ảnh khởi động).
+
+| Ảnh 50 MP | Luồng | Mã cũ (d14346d, 60 MP): peak_wset / RSS đỉnh / riêng đỉnh | Mã mới (50 MP): peak_wset / RSS đỉnh / riêng đỉnh |
+|---|---|---|---|
+| JPEG RGB | 1 | 737 / 642 / 930 | 441 / 395 / 635 |
+| JPEG RGB xoay 6 | 1 | 737 / 616 / 930 | 548 / 531 / 740 |
+| JPEG CMYK xoay 6 | 1 | 739 / 709 / 932 | 548 / 539 / 740 |
+| PNG RGB | 1 | 735 / 697 / 928 | 440 / 435 / 633 |
+| JPEG RGB | 8 | 740 / 712 / 933 | 444 / 443 / 638 |
+| JPEG RGB xoay 6 | 8 | 740 / 674 / 933 | 551 / 539 / 743 |
+| JPEG CMYK xoay 6 | 8 | 743 / 699 / 936 | 552 / 551 / 745 |
+| PNG RGB | 8 | 738 / 716 / 932 | 444 / 402 / 638 |
+
+Mọi lần đều HTTP 200. Mã mới, ảnh tới `MAX_PIXELS` = 50 MP, trường hợp xấu nhất đã đo (JPEG CMYK có xoay, 8 luồng):
+peak_wset 552 MB, riêng đỉnh 745 MB, dưới 900 MB. 30 ảnh thật (lượt `may-chu-t8-v2`): peak_wset 549 MB. **Chưa đo trên
+Linux / máy B1s** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux).
+
+```powershell
+D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py tao     # tạo 4 ảnh ở D:\tmp\may-chu-1\anh-lon (không commit)
+D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-xoay6 --threads 8 --out D:\tmp\may-chu-1\ket-qua\anh-lon\moi-t8-jpeg-cmyk-xoay6.json
+# đo mã cũ: --code-dir <thư mục server/ của commit cũ, chép bằng git archive ra D:\tmp> (không checkout trong worktree)
+```
 
 ## Docker (để sau, chưa build)
 

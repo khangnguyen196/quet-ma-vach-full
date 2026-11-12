@@ -59,7 +59,7 @@ class Settings:
     ocr_offline: bool = False       # 1 = thiếu model thì từ chối khởi động, không tải
     max_bytes: int = 5 * 1024 * 1024  # trần dung lượng ảnh
     multipart_overhead: int = 64 * 1024  # phần đầu multipart cho phép thêm (thân = ảnh + phần này)
-    max_pixels: int = 60_000_000    # trần số điểm ảnh (rộng × cao) trước khi giải mã
+    max_pixels: int = 50_000_000    # trần số điểm ảnh (rộng × cao) trước khi giải mã (đo RAM ảnh lớn: server/README.md)
     rate_limit_per_min: int = 20    # lượt /ocr mỗi IP trong 60 giây
     rate_limit_max_ips: int = 10_000  # số IP tối đa giữ trong RAM
     max_concurrent: int = 1         # số ảnh OCR cùng lúc
@@ -86,7 +86,7 @@ def load_settings(env=None) -> Settings:
         ocr_threads=_int(env, "OCR_THREADS", 8, 1),
         ocr_offline=_flag(env, "OCR_OFFLINE"),
         max_bytes=_int(env, "MAX_BYTES", 5 * 1024 * 1024, 1),
-        max_pixels=_int(env, "MAX_PIXELS", 60_000_000, 1),
+        max_pixels=_int(env, "MAX_PIXELS", 50_000_000, 1),
         rate_limit_per_min=_int(env, "RATE_LIMIT_PER_MIN", 20, 1),
         rate_limit_max_ips=_int(env, "RATE_LIMIT_MAX_IPS", 10_000, 1),
         max_concurrent=_int(env, "MAX_CONCURRENT", 1, 1),

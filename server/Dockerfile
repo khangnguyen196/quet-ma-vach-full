@@ -24,10 +24,13 @@ RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); ass
  && python -c "import ocr_engine as e; o = e.OcrEngine(1, True); print('nạp thử OK', round(o.load_seconds, 2), 'giây')"
 
 # Chạy thật: không tải model, chỉ CORS github.io (không localhost), đăng nhập tắt (AUTH_MODE=supabase làm ở đợt dang-nhap)
+# MAX_PIXELS=50 MP: đo trên Windows, ảnh tổng hợp 50 MP (JPEG RGB / CMYK có xoay, PNG) đỉnh RAM < 900 MB (server/README.md).
 ENV OCR_OFFLINE=1 \
     CORS_ALLOW_LOCALHOST=0 \
     AUTH_MODE=off \
-    OCR_THREADS=1
+    OCR_THREADS=1 \
+    MAX_PIXELS=50000000 \
+    BODY_TIMEOUT_S=30
 
 # Người dùng không phải root, không có thư mục nhà ghi được ngoài /tmp
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin ocr

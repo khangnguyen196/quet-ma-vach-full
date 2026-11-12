@@ -1,6 +1,7 @@
-"""Giải mã + thu nhỏ ảnh cho OCR, ĐÚNG cách của test-ocr/ocr-mat/chay_ocr.py (load_image + fit_size):
+"""Giải mã + thu nhỏ ảnh cho OCR, cho ĐÚNG điểm ảnh như test-ocr/ocr-mat/chay_ocr.py (load_image + fit_size):
 Image.open -> ImageOps.exif_transpose -> convert("RGB") -> thu cạnh dài về 1.600 px bằng BICUBIC (chỉ thu nhỏ,
 làm tròn như Math.round của JS). Không dùng draft / thumbnail / reducing_gap (đổi điểm ảnh -> đổi chữ OCR).
+Thứ tự trong decode() là đổi màu rồi xoay tại chỗ (ít bản chép hơn, cùng điểm ảnh; xem decode).
 
 Định dạng nhận theo CHỮ KÝ NỘI DUNG (vài byte đầu), không theo đuôi file hay Content-Type.
 Ảnh chỉ nằm trong RAM, không ghi ra đĩa.
@@ -62,8 +63,13 @@ def detect_format(data):
 _PIL_FORMATS = {"jpeg": ["JPEG"], "png": ["PNG"], "heic": ["HEIF"]}
 
 
-def decode(data: bytes, max_pixels: int):
-    """bytes -> (ảnh PIL RGB đã thu nhỏ, (rộng gốc, cao gốc) sau khi xoay theo EXIF).
+def decode(data, max_pixels: int):
+    """bytes-like (bytes / bytearray) -> (ảnh PIL RGB đã thu nhỏ, (rộng gốc, cao gốc) sau khi xoay theo EXIF).
+
+    Điểm ảnh ra GIỐNG HỆT chuỗi cũ exif_transpose(img).convert("RGB") rồi thu BICUBIC, nhưng ít bản chép hơn (RAM):
+    - đổi màu TRƯỚC, chỉ khi mode != "RGB" (ảnh RGB không bị chép; CMYK 4 byte/điểm bỏ bản to sớm). Xoay / lật chỉ là
+      hoán vị điểm ảnh, đổi màu làm từng điểm, nên đổi trước hay sau cho cùng kết quả (test so từng byte);
+    - xoay TẠI CHỖ (exif_transpose in_place=True): không có tag xoay thì không chép gì, có thì chỉ 1 bản mới thay bản cũ.
 
     Ném ImageError: 415 (không phải ảnh / chưa hỗ trợ HEIC / ảnh hỏng), 413 (quá nhiều điểm ảnh)."""
     kind = detect_format(data)
@@ -80,7 +86,10 @@ def decode(data: bytes, max_pixels: int):
             w, h = img.size
             if w <= 0 or h <= 0 or w * h > max_pixels:
                 raise too_big
-            img = ImageOps.exif_transpose(img).convert("RGB")
+            img.load()
+            if img.mode != "RGB":
+                img = img.convert("RGB")  # giữ info (kể cả EXIF) nên bước xoay dưới vẫn đọc được tag xoay
+            ImageOps.exif_transpose(img, in_place=True)
     except ImageError:
         raise
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):

@@ -126,7 +126,7 @@ def test_413_khi_stream_vuot_dung_doc_som_khong_content_length(make_app):
 
 
 def test_bom_diem_anh_413(make_app):
-    r = post_image(make_app(), png_header_only(10000, 10000))  # 100 MP > 60 MP
+    r = post_image(make_app(), png_header_only(10000, 10000))  # 100 MP > 50 MP
     assert r.status_code == 413
     assert "điểm ảnh" in r.json()["error"]
 

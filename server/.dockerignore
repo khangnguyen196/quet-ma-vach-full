@@ -11,6 +11,7 @@ __pycache__/
 requirements-dev.txt
 do-30-anh.mjs
 do_rss.py
+do-anh-lon.py
 chay-thu.ps1
 pytest.ini
 *.md
