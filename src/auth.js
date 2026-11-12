@@ -136,12 +136,24 @@ export function emailOf(session) {
 }
 
 /**
- * Chữ cho phần tử thông báo cố định #authMsg (main.js chỉ đổi textContent + hidden, không thay phần tử):
- * { text, hidden }. Không có lỗi / khối ẩn → { text: "", hidden: true }.
+ * Chữ cho phần tử thông báo cố định #authMsg (luôn hiện, không dùng hidden, để trình đọc màn hình đọc được khi chữ
+ * đổi; main.js chỉ đổi textContent, không thay phần tử). Trả chuỗi; không có lỗi / khối ẩn → "".
  */
 export function authMessage(view) {
-  const text = view?.visible ? String(view.error || "") : "";
-  return { text, hidden: !text };
+  return view?.visible ? String(view.error || "") : "";
+}
+
+/** Câu lỗi chung khi không lấy được phiên đăng nhập. */
+const AUTH_FAILED = "Đăng nhập không thành công. Thử lại sau.";
+
+/**
+ * Câu lỗi sau khi hỏi phiên (getSession) xong. urlError: câu từ authErrorFromUrl (quay về từ Google với lỗi);
+ * hasSession: đang có phiên; failed: getSession báo lỗi / ném lỗi.
+ * Câu lỗi từ địa chỉ chỉ hiện khi CHƯA có phiên (đã đăng nhập thì không ghi "Chưa đăng nhập: …"); không có thì
+ * getSession lỗi → câu lỗi chung; còn lại "".
+ */
+export function authErrorAfterSession({ urlError = "", hasSession = false, failed = false } = {}) {
+  return (hasSession ? "" : String(urlError || "")) || (failed ? AUTH_FAILED : "");
 }
 
 /**

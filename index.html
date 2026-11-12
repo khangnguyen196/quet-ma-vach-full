@@ -120,10 +120,11 @@
 
   <!-- Tài khoản (đăng nhập Google qua Supabase, không bắt buộc): cuối trang, ngay trước footer, để nút quét luôn ở trên.
        main.js chỉ hiện khi có biến môi trường. #authBody vẽ lại theo trạng thái (render.js); #authMsg là dòng thông báo
-       CỐ ĐỊNH (main.js chỉ đổi chữ + hidden, không thay phần tử) để trình đọc màn hình đọc được khi chữ đổi. -->
+       CỐ ĐỊNH, luôn hiện (không hidden, rỗng khi không lỗi; main.js chỉ đổi chữ, không thay phần tử) để trình đọc màn
+       hình đọc được khi chữ đổi. -->
   <section id="authBox" class="auth-box" aria-label="Tài khoản" hidden>
     <div id="authBody"></div>
-    <p id="authMsg" class="auth-msg warn" role="status" hidden></p>
+    <p id="authMsg" class="auth-msg warn" role="status"></p>
   </section>
 
   <footer>

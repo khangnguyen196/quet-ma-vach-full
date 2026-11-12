@@ -6,7 +6,7 @@ import {
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox
 } from "./render.js";
-import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage } from "./auth.js";
+import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
   getAllergyProfile, setAllergyProfile, importPantryData, isAllergyProfileKey
@@ -707,13 +707,13 @@ compareForm.addEventListener("submit", async (ev) => {
 // Thư viện @supabase/supabase-js chỉ import động khi có biến; chỉ dùng phần auth.
 const authBox = $("#authBox");
 const authBody = $("#authBody"); // vẽ lại theo trạng thái
-const authMsg = $("#authMsg"); // dòng thông báo cố định: chỉ đổi chữ + hidden, không bao giờ thay phần tử
+const authMsg = $("#authMsg"); // dòng thông báo cố định, luôn hiện (không hidden): chỉ đổi chữ, không bao giờ thay phần tử
 // Vite thay 2 biến này bằng chuỗi cố định lúc build: thiếu biến thì điều kiện luôn sai và Rollup bỏ hẳn
 // import("@supabase/supabase-js") (bản build không có file thư viện nào). authConfig() vẫn kiểm kỹ (https…) lúc chạy.
 const loadSupabase = (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
   ? () => import("@supabase/supabase-js")
   : null;
-// Chỉ truyền đúng 2 biến (không truyền cả import.meta.env) để Vite không nhúng mọi biến VITE_* vào bản build.
+// main.js không truyền cả object env; plugin build chặn mọi biến VITE_* chứa khóa bí mật.
 const authCfg = loadSupabase
   ? authConfig({
     VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
@@ -733,8 +733,7 @@ function setAuth(patch) {
   const view = authView(authState);
   authBody.innerHTML = renderAuthBox(view);
   const msg = authMessage(view);
-  if (authMsg.textContent !== msg.text) authMsg.textContent = msg.text; // chữ không đổi thì không đọc lại
-  authMsg.hidden = msg.hidden;
+  if (authMsg.textContent !== msg) authMsg.textContent = msg; // chữ không đổi thì không đọc lại
   authBox.hidden = !authCfg;
   for (const fn of authListeners) {
     try { fn(!!authState.session); } catch (e) { console.error(e); }
@@ -767,16 +766,18 @@ async function initAuth() {
       setAuth(clearError ? { loading: false, session, error: "" } : { loading: false, session });
     });
     // getSession() chờ thư viện đổi ?code= lấy phiên (detectSessionInUrl) xong mới trả về.
+    // Đặt câu lỗi SAU CÙNG (sau mọi sự kiện INITIAL_SESSION): lỗi từ ?error= chỉ hiện khi chưa có phiên.
     const { data, error } = await authClient.auth.getSession();
     if (error) console.warn("Đăng nhập:", error);
+    const session = data?.session ?? null;
     setAuth({
       loading: false,
-      session: data?.session ?? null,
-      error: urlError || (error ? "Đăng nhập không thành công. Thử lại sau." : "")
+      session,
+      error: authErrorAfterSession({ urlError, hasSession: !!session, failed: !!error })
     });
   } catch (e) {
     console.error(e);
-    setAuth({ loading: false, session: null, error: urlError || "Đăng nhập không thành công. Thử lại sau." });
+    setAuth({ loading: false, session: null, error: authErrorAfterSession({ urlError, hasSession: false, failed: true }) });
   } finally {
     // Đổi mã xong (thành công hay lỗi) mới xóa ?code= / ?error= khỏi thanh địa chỉ, giữ tham số khác.
     if (hasAuthParams(location.href)) history.replaceState(history.state, "", cleanAuthParams(location.href));

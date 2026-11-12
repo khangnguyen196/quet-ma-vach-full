@@ -445,6 +445,8 @@ table.cmp-table .empty { font-size: 13px; }
 .auth-email { overflow-wrap: anywhere; }
 .auth-note { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
 .auth-msg { margin-top: 8px; font-size: 14px; }
+/* #authMsg luôn hiện (không hidden / display:none, để trình đọc màn hình đọc khi chữ đổi): rỗng thì không chiếm chỗ */
+.auth-msg:empty { margin-top: 0; }
 .auth-msg.warn { color: var(--warn); }
 
 /* Khu thử máy chủ OCR: CHỈ khi chạy dev (src/dev-ocr.js), không có trong bản build */
