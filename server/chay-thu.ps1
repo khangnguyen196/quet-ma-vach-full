@@ -33,5 +33,6 @@ if (-not (Test-Path $py)) {
 }
 Set-Location $PSScriptRoot
 Write-Host "Máy chủ OCR: http://127.0.0.1:$Port (OCR_THREADS=$Threads). Ctrl+C để tắt."
-& $py -m uvicorn app:app --host 127.0.0.1 --port $Port --workers 1 --no-access-log
+# --no-proxy-headers: uvicorn KHÔNG tự thay IP bằng X-Forwarded-For (mặc định nó tin 127.0.0.1) -> TRUST_PROXY của app là công tắc duy nhất
+& $py -m uvicorn app:app --host 127.0.0.1 --port $Port --workers 1 --no-access-log --no-proxy-headers
 exit $LASTEXITCODE

@@ -87,7 +87,7 @@ async function main() {
   };
   const py = path.join(venv, "Scripts", "python.exe");
   const t0 = performance.now();
-  const server = spawn(py, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", String(PORT), "--workers", "1", "--no-access-log"],
+  const server = spawn(py, ["-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", String(PORT), "--workers", "1", "--no-access-log", "--no-proxy-headers"],
     { cwd: HERE, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const logStream = fs.createWriteStream(logFile);
   let serverLog = "";

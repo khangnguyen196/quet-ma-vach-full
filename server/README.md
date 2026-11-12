@@ -41,7 +41,8 @@ powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1            # 127.0.
 powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 -Threads 1 # giống máy 1 vCPU
 ```
 
-Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy `uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log`.
+Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy
+`uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log --no-proxy-headers`.
 **Chỉ 127.0.0.1** (không 0.0.0.0, không mở ra mạng ngoài). Tắt: Ctrl+C. Kiểm đã tắt:
 `Get-NetTCPConnection -LocalPort 8765 -State Listen` không ra gì.
 
@@ -125,6 +126,10 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 - **Không file tạm**: không dùng `request.form()` của Starlette (nó đặt file vào `SpooledTemporaryFile` 1 MB rồi ghi ra đĩa
   và đọc hết thân rồi mới trả), mà tách multipart theo luồng bằng `MultipartParser` của python-multipart, giữ ảnh trong RAM,
   đếm byte theo khúc (`upload.py`). Không ghi ảnh ra đĩa ở đâu cả.
+- **IP cho giới hạn lượt**: cả 3 lệnh chạy uvicorn (`chay-thu.ps1`, `Dockerfile`, `do-30-anh.mjs`) có `--no-proxy-headers`.
+  Thiếu cờ này, uvicorn mặc định tin `127.0.0.1` và tự thay IP bằng `X-Forwarded-For` trước khi app thấy, nên ai gửi từ
+  localhost kèm `X-Forwarded-For` khác nhau mỗi lần là lách được giới hạn lượt (đã thử: 3 lần đều 200). Với cờ này,
+  `TRUST_PROXY` của app là công tắc DUY NHẤT để dùng `X-Forwarded-For`. Test: `tests/test_uvicorn.py` (chạy uvicorn thật).
 - **CORS**: chỉ khớp chính xác `https://khangnguyen196.github.io` (+ localhost khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization.
 - **Log**: tắt access log của uvicorn (có IP). Log riêng chỉ có thời gian, phương thức, đường dẫn, mã, số byte, số khung chữ, giây.
