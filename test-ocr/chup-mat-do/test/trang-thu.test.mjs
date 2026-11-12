@@ -320,6 +320,32 @@ test("trang-thu-check (thu-r1 vòng 3): ảnh bị bỏ vì trang vẫn bận gh
   assert.ok(!src.replace(body[0], "").includes("sau ảnh ${"), "còn chỗ tự viết \"sau ảnh ${\" ngoài busyRows");
 });
 
+test("trang-thu-check (thu-r1 vòng 4): trang đóng / sập giữa chừng thì các ảnh còn lại ghi lỗi (stopRows), n đủ số ảnh", () => {
+  assert.equal(typeof check.stopRows, "function", "chưa có stopRows");
+  const rest = [{ code: "b" }, { code: "c" }];
+  const rows = check.stopRows("Target page, context or browser has been closed", rest, "a");
+  assert.deepEqual(rows, [
+    { code: "b", seconds: null, error: "trang đã đóng sau ảnh a", top1: false, inTop5: false },
+    { code: "c", seconds: null, error: "trang đã đóng sau ảnh a", top1: false, inTop5: false },
+  ]);
+  assert.equal(check.stopRows("Timeout 180000ms exceeded", rest, "a"), null);
+  assert.equal(check.stopRows(null, rest, "a"), null);
+  assert.equal(check.stopRows("Page crashed", rest, "a").length, 2);
+  // 1 ảnh tốt + 2 dòng này: n đủ 3, 2 lỗi
+  const s = check.runStats([{ code: "a", seconds: 12, rank: 1, top1: true, inTop5: true }, ...rows]);
+  assert.equal(s.top1, "1/3");
+  assert.equal(s.top5, "1/3");
+  assert.equal(s.errors, 2);
+  const src = fs.readFileSync(new URL("../trang-thu-check.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /closed\|crash\/i\.test\(row\.error\)\) break;/, "còn nhánh dừng không ghi các ảnh còn lại");
+  assert.match(src, /stopRows\(row\.error, items\.slice\(k \+ 1\), t\.code\)/);
+});
+
+test("trang-thu-check (thu-r1 vòng 4): lý do dừng: bị sập (page.on crash) / đã đóng / vẫn bận", () => {
+  assert.equal(typeof check.busyReason, "function", "chưa có busyReason");
+  assert.deepEqual([check.busyReason(true, true), check.busyReason(false, true), check.busyReason(false, false)], ["trang bị sập", "trang đã đóng", "trang vẫn bận"]);
+});
+
 test("trang-thu-check (thu-r1 vòng 2): --ref-dir (mặc định D:\\tmp\\ocr-mat\\ket-qua); file tham chiếu hỏng -> lỗi tiếng Việt, không ném", () => {
   assert.equal(check.parseCheckArgs([]).refDir, "D:\\tmp\\ocr-mat\\ket-qua");
   assert.equal(check.parseCheckArgs(["--ocr", "r1", "--ref-dir", "D:\\khac\\ket-qua"]).refDir, "D:\\khac\\ket-qua");
