@@ -1,0 +1,16 @@
+# Ngữ cảnh build Docker = server/: chỉ cần mã chạy + requirements.txt
+.venv/
+venv/
+tests/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+!.env.example
+requirements-dev.txt
+do-30-anh.mjs
+do_rss.py
+chay-thu.ps1
+pytest.ini
+*.md
