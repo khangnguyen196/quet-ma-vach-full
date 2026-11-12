@@ -274,3 +274,13 @@ test("trang-thu-check (thu-r1): --ocr 1a|r1 mở trang với ?ocr=…; không c�
   assert.equal(check.r1Requests(reqs).length, 4);
   assert.equal(requestSummary(reqs, "127.0.0.1").r1.length, 4);
 });
+
+test("trang-thu-check (thu-r1 vòng 2): chờ mỗi ảnh = giới hạn nạp của OCR + thời gian đọc; lấy kết quả theo chỉ số, không runs.at(-1)", () => {
+  assert.equal(typeof check.imageWaitMs, "function", "chưa có imageWaitMs");
+  assert.ok(check.imageWaitMs("r1") >= chon.OCR_CONFIGS.r1.loadTimeoutMs + 30000, `r1: ${check.imageWaitMs("r1")}`);
+  assert.ok(check.imageWaitMs("1a") >= chon.OCR_CONFIGS["1a"].loadTimeoutMs, `1a: ${check.imageWaitMs("1a")}`);
+  assert.ok(check.imageWaitMs(null) >= chon.OCR_CONFIGS["1a"].loadTimeoutMs, `null: ${check.imageWaitMs(null)}`);
+  const src = fs.readFileSync(new URL("../trang-thu-check.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /runs\.at\(-1\)/, "còn runs.at(-1)");
+  assert.doesNotMatch(src, /\b90000\b/, "còn hằng 90000");
+});
