@@ -11,9 +11,12 @@
 //   Vòng 6: --base <url> (vd https://khangnguyen196.github.io/quet-ma-vach-full/) thì KHÔNG build, KHÔNG dựng server,
 //   mở thẳng địa chỉ đó.
 // - Mỗi trình duyệt (ngữ cảnh mới, cache trống): mở chup-mat-do.html, chọn lần lượt front.jpg theo thứ tự truth.csv
-//   (mặc định 3 mã ĐẦU TIÊN có ảnh, chốt trước; vòng 6: --all = mọi mã có ảnh), bấm "Nhận ra sản phẩm", chờ ≤ 90 giây /
-//   ảnh (ảnh đầu gồm cả tải PaddleOCR); ghi top5, mã đúng ở vị trí 1 / trong 5 đầu, giây. --gap <giây>: giãn giữa 2 ảnh
-//   (mặc định 0; Pages dùng 5).
+//   (mặc định 3 mã ĐẦU TIÊN có ảnh, chốt trước; vòng 6: --all = mọi mã có ảnh), bấm "Nhận ra sản phẩm", chờ mỗi ảnh tối
+//   đa imageWaitMs = giới hạn nạp của OCR trên trang (ocr-chon.mjs: 1a 120 giây, R1 180 giây) + 60 giây đọc chữ (mọi
+//   ảnh, vì sau ảnh lỗi trang nạp lại OCR); lấy đúng kết quả của lần bấm (runs[chỉ số trước khi bấm]). Ảnh lỗi phía bộ
+//   kiểm: chờ trang hết bận (tối đa imageWaitMs), kết quả muộn ghi vào lateRun nhưng ảnh vẫn tính lỗi; trang vẫn bận thì
+//   các ảnh còn lại ghi lỗi "trang vẫn bận sau ảnh <mã>" và dừng trình duyệt đó. Ghi top5, mã đúng ở vị trí 1 / trong 5
+//   đầu, giây. --gap <giây>: giãn giữa 2 ảnh (mặc định 0; Pages dùng 5).
 // - Ghi mọi request: không có request tới openfoodfacts.org; không có POST; chỉ cùng tên miền + jsDelivr / HuggingFace
 //   (gồm máy chủ tải file của HuggingFace *.hf.co / *.huggingface.co).
 // - Vòng 6, bước service worker (ngữ cảnh mới): mở index.html, chờ service worker điều khiển trang, mở chup-mat-do.html,
@@ -29,14 +32,21 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseCsv, rankOf, median, maxOf } from "./lib.mjs";
+import { OCR_CONFIGS } from "../../public/chup-mat-do/ocr-chon.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..", "..");
 const DIST = path.join(ROOT, "dist");
 const PHOTOS = "D:\\quet-ma-vach-full\\test-ocr\\photos";
 const K = "D:\\tmp\\chup-mat-do\\ket-qua";
-const PER_IMAGE_MS = 90000;
+const READ_MS = 60000; // thời gian đọc chữ + tìm cho 1 ảnh (đo: lớn nhất ~10 giây)
 const TEST_TITLE = "Thử nhận ra sản phẩm";
+
+/** Thời gian chờ tối đa cho 1 ảnh = giới hạn nạp của OCR trên trang (ocr-chon.mjs, 1a khi không có --ocr) + 60 giây
+ *  đọc chữ. Dùng cho MỌI ảnh: sau ảnh lỗi trang nhả OCR, ảnh sau nạp lại từ đầu. */
+export function imageWaitMs(ocr) {
+  return OCR_CONFIGS[ocr ?? "1a"].loadTimeoutMs + READ_MS;
+}
 
 /** Đọc tùy chọn dòng lệnh. --base có thì không build (và không dựng server). */
 export function parseCheckArgs(argv) {
@@ -220,17 +230,23 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       await sleep(1000);
       out.ready = await page.evaluate(() => ({ ready: window.__chupMatDo.ready, error: window.__chupMatDo.error || null, title: document.title, ocr: window.__chupMatDo.ocr ?? null, select: document.getElementById("ocrPick")?.value ?? null, notice: document.getElementById("notice")?.textContent || "" }));
       out.r1RequestsOnOpen = r1Requests(reqs).length; // trước lần bấm đầu: phải 0 (kể cả ?ocr=r1)
+      const waitMs = imageWaitMs(args.ocr);
+      out.imageWaitMs = waitMs;
       for (const [k, t] of items.entries()) {
         if (k > 0 && args.gapSeconds > 0) await sleep(args.gapSeconds * 1000);
         const row = { code: t.code };
         const a = Date.now();
+        let before = null;
+        let gotRun = false;
         try {
-          const before = await page.evaluate(() => window.__chupMatDo.runs.length);
+          before = await page.evaluate(() => window.__chupMatDo.runs.length);
           await page.setInputFiles("#pickLibrary", path.join(PHOTOS, t.code, "front.jpg"));
           await page.waitForFunction(() => /Ảnh sẵn sàng|Không mở được/.test(document.getElementById("status").textContent), null, { timeout: 30000 });
           await page.click("#run");
-          await page.waitForFunction((n) => window.__chupMatDo.runs.length > n, before, { timeout: PER_IMAGE_MS, polling: 250 });
-          const r = await page.evaluate(() => JSON.parse(JSON.stringify(window.__chupMatDo.runs.at(-1))));
+          await page.waitForFunction((n) => window.__chupMatDo.runs.length > n, before, { timeout: waitMs, polling: 250 });
+          // đúng kết quả của lần bấm này (chỉ số `before`), không lấy phần tử cuối
+          const r = await page.evaluate((i) => JSON.parse(JSON.stringify(window.__chupMatDo.runs[i])), before);
+          gotRun = true;
           const rank = rankOf(r.top5 || [], t.code);
           Object.assign(row, { ocr: r.ocr ?? null, modelLoadSeconds: r.modelLoadSeconds ?? null, timing: await page.locator("#timing").textContent().catch(() => null), seconds: (Date.now() - a) / 1000, ocrSeconds: r.ocrSeconds ?? null, loadSeconds: r.loadSeconds ?? null, searchMs: r.searchMs ?? null, lines: r.lines ?? null, top5: r.top5 || [], rank, top1: rank === 1, inTop5: rank != null, error: r.error || null, shownHits: await page.locator("#hits li").count() });
         } catch (e) {
@@ -239,6 +255,27 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         out.runs.push(row);
         console.log(`${name} ${t.code}: ${row.error ? `LỖI ${row.error}` : `${row.seconds.toFixed(1)} s (đọc ${row.ocrSeconds?.toFixed(1)} s${row.loadSeconds != null ? `, tải ${row.loadSeconds.toFixed(1)} s` : ""}), rank ${row.rank ?? "-"}, ${row.lines} dòng`}`);
         if (row.error && /closed|crash/i.test(row.error)) break;
+        if (row.error && !gotRun) {
+          // Ảnh lỗi phía bộ kiểm (hết giờ…): chờ trang hết bận để kết quả muộn của ảnh này không bị đếm cho ảnh sau.
+          // Kết quả muộn chỉ ghi lại (lateRun), ảnh này VẪN tính lỗi.
+          const idle = await page.waitForFunction((n) => {
+            const s = window.__chupMatDo;
+            return (n != null && s.runs.length > n) || !document.getElementById("pickLibrary").disabled || !document.getElementById("run").disabled;
+          }, before, { timeout: waitMs, polling: 250 }).then(() => true, () => false);
+          if (before != null) {
+            const late = await page.evaluate((i) => {
+              const r = window.__chupMatDo.runs[i];
+              return r ? JSON.parse(JSON.stringify({ top5: r.top5 || null, error: r.error || null })) : null;
+            }, before).catch(() => null);
+            if (late) row.lateRun = late;
+          }
+          if (!idle) {
+            // trang vẫn bận: các ảnh còn lại ghi lỗi, dừng vòng lặp của trình duyệt này (không để lệch dây chuyền)
+            for (const rest of items.slice(k + 1)) out.runs.push({ code: rest.code, seconds: 0, error: `trang vẫn bận sau ảnh ${t.code}`, top1: false, inTop5: false });
+            console.log(`${name}: trang vẫn bận sau ảnh ${t.code} (chờ ${waitMs / 1000} giây), dừng`);
+            break;
+          }
+        }
       }
       out.requests = requestSummary(reqs, own);
       out.stats = runStats(out.runs);
