@@ -199,6 +199,13 @@ test("chup-mat-do.html: noindex, không gọi API Open Food Facts, không innerH
   assert.doesNotMatch(js, /localStorage|method:\s*"POST"/);
 });
 
+test("chup-mat-do.html (thu-r1 vòng 2): rời / tải lại trang thì xóa dấu R1 (pagehide), quay lại từ bộ nhớ đệm mà còn bận R1 thì ghi lại dấu; dispose muộn có .catch", () => {
+  const html = read("chup-mat-do.html");
+  assert.match(html, /addEventListener\("pagehide", function \([^)]*\) \{[^}]*markClear\(\)/, "pagehide gọi markClear");
+  assert.match(html, /addEventListener\("pageshow", function \((\w+)\) \{[^}]*\1\.persisted[^}]*markSet\(\)/, "pageshow persisted ghi lại dấu");
+  assert.match(html, /Promise\.resolve\(\)\.then\(function \(\) \{ return late\.dispose\(\); \}\)\.catch\(/, "dispose muộn có .catch");
+});
+
 // ---------- danh mục ----------
 test("danh-muc-vn.json: meta nguồn + giấy phép, 1.452 sản phẩm, chỉ code / name / brand / text", () => {
   const cat = JSON.parse(read("chup-mat-do/danh-muc-vn.json"));
