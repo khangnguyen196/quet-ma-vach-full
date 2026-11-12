@@ -147,6 +147,9 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 - **Log**: tắt access log của uvicorn (có IP). Log riêng chỉ có thời gian, phương thức, đường dẫn, mã, số byte, số khung chữ, giây.
   Không IP, không tên file, không chữ OCR.
 - **HEIC**: dùng `pi-heif` (chỉ đọc; libheif + libde265, LGPLv3), không dùng `pillow-heif` (kèm x265, GPL). Chi tiết `LICENSES.md`.
+  Đã thử với 2 ảnh HEIC TỰ VẼ 64 × 48 (`tests/fixtures/khong-xoay.heic`, `xoay6.heic` có orientation 6 / hộp irot):
+  `/ocr` trả 200, cỡ đã xoay (48 × 64) đọc được trước khi giải mã, xoay đúng 1 lần (`tests/test_heic.py`).
+  **Chưa thử với ảnh iPhone thật** (ảnh thật có thể có lưới ô / ảnh phụ / HDR mà ảnh tự vẽ không có).
 - Không có khóa / token / mật khẩu nào trong code.
 
 ## Test
@@ -159,6 +162,18 @@ D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tm
 
 (nhớ đặt biến ổ D ở mục Cài.) Lượt thường bỏ test `real_model` (pytest in "2 deselected", không skip ẩn); thiếu model thì
 test `real_model` FAIL.
+
+- `tests/test_uvicorn.py` chạy uvicorn THẬT trong luồng nền (127.0.0.1, cổng trống ngẫu nhiên, hạn giờ 10 giây, tắt trong
+  `finally`, kiểm cổng đã đóng). `tests/test_gate.py` gọi ASGI thô để điều khiển từng khúc thân yêu cầu (gửi treo, ngắt
+  giữa chừng); mọi lời gọi bọc `asyncio.wait_for`.
+- Ảnh HEIC test (`tests/fixtures/*.heic`, tự vẽ, < 2 KB mỗi ảnh) tạo một lần bằng venv TẠM có `pillow-heif` (KHÔNG vào
+  requirements, không phân phối; máy chủ chỉ dùng `pi-heif` để đọc):
+
+```powershell
+py -3.12 -m venv D:\tmp\may-chu-1\venv-heic-tao
+D:\tmp\may-chu-1\venv-heic-tao\Scripts\python -m pip install pillow-heif   # 12/11/2026: pillow_heif 1.8.1
+D:\tmp\may-chu-1\venv-heic-tao\Scripts\python server\tests\fixtures\tao_heic.py
+```
 
 ## Đo 30 ảnh
 

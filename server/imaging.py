@@ -55,7 +55,8 @@ def detect_format(data):
         return "jpeg"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "png"
-    if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in HEIF_BRANDS:
+    # bytes(...): data có thể là bytearray (upload.read_image), mà lát cắt bytearray không băm được để tra trong set
+    if len(data) >= 12 and data[4:8] == b"ftyp" and bytes(data[8:12]) in HEIF_BRANDS:
         return "heic"
     return None
 

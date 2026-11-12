@@ -26,6 +26,11 @@ def test_detect_format_theo_chu_ky_khong_theo_duoi():
     assert imaging.detect_format(b"\x00\x00\x00\x18ftypavif" + b"\x00" * 8) is None
     assert imaging.detect_format(b"GIF89a....") is None
     assert imaging.detect_format(b"") is None
+    # upload.read_image trả bytearray: mọi nhánh phải chạy với bytearray (lát cắt bytearray không băm được)
+    assert imaging.detect_format(bytearray(b"\x00\x00\x00\x18ftypheic" + b"\x00" * 8)) == "heic"
+    assert imaging.detect_format(bytearray(b"\x00\x00\x00\x18ftypavif" + b"\x00" * 8)) is None
+    assert imaging.detect_format(bytearray(jpeg_bytes())) == "jpeg"
+    assert imaging.detect_format(bytearray(png_bytes())) == "png"
 
 
 def test_fit_size_nhu_ocr_mat():
