@@ -128,6 +128,33 @@ def test_khach_ngat_giua_chung_khong_500_va_tra_cho(make_app, caplog):
     assert not any(r.exc_info for r in caplog.records), "có traceback trong log"
 
 
+# ---------------- (c2) yêu cầu bị HUỶ (task bị cancel) lúc đang đọc thân -> trả chỗ ----------------
+
+def test_huy_yeu_cau_luc_dang_doc_than_tra_cho(make_app):
+    app = make_app(body_timeout_s=GUARD_S)  # hạn đọc thân dài: chỉ việc huỷ mới làm yêu cầu kết thúc
+    reading = asyncio.Event()
+    msgs = iter([{"type": "http.request", "body": body_head(), "more_body": True}])
+
+    async def receive():
+        for m in msgs:
+            return m
+        reading.set()  # máy chủ đã nhận khúc đầu, đang chờ thêm thân ảnh
+        await _forever()
+
+    async def go():
+        task = asyncio.create_task(asgi_post(app, receive))
+        await asyncio.wait_for(reading.wait(), 5)
+        held = app.state.gate.inside  # đang giữ 1 chỗ trong hàng đợi
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return held
+
+    held = asyncio.run(asyncio.wait_for(go(), GUARD_S))
+    assert held == 1
+    assert app.state.gate.inside == 0
+
+
 # ---------------- (d) sau mỗi lỗi, chỗ đã trả ----------------
 
 async def _apost(app, body, ctype, headers=None):
