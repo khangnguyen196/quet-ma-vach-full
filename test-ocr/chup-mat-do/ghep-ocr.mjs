@@ -75,6 +75,17 @@ export function mergeOcr(ocrA, ocrB, { scaleA = 1, scaleB = 1 } = {}) {
   return { status: "ok", lines: mergeLines(ra.lines, rb.lines), seconds, nguon: "ca-hai" };
 }
 
+/** Đọc JSON của một file kết quả; hỏng -> Error tiếng Việt có tên file, exitCode 2 (dòng lệnh thoát mã 2). */
+export function parseResultJson(text, file) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const err = new Error(`File kết quả ${file} không đọc được (JSON hỏng: ${e.message}). Chạy lại t1-ocr.mjs cho bộ đó rồi ghép lại.`);
+    err.exitCode = 2;
+    throw err;
+  }
+}
+
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] != null ? process.argv[i + 1] : def;
@@ -99,7 +110,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const load = (n) => {
     const f = path.join(ketQua, `${n}.json`);
     if (!fs.existsSync(f)) { console.error(`Không có file kết quả ${f}`); process.exit(2); }
-    const j = JSON.parse(fs.readFileSync(f, "utf8"));
+    let j;
+    try { j = parseResultJson(fs.readFileSync(f, "utf8"), f); } catch (e) { console.error(e.message); process.exit(e.exitCode || 2); }
     return { name: n, dir: j.dir, scale: Number(j.scale) > 0 ? Number(j.scale) : 1, summary: j.summary, codes: (j.items || []).map((it) => it.ma) };
   };
   const x = load(xName);
