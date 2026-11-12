@@ -100,8 +100,14 @@ export function pickImages(truth, hasPhoto, all) {
   return all ? items : items.slice(0, 3);
 }
 
+/** Các ảnh còn lại khi trang vẫn bận (hoặc đã đóng) sau ảnh `code`: ghi lỗi, seconds null (không đo, không tính giây). */
+export function busyRows(items, code, reason = "trang vẫn bận") {
+  return items.map((t) => ({ code: t.code, seconds: null, error: `${reason} sau ảnh ${code}`, top1: false, inTop5: false }));
+}
+
 /** Thống kê một trình duyệt: x/n vị trí 1 và 5 đầu (ảnh lỗi tính sai), giây ảnh đầu (gồm tải PaddleOCR) tách riêng,
- *  trung vị / lớn nhất các ảnh sau (ảnh lỗi tính giây thật). */
+ *  trung vị / lớn nhất các ảnh sau (ảnh lỗi tính giây thật; ảnh bị bỏ vì trang vẫn bận có seconds null, median / maxOf
+ *  của lib.mjs bỏ qua nên không tính giây). */
 export function runStats(runs) {
   const n = runs.length;
   const ok = runs.filter((r) => !r.error);
@@ -293,9 +299,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
             if (late) row.lateRun = late;
           }
           if (!idle) {
-            // trang vẫn bận: các ảnh còn lại ghi lỗi, dừng vòng lặp của trình duyệt này (không để lệch dây chuyền)
-            for (const rest of items.slice(k + 1)) out.runs.push({ code: rest.code, seconds: 0, error: `trang vẫn bận sau ảnh ${t.code}`, top1: false, inTop5: false });
-            console.log(`${name}: trang vẫn bận sau ảnh ${t.code} (chờ ${waitMs / 1000} giây), dừng`);
+            // trang vẫn bận (hoặc đã đóng): các ảnh còn lại ghi lỗi, seconds null (không tính giây), dừng vòng lặp
+            // của trình duyệt này (không để lệch dây chuyền)
+            const reason = page.isClosed() ? "trang đã đóng" : "trang vẫn bận";
+            out.runs.push(...busyRows(items.slice(k + 1), t.code, reason));
+            console.log(`${name}: ${reason} sau ảnh ${t.code}${reason === "trang vẫn bận" ? ` (chờ ${waitMs / 1000} giây)` : ""}, dừng`);
             break;
           }
         }
