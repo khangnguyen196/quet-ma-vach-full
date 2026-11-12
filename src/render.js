@@ -439,3 +439,32 @@ export function renderPantry(list, { editingId = null, today = new Date() } = {}
   }).join("");
   return `<ul class="pantry-list">${items}</ul>`;
 }
+
+// ---- Tài khoản (đăng nhập Google qua Supabase, đợt dang-nhap; không bắt buộc) ----
+
+/** Dòng giải thích dưới nút đăng nhập. */
+export const AUTH_NOTE = "Đăng nhập lưu email của bạn ở Supabase để chống dùng chùa máy chủ, không dùng vào việc khác. "
+  + "App đang ở chế độ thử: chỉ email được thêm vào danh sách mới đăng nhập được. "
+  + "Quét mã, tủ đồ, dị ứng, so sánh, xuất / nhập vẫn dùng được không cần đăng nhập.";
+
+/**
+ * HTML khối tài khoản từ authView() (src/auth.js). Mọi email / câu lỗi qua esc().
+ * Nút có data-auth="login" / "logout" (main.js bắt bằng 1 listener trên khối).
+ */
+export function renderAuthBox(view) {
+  if (!view?.visible) return "";
+  const error = view.error ? `<p class="auth-msg warn" role="alert">${esc(view.error)}</p>` : "";
+  const disabled = view.busy ? " disabled" : "";
+  if (view.mode === "loading") {
+    return `<p class="auth-status">Đang kiểm đăng nhập…</p>${error}`;
+  }
+  if (view.mode === "unavailable") {
+    return `<p class="auth-status">Chưa tải được phần đăng nhập. Các tính năng khác vẫn dùng bình thường.</p>${error}`;
+  }
+  if (view.mode === "signedIn") {
+    return `<p class="auth-status">Đã đăng nhập: <strong class="auth-email">${esc(view.email || "(không rõ email)")}</strong></p>
+<div class="actions auth-actions"><button class="btn" type="button" data-auth="logout"${disabled}>Đăng xuất</button></div>${error}`;
+  }
+  return `<div class="actions auth-actions"><button class="btn" type="button" data-auth="login"${disabled}>Đăng nhập bằng Google</button></div>
+<p class="auth-note">${esc(AUTH_NOTE)}</p>${error}`;
+}

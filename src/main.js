@@ -4,8 +4,9 @@ import { getProduct, isProductCached, normalize, cleanAllergyProfile, matchAller
 import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
-  renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames
+  renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox
 } from "./render.js";
+import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
   getAllergyProfile, setAllergyProfile, importPantryData, isAllergyProfileKey
@@ -699,3 +700,97 @@ compareForm.addEventListener("submit", async (ev) => {
   say(compareMsg);
   drawCompare();
 });
+
+// ---- Tài khoản: đăng nhập Google qua Supabase (đợt dang-nhap) ----
+// KHÔNG bắt buộc: mọi tính năng ở trên chạy như cũ khi chưa đăng nhập / không tải được thư viện.
+// Thiếu biến VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY → không hiện khối, không tải thư viện.
+// Thư viện @supabase/supabase-js chỉ import động khi có biến; chỉ dùng phần auth.
+const authBox = $("#authBox");
+// Vite thay 2 biến này bằng chuỗi cố định lúc build: thiếu biến thì điều kiện luôn sai và Rollup bỏ hẳn
+// import("@supabase/supabase-js") (bản build không có file thư viện nào). authConfig() vẫn kiểm kỹ (https…) lúc chạy.
+const loadSupabase = (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+  ? () => import("@supabase/supabase-js")
+  : null;
+const authCfg = loadSupabase ? authConfig(import.meta.env) : null;
+let authClient = null;
+let authState = { configured: !!authCfg, loading: true, unavailable: false, session: null, error: "", busy: false };
+const authListeners = new Set(); // khu thử dev (dev-ocr.js) nghe đăng nhập / đăng xuất
+
+function setAuth(patch) {
+  authState = { ...authState, ...patch };
+  authBox.innerHTML = renderAuthBox(authView(authState));
+  authBox.hidden = !authCfg;
+  for (const fn of authListeners) {
+    try { fn(!!authState.session); } catch (e) { console.error(e); }
+  }
+}
+
+async function initAuth() {
+  if (!authCfg) { authBox.hidden = true; return; }
+  const urlError = authErrorFromUrl(location.href); // quay về từ Google với lỗi (hủy, email không trong danh sách thử)
+  setAuth({});
+  let createClient;
+  try {
+    ({ createClient } = await loadSupabase());
+  } catch (e) {
+    console.error(e);
+    setAuth({ loading: false, unavailable: true, error: "Không tải được phần đăng nhập (kiểm tra mạng rồi tải lại trang)." });
+    return;
+  }
+  try {
+    authClient = createClient(authCfg.url, authCfg.key, {
+      auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true, autoRefreshToken: true }
+    });
+    // Không gọi hàm supabase khác bên trong callback này (thư viện khuyên vậy để tránh kẹt khóa).
+    authClient.auth.onAuthStateChange((_event, session) => { setAuth({ loading: false, session }); });
+    // getSession() chờ thư viện đổi ?code= lấy phiên (detectSessionInUrl) xong mới trả về.
+    const { data, error } = await authClient.auth.getSession();
+    if (error) console.warn("Đăng nhập:", error);
+    setAuth({
+      loading: false,
+      session: data?.session ?? null,
+      error: urlError || (error ? "Đăng nhập không thành công. Thử lại sau." : "")
+    });
+  } catch (e) {
+    console.error(e);
+    setAuth({ loading: false, session: null, error: urlError || "Đăng nhập không thành công. Thử lại sau." });
+  } finally {
+    // Đổi mã xong (thành công hay lỗi) mới xóa ?code= / ?error= khỏi thanh địa chỉ, giữ tham số khác.
+    if (hasAuthParams(location.href)) history.replaceState(history.state, "", cleanAuthParams(location.href));
+  }
+}
+
+authBox.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-auth]");
+  if (!btn || !authClient || authState.busy) return;
+  setAuth({ busy: true, error: "" });
+  try {
+    if (btn.dataset.auth === "login") {
+      // Chuyển sang trang Google; quay về đúng trang app (Pages hoặc https://localhost:5173/).
+      const { error } = await authClient.auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirectUrl(location) } });
+      if (error) throw error;
+      return; // trình duyệt đang chuyển trang: giữ nút ở trạng thái bận
+    }
+    const { error } = await authClient.auth.signOut();
+    if (error) throw error;
+    setAuth({ busy: false, session: null });
+  } catch (e) {
+    console.error(e);
+    setAuth({ busy: false, error: btn.dataset.auth === "login" ? "Không mở được trang đăng nhập Google. Thử lại sau." : "Chưa đăng xuất được. Thử lại sau." });
+  }
+});
+
+initAuth();
+
+// Khu thử máy chủ OCR: CHỈ khi chạy dev (npm run dev). Bản build bỏ hẳn đoạn này và file dev-ocr.js.
+if (import.meta.env.DEV) {
+  import("./dev-ocr.js").then((m) => m.initDevOcr({
+    anchor: authBox,
+    async getAccessToken() {
+      if (!authClient) return "";
+      const { data } = await authClient.auth.getSession();
+      return data?.session?.access_token || "";
+    },
+    onAuthChange(fn) { authListeners.add(fn); fn(!!authState.session); }
+  })).catch((e) => console.error(e));
+}

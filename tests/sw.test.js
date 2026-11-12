@@ -367,6 +367,53 @@ describe("precacheList: danh sách lưu sẵn không có file .wasm (sua-cuoi)",
   });
 });
 
+describe("đăng nhập Supabase: service worker không giữ gì của đăng nhập (dang-nhap)", () => {
+  const SB = "https://abcdefgh.supabase.co";
+
+  test("request tới supabase.co (auth, token, user) → skip, kể cả khi mở trang", () => {
+    for (const url of [SB + "/auth/v1/token?grant_type=pkce", SB + "/auth/v1/user", SB + "/auth/v1/authorize?provider=google",
+      "https://accounts.google.com/o/oauth2/v2/auth?client_id=x"]) {
+      for (const mode of ["cors", "no-cors", "navigate"]) assert.equal(routeFor(url, SCOPE, mode), "skip", url + " " + mode);
+    }
+  });
+
+  test("mở trang quay về từ Google (/quet-ma-vach-full/?code=abc) → navigate; GET khác (không mở trang) cùng địa chỉ → skip", () => {
+    assert.equal(routeFor(SCOPE + "?code=abc", SCOPE, "navigate"), "navigate");
+    assert.equal(routeFor(SCOPE + "?code=abc", SCOPE, "cors"), "skip");
+    assert.equal(routeFor(SCOPE + "?code=abc", SCOPE, "no-cors"), "skip");
+    assert.equal(routeFor(SCOPE + "?error=access_denied&error_description=x", SCOPE, "same-origin"), "skip");
+  });
+
+  test("sw.js sinh ra: nhánh navigate không có cache.put (không lưu trang có ?code=)", () => {
+    const code = buildServiceWorker({ version: "vAuth", files: FILES });
+    const start = code.indexOf('if (route === "navigate")');
+    const end = code.indexOf("return;", start);
+    assert.ok(start > 0 && end > start);
+    const navBranch = code.slice(start, end);
+    assert.ok(!navBranch.includes("cache.put") && !navBranch.includes(".put("), navBranch);
+    // put duy nhất của cả file nằm trong install (danh sách lưu sẵn)
+    assert.equal(code.split(".put(").length - 1, 1);
+    assert.ok(code.indexOf(".put(") < code.indexOf('addEventListener("activate"'));
+  });
+
+  test("mở trang ?code=abc chạy thật trong sw giả: lấy mạng, không ghi cache", async () => {
+    const code = buildServiceWorker({ version: "vAuth", files: FILES });
+    const { listeners, log } = loadSw(code, { cacheNames: ["qmv-shell-vAuth"] });
+    const res = await dispatchFetch(listeners, { method: "GET", url: SCOPE + "?code=abc", mode: "navigate" });
+    assert.equal(res.body, "mạng:" + SCOPE + "?code=abc");
+    assert.deepEqual(log.put, []);
+  });
+
+  test("PRECACHE không có mục nào chứa 'code=' / 'supabase'", () => {
+    const names = ["index.html", "assets/index-abc.js", "assets/index-abc.css", "assets/dist-xyz.js", "manifest.webmanifest", "icons/icon-192.png"];
+    const code = buildServiceWorker({ version: "vAuth", files: swBuild.precacheList(names) });
+    const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(code)[1]);
+    assert.ok(precache.length > 0);
+    assert.ok(precache.every((f) => !f.includes("code=") && !f.toLowerCase().includes("supabase")), precache.join(", "));
+    assert.ok(!code.toLowerCase().includes("supabase"));
+  });
+});
+
 describe("precacheList: không lưu sẵn trang thử ocr-thu* / chup-mat-do* (chup-mat-do vòng 5)", () => {
   // Trang thử nằm trong public/ nên plugin gom vào danh sách; routeFor bỏ qua chúng ("skip") nên lưu sẵn là phí.
   const NAMES = [

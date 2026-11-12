@@ -430,3 +430,32 @@ table.cmp-table .empty { font-size: 13px; }
 }
 .update-bar[hidden] { display: none; }
 .update-bar .btn { flex: 0 0 auto; min-height: 44px; }
+
+/* Khối tài khoản (đăng nhập Google, không bắt buộc; src/render.js renderAuthBox). Ẩn khi thiếu biến môi trường */
+.auth-box {
+  margin-bottom: 18px; padding: 12px 14px;
+  border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--well);
+}
+.auth-box[hidden] { display: none; }
+.auth-box .auth-actions { margin-top: 0; }
+.auth-box .auth-status + .auth-actions { margin-top: 10px; }
+.auth-status { font-size: 15px; }
+.auth-email { overflow-wrap: anywhere; }
+.auth-note { margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+.auth-msg { margin-top: 8px; font-size: 14px; }
+.auth-msg.warn { color: var(--warn); }
+
+/* Khu thử máy chủ OCR: CHỈ khi chạy dev (src/dev-ocr.js), không có trong bản build */
+.dev-ocr {
+  margin-bottom: 18px; padding: 12px 14px;
+  border: 2px dashed var(--warn); border-radius: 6px;
+}
+.dev-ocr[hidden] { display: none; }
+.dev-ocr h2 { font-size: 17px; }
+.dev-ocr p { margin-top: 6px; font-size: 14px; color: var(--ink-2); }
+.dev-ocr .msg.warn { color: var(--warn); }
+.dev-ocr pre {
+  margin: 8px 0 0; padding: 8px; max-height: 240px; overflow: auto;
+  background: var(--well); border-radius: 4px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
