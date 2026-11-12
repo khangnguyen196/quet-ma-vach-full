@@ -75,6 +75,45 @@ def test_decode_moi_giong_tung_byte_chuoi_cu(fmt, mode, orientation):
         assert orig == (37, 23)
 
 
+def extra_png(kind: str):
+    """Thêm mode PNG ít gặp (GỢI Ý vòng 2): (ảnh, tham số lưu, mode mong đợi khi mở lại, transparency mong đợi)."""
+    base = pattern("RGB")
+    if kind == "1":
+        return base.convert("1"), {}, "1", None
+    if kind == "LA":
+        return base.convert("LA"), {}, "LA", None
+    if kind == "I;16":  # 16 bit xám, dùng cả dải 0..65535
+        return base.convert("L").convert("I").point(lambda v: v * 257).convert("I;16"), {}, "I;16", None
+    if kind == "P-transparency":
+        return base.convert("P", palette=Image.Palette.ADAPTIVE, colors=64), {"transparency": 5}, "P", 5
+    if kind == "RGB-tRNS":
+        return base, {"transparency": (250, 20, 40)}, "RGB", (250, 20, 40)
+    raise ValueError(kind)
+
+
+EXTRA_PNG = ["1", "LA", "I;16", "P-transparency", "RGB-tRNS"]
+
+
+@pytest.mark.parametrize("orientation", range(1, 9))
+@pytest.mark.parametrize("kind", EXTRA_PNG)
+def test_decode_png_mode_it_gap_giong_tung_byte_chuoi_cu(kind, orientation):
+    img, kw, mode, transparency = extra_png(kind)
+    if orientation != 1:
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+        kw = {**kw, "exif": exif.tobytes()}
+    buf = io.BytesIO()
+    img.save(buf, "PNG", **kw)
+    data = buf.getvalue()
+    with Image.open(io.BytesIO(data)) as im:
+        assert im.mode == mode and im.info.get("transparency") == transparency
+        assert im.getexif().get(0x0112, 1) == orientation
+    out, orig = imaging.decode(data, 10**6)
+    ref, ref_orig = reference_decode(data)
+    assert out.mode == "RGB" and orig == ref_orig and out.size == ref.size
+    assert out.tobytes() == ref.tobytes()
+
+
 @pytest.mark.parametrize("fmt,mode,orientation", [("JPEG", "RGB", 6), ("JPEG", "CMYK", 8), ("PNG", "RGBA", 3), ("PNG", "P", 5)])
 def test_decode_moi_giong_chuoi_cu_khi_phai_thu_nho(fmt, mode, orientation):
     data = encode(pattern(mode, (1900, 1100)), fmt, orientation)
