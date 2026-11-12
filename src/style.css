@@ -431,9 +431,10 @@ table.cmp-table .empty { font-size: 13px; }
 .update-bar[hidden] { display: none; }
 .update-bar .btn { flex: 0 0 auto; min-height: 44px; }
 
-/* Khối tài khoản (đăng nhập Google, không bắt buộc; src/render.js renderAuthBox). Ẩn khi thiếu biến môi trường */
+/* Khối tài khoản (đăng nhập Google, không bắt buộc; src/render.js renderAuthBox). Cuối trang, ngay trước footer.
+   Ẩn khi thiếu biến môi trường */
 .auth-box {
-  margin-bottom: 18px; padding: 12px 14px;
+  margin-top: 32px; padding: 12px 14px;
   border: 1px solid var(--rule); border-radius: 6px;
   background: var(--well);
 }

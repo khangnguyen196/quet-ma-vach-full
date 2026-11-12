@@ -712,6 +712,10 @@ const loadSupabase = (import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_
   ? () => import("@supabase/supabase-js")
   : null;
 const authCfg = loadSupabase ? authConfig(import.meta.env) : null;
+if (loadSupabase && !authCfg) {
+  // có biến nhưng sai (URL không https, hoặc dán nhầm khóa BÍ MẬT sb_secret_ / service_role): không bật đăng nhập
+  console.warn("Đăng nhập: biến VITE_SUPABASE_* không hợp lệ (cần URL https và publishable key, không phải khóa bí mật). Bỏ qua đăng nhập.");
+}
 let authClient = null;
 let authState = { configured: !!authCfg, loading: true, unavailable: false, session: null, error: "", busy: false };
 const authListeners = new Set(); // khu thử dev (dev-ocr.js) nghe đăng nhập / đăng xuất
@@ -742,7 +746,10 @@ async function initAuth() {
       auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true, autoRefreshToken: true }
     });
     // Không gọi hàm supabase khác bên trong callback này (thư viện khuyên vậy để tránh kẹt khóa).
-    authClient.auth.onAuthStateChange((_event, session) => { setAuth({ loading: false, session }); });
+    // Có phiên (đăng nhập xong / làm mới token) thì xóa câu lỗi cũ (vd lần trước hủy đăng nhập).
+    authClient.auth.onAuthStateChange((_event, session) => {
+      setAuth(session ? { loading: false, session, error: "" } : { loading: false, session });
+    });
     // getSession() chờ thư viện đổi ?code= lấy phiên (detectSessionInUrl) xong mới trả về.
     const { data, error } = await authClient.auth.getSession();
     if (error) console.warn("Đăng nhập:", error);
@@ -771,13 +778,20 @@ authBox.addEventListener("click", async (ev) => {
       if (error) throw error;
       return; // trình duyệt đang chuyển trang: giữ nút ở trạng thái bận
     }
-    const { error } = await authClient.auth.signOut();
+    // scope "local": chỉ đăng xuất trên máy / trình duyệt này, máy khác vẫn giữ phiên
+    const { error } = await authClient.auth.signOut({ scope: "local" });
     if (error) throw error;
     setAuth({ busy: false, session: null });
   } catch (e) {
     console.error(e);
     setAuth({ busy: false, error: btn.dataset.auth === "login" ? "Không mở được trang đăng nhập Google. Thử lại sau." : "Chưa đăng xuất được. Thử lại sau." });
   }
+});
+
+// Bấm "Quay lại" từ trang Google: trình duyệt (nhất là Safari / Chrome điện thoại) lấy lại trang từ bộ nhớ (bfcache)
+// kèm busy = true, nút "Đăng nhập bằng Google" sẽ mờ mãi. Trang hiện lại từ bộ nhớ thì mở khóa nút.
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted && authState.busy) setAuth({ busy: false });
 });
 
 initAuth();

@@ -37,7 +37,25 @@ describe("authConfig(env)", () => {
       assert.equal(auth.authConfig({ VITE_SUPABASE_URL: url, VITE_SUPABASE_PUBLISHABLE_KEY: KEY_OK }), null, url);
     }
   });
+
+  test("dán nhầm khóa BÍ MẬT (sb_secret_…, JWT role service_role) → null", () => {
+    for (const key of ["sb_secret_khoa-bi-mat-gia", "  sb_secret_co-khoang-trang ", jwtOf({ iss: "supabase", role: "service_role" })]) {
+      assert.equal(auth.authConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: key }), null, key);
+    }
+  });
+
+  test("khóa công khai vẫn nhận: sb_publishable_…, JWT anon cũ, 3 phần không giải được, gần giống tiền tố", () => {
+    for (const key of [KEY_OK, jwtOf({ iss: "supabase", role: "anon" }), "a.b.c", "x.@@@.y", "sb_secretX"]) {
+      assert.deepEqual(auth.authConfig({ VITE_SUPABASE_URL: URL_OK, VITE_SUPABASE_PUBLISHABLE_KEY: key }), { url: URL_OK, key }, key);
+    }
+  });
 });
+
+/** JWT giả (chữ ký rác): chỉ để kiểm phần payload. */
+function jwtOf(payload) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "HS256", typ: "JWT" })}.${b64(payload)}.chu-ky-gia`;
+}
 
 describe("redirectUrl(location)", () => {
   test("trang Pages: giữ nguyên, có / cuối", () => {
@@ -81,6 +99,32 @@ describe("cleanAuthParams(url)", () => {
   test("nhận URL object", () => {
     assert.equal(auth.cleanAuthParams(new URL("https://localhost:5173/?code=z&q=2")), "https://localhost:5173/?q=2");
   });
+
+  test("phần sau # : bỏ lỗi / mã / token, giữ khóa khác; # rỗng thì bỏ hẳn dấu #", () => {
+    assert.equal(auth.cleanAuthParams(PAGES + "#error=access_denied&error_code=403&error_description=Huy"), PAGES);
+    assert.equal(
+      auth.cleanAuthParams(PAGES + "#access_token=aaa&refresh_token=bbb&token_type=bearer&expires_in=3600&expires_at=1&provider_token=ccc"),
+      PAGES
+    );
+    assert.equal(auth.cleanAuthParams(PAGES + "?x=1#error=server_error&tab=2"), PAGES + "?x=1#tab=2");
+    assert.equal(auth.cleanAuthParams(PAGES + "?code=abc#access_token=aaa"), PAGES);
+    assert.equal(auth.cleanAuthParams(PAGES + "#"), PAGES + "#", "không có khóa đăng nhập → giữ nguyên");
+  });
+
+  test("# không có khóa đăng nhập → giữ nguyên từng ký tự", () => {
+    assert.equal(auth.cleanAuthParams(PAGES + "#tu-do"), PAGES + "#tu-do");
+    assert.equal(auth.cleanAuthParams(PAGES + "#a=1&b=%20x"), PAGES + "#a=1&b=%20x");
+  });
+});
+
+describe("hasAuthParams(url)", () => {
+  test("tính cả ? và #", () => {
+    assert.equal(auth.hasAuthParams(PAGES), false);
+    assert.equal(auth.hasAuthParams(PAGES + "?a=1#tu-do"), false);
+    assert.equal(auth.hasAuthParams(PAGES + "?code=abc"), true);
+    assert.equal(auth.hasAuthParams(PAGES + "#error=access_denied"), true);
+    assert.equal(auth.hasAuthParams(PAGES + "#access_token=aaa"), true);
+  });
 });
 
 describe("authErrorFromUrl(url)", () => {
@@ -91,6 +135,26 @@ describe("authErrorFromUrl(url)", () => {
     assert.match(msg, /hủy|danh sách/i);
     assert.ok(!msg.includes("User cancelled"), "không chép nguyên câu tiếng Anh từ địa chỉ");
     assert.ok(auth.authErrorFromUrl(PAGES + "?error=server_error").length > 0);
+  });
+
+  test("lỗi sau dấu # (#error=…) cũng nhận ra", () => {
+    const msg = auth.authErrorFromUrl(PAGES + "#error=access_denied&error_code=403&error_description=User+cancelled");
+    assert.match(msg, /hủy|danh sách/i);
+    assert.ok(!msg.includes("User cancelled"));
+    assert.ok(auth.authErrorFromUrl(PAGES + "#error_description=Loi+gi+do").length > 0, "chỉ có error_description");
+    assert.ok(auth.authErrorFromUrl(PAGES + "#error=server_error").length > 0);
+    assert.equal(auth.authErrorFromUrl(PAGES + "#access_token=aaa"), "");
+    assert.equal(auth.authErrorFromUrl(PAGES + "#tu-do"), "");
+  });
+});
+
+describe("renderAuthBox(view) (src/render.js)", () => {
+  test("dòng thông báo lỗi có role=status + aria-live=polite, lỗi được escape", async () => {
+    const { renderAuthBox } = await import("../src/render.js");
+    const html = renderAuthBox({ visible: true, mode: "signedOut", email: "", error: "<b>lỗi</b>", busy: false });
+    assert.match(html, /<p class="auth-msg warn" role="status" aria-live="polite">&lt;b&gt;lỗi&lt;\/b&gt;<\/p>/);
+    assert.ok(!html.includes('role="alert"'));
+    assert.ok(!renderAuthBox({ visible: true, mode: "signedOut", email: "", error: "", busy: false }).includes("auth-msg"));
   });
 });
 

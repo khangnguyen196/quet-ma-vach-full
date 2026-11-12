@@ -37,9 +37,6 @@
     <p>Quét mã trên gói mì, chai nước, hộp bánh… để xem thành phần và dinh dưỡng.</p>
   </header>
 
-  <!-- Tài khoản (đăng nhập Google qua Supabase, không bắt buộc): main.js chỉ hiện khi có biến môi trường -->
-  <section id="authBox" class="auth-box" aria-label="Tài khoản" aria-live="polite" hidden></section>
-
   <!-- Màn Tra cứu, màn Tủ đồ và màn So sánh: chỉ hiện 1 màn, các màn kia có thuộc tính hidden -->
   <div id="screenLookup">
   <section aria-label="Quét mã">
@@ -120,6 +117,10 @@
     <p id="compareMsg" class="msg" role="status" aria-live="polite"></p>
     <div id="compareResult"></div>
   </section>
+
+  <!-- Tài khoản (đăng nhập Google qua Supabase, không bắt buộc): cuối trang, ngay trước footer, để nút quét luôn ở trên.
+       main.js chỉ hiện khi có biến môi trường. Dòng thông báo lỗi bên trong tự có role="status" (render.js). -->
+  <section id="authBox" class="auth-box" aria-label="Tài khoản" hidden></section>
 
   <footer>
     Dữ liệu: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> (cộng đồng đóng góp, có thể thiếu hoặc sai)

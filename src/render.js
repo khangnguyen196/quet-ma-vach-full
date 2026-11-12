@@ -453,7 +453,7 @@ export const AUTH_NOTE = "Đăng nhập lưu email của bạn ở Supabase đ�
  */
 export function renderAuthBox(view) {
   if (!view?.visible) return "";
-  const error = view.error ? `<p class="auth-msg warn" role="alert">${esc(view.error)}</p>` : "";
+  const error = view.error ? `<p class="auth-msg warn" role="status" aria-live="polite">${esc(view.error)}</p>` : "";
   const disabled = view.busy ? " disabled" : "";
   if (view.mode === "loading") {
     return `<p class="auth-status">Đang kiểm đăng nhập…</p>${error}`;
