@@ -16,7 +16,7 @@
 //   đa imageWaitMs = giới hạn nạp của OCR trên trang (ocr-chon.mjs: 1a 120 giây, R1 180 giây) + 60 giây đọc chữ (mọi
 //   ảnh, vì sau ảnh lỗi trang nạp lại OCR); lấy đúng kết quả của lần bấm (runs[chỉ số trước khi bấm]). Ảnh lỗi phía bộ
 //   kiểm: chờ trang hết bận (tối đa imageWaitMs), kết quả muộn ghi vào lateRun nhưng ảnh vẫn tính lỗi; trang vẫn bận thì
-//   các ảnh còn lại ghi lỗi "trang vẫn bận sau ảnh <mã>" và dừng trình duyệt đó. Ghi top5, mã đúng ở vị trí 1 / trong 5
+//   các ảnh còn lại ghi lỗi "trang vẫn bận sau ảnh <mã>" (seconds null, không tính giây) và dừng trình duyệt đó. Ghi top5, mã đúng ở vị trí 1 / trong 5
 //   đầu, giây. --gap <giây>: giãn giữa 2 ảnh (mặc định 0; Pages dùng 5).
 // - Ghi mọi request: không có request tới openfoodfacts.org; không có POST; chỉ cùng tên miền + jsDelivr / HuggingFace
 //   (gồm máy chủ tải file của HuggingFace *.hf.co / *.huggingface.co).
