@@ -767,7 +767,8 @@ async function initAuth() {
     });
     // getSession() chờ thư viện đổi ?code= lấy phiên (detectSessionInUrl) xong mới trả về.
     // Thứ tự với INITIAL_SESSION không chắc, nhưng kết quả như nhau: có phiên thì không có câu lỗi;
-    // chưa có phiên thì sự kiện không xóa câu lỗi (authErrorAfterSession).
+    // chưa có phiên thì sự kiện không xóa câu lỗi (điều kiện clearError ở trên), câu lỗi do
+    // authErrorAfterSession đặt.
     const { data, error } = await authClient.auth.getSession();
     if (error) console.warn("Đăng nhập:", error);
     const session = data?.session ?? null;

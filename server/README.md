@@ -166,7 +166,7 @@ Lưu ý khi dùng `server\.env` với `chay-thu.ps1`:
    npm ci
    D:\tmp\may-chu-1\venv\Scripts\python -m pip install -r server\requirements.txt
    ```
-   Lệnh `git log -5 --oneline`: trong 5 dòng phải thấy commit của đợt dang-nhap (vd "docs(dang-nhap): …").
+   Lệnh `git log -5 --oneline`: trong 5 dòng phải thấy commit của đợt dang-nhap (vd "docs(dang-nhap): …"); nếu main đã có đợt mới hơn thì dùng `git log --oneline --grep dang-nhap -1`.
    (thư mục chính không tự cập nhật khi nhánh lên `origin/main`; `node_modules` ở đó chưa có `@supabase/supabase-js`;
    venv chưa có PyJWT / cryptography).
    Kiểm Supabase → Authentication → URL Configuration → Redirect URLs có `https://localhost:5173/` (thiếu thì Supabase
