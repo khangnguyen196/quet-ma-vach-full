@@ -45,7 +45,8 @@ powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 -Threads 1 # giốn
 Có `server\.env` thì script đọc các dòng `KEY=VALUE` trước (bỏ dòng trống / `#`, bỏ BOM, bỏ dấu nháy bao ngoài), CHỈ đặt
 biến chưa có trong môi trường, không in tên hay giá trị nào (chỉ in số biến đã đặt). `-NoEnvFile`: bỏ qua file;
 `-EnvFile <đường dẫn>`: đọc file khác (vd chạy từ worktree: `-EnvFile D:\quet-ma-vach-full\server\.env`).
-Sau đó `AUTH_MODE` vẫn trống thì đặt `off`. Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy
+Sau đó `AUTH_MODE` vẫn trống thì đặt `off`, rồi in đúng 1 dòng `AUTH_MODE=<giá trị>` (không in biến nào khác). Script đặt
+biến ổ D, `OCR_THREADS` (theo `-Threads`), `CORS_ALLOW_LOCALHOST=1`, rồi chạy
 `uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log --no-proxy-headers --limit-concurrency 16`.
 **Chỉ 127.0.0.1** (không 0.0.0.0, không mở ra mạng ngoài). Tắt: Ctrl+C. Kiểm đã tắt:
 `Get-NetTCPConnection -LocalPort 8765 -State Listen` không ra gì.
@@ -129,7 +130,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 | 422 | yêu cầu không hợp lệ khác |
 | 401 | (`AUTH_MODE=supabase`) thiếu token, token sai / hết hạn / alg không nhận; có `WWW-Authenticate: Bearer` |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, hoặc quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng; có `Retry-After` |
-| 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi); cấu hình đăng nhập sai lọt qua bước khởi động ("Cấu hình đăng nhập sai trên máy chủ.", không bao giờ cho qua) |
+| 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi); lỗi lạ trong lúc kiểm token ("Lỗi khi kiểm đăng nhập trên máy chủ.", có CORS, log chỉ tên lỗi, không bao giờ cho qua); cấu hình đăng nhập sai lọt qua bước khởi động ("Cấu hình đăng nhập sai trên máy chủ.", không bao giờ cho qua) |
 | 503 | hàng đợi đầy, chưa nạp xong model, hoặc (`AUTH_MODE=supabase`) chưa kiểm được token vì Supabase lỗi / không trả lời; có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
 
 ## Đăng nhập (`AUTH_MODE=supabase`, đợt `dang-nhap`)
@@ -140,6 +141,25 @@ Mục đích: chống dùng chùa máy chủ OCR. App đăng nhập Google qua S
 **Bật**: điền `server/.env` (chép từ `.env.example`): `AUTH_MODE=supabase`, `SUPABASE_URL=https://<ref>.supabase.co`,
 `SUPABASE_PUBLISHABLE_KEY=<publishable key>` (khóa công khai, lấy ở Supabase → Project Settings → API Keys). Rồi chạy
 `server\chay-thu.ps1` như trên. Thiếu / sai 1 trong 2 biến thì máy chủ không khởi động (câu lỗi chỉ nêu tên biến).
+Dán nhầm khóa BÍ MẬT vào `SUPABASE_PUBLISHABLE_KEY` (tiền tố `sb_secret_`, hoặc JWT có `role = service_role`) cũng không
+khởi động (app trên trình duyệt cũng bỏ qua đăng nhập với khóa như vậy); khi đó đổi khóa bí mật đó trên Supabase.
+
+Lưu ý khi dùng `server\.env` với `chay-thu.ps1`:
+- Script in `AUTH_MODE=<giá trị>` lúc chạy: thấy `off` mà định bật đăng nhập thì kiểm lại `-EnvFile` (chạy từ worktree
+  thì file `.env` nằm ở thư mục chính).
+- Dòng `KEY=` (giá trị rỗng) vẫn được đếm là "biến mới" và đặt biến rỗng (máy chủ coi rỗng như chưa điền).
+- `OCR_THREADS` và `CORS_ALLOW_LOCALHOST` do script tự đặt SAU khi đọc file (theo tham số `-Threads`, và luôn 1), nên ghi
+  trong `.env` không có tác dụng: đổi bằng tham số script.
+
+**Chủ dự án tự kiểm với project thật** (máy không làm thay vì không được đọc `server\.env`), chạy từ thư mục chính
+`D:\quet-ma-vach-full` sau khi `main` đã có đợt `dang-nhap`:
+1. `powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1` → thấy `AUTH_MODE=supabase` và 1 dòng log
+   `JWKS: n khóa (…)` (ghi lại n và alg: ES256 / RS256, hay "project dùng HS256").
+2. Cửa sổ khác: `curl.exe -i -F "image=@test-ocr\photos\8934572260543\front.jpg" http://127.0.0.1:8765/ocr` → **401**
+   (không token); thêm `-H "Authorization: Bearer abc"` → **401**.
+3. `npm run dev`, mở `https://localhost:5173`, đăng nhập Google (email trong danh sách thử), dùng khu "Thử máy chủ OCR
+   (chỉ khi chạy dev)" ở cuối trang chọn 1 ảnh → **200** + chữ. Đăng xuất rồi thử lại → khu thử ẩn.
+4. Tắt cả hai (Ctrl+C), kiểm cổng 8765 / 5173 đã đóng.
 Lúc khởi động máy chủ tải JWKS 1 lần và ghi 1 dòng log `JWKS: n khóa (ES256 …)` (không có địa chỉ); tải lỗi thì vẫn
 khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. KHÔNG cần (và không bao giờ đọc) JWT secret / service_role.
 
@@ -162,8 +182,8 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 - Gọi mạng (JWKS, `/user`) chạy trong threadpool, không chặn vòng sự kiện.
 - **Giới hạn đã biết**: token đã đăng xuất (hoặc tài khoản bị xoá) VẪN qua tới khi token hết hạn (~1 giờ, mặc định của
   Supabase) với đường JWKS, vì kiểm tại máy không hỏi Supabase; đường `/user` thì chậm tối đa 60 giây (lưu tạm).
-- Test: `tests/test_auth.py` (khóa ES256 / RS256 tự sinh, JWKS / `/user` giả, đồng hồ giả, 2 test urllib thật với
-  `http.server` trên 127.0.0.1; không test nào gọi Internet).
+- Test: `tests/test_auth.py` (khóa ES256 / RS256 tự sinh, JWKS / `/user` giả, đồng hồ giả, 4 test urllib thật với
+  `http.server` trên 127.0.0.1: tải được, hết giờ, JWKS trả 302 không đi theo, JWKS > 64 KB; không test nào gọi Internet).
 
 ## Giới hạn và an toàn
 
@@ -204,7 +224,7 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (309 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (319 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (2 test)
 ```
 

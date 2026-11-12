@@ -9,6 +9,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - HTML + CSS + JavaScript thuần (ES modules), bundler Vite. **Không** đưa React/Vue/TypeScript vào trừ khi được yêu cầu.
 - `html5-qrcode`: dự phòng cho "Bật camera" và "Chụp ảnh mã" khi không tải được zxing-wasm; `tesseract.js` chỉ cài khi tới giai đoạn 3.
 - `zxing-wasm` cho nút "Chụp ảnh mã" (chủ dự án đồng ý 06/11/2026: bao bì thật nhăn / xoay dọc thì html5-qrcode đọc ảnh trượt) và giải mã khung hình "Bật camera" (chủ dự án đồng ý 07/11/2026 nếu đo thấy tốt hơn; đợt `nhay-hon` đo camera giả: 20% → 81% ra mã trong 5 giây). File wasm tự host trong `dist/assets` (không tải từ CDN), chỉ tải khi người dùng chọn ảnh hoặc bấm "Bật camera", không vào danh sách lưu sẵn (precache) của service worker; không tải được thì quay về html5-qrcode.
+- `@supabase/supabase-js` 2.119.0 (ghim đúng bản) cho đăng nhập Google KHÔNG bắt buộc: để máy chủ OCR biết ai gọi, chống dùng chùa (chủ dự án đồng ý 12/11/2026). Chỉ import động khi có biến `VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY` (thiếu biến thì bản build không có thư viện, không có khối tài khoản); chỉ dùng phần auth. Publishable key là khóa công khai; không bao giờ dùng JWT secret / service_role (app và máy chủ từ chối khóa `sb_secret_…` / JWT role `service_role`).
 - Dữ liệu: Open Food Facts API v2 (không cần key). Lưu trữ: localStorage.
 - Lệnh: `npm run dev` (dev có HTTPS), `npm run build`, `npm run preview`, `npm test` (test node của app ở `tests/`).
 - Đưa lên web: lên main (chế độ C: git push từ nhánh của đợt sang main, không commit thẳng main) thì GitHub Actions (workflow "Deploy GitHub Pages", `.github/workflows/deploy.yml`) tự chạy `npm ci` + `npm run build` rồi deploy `dist/` lên GitHub Pages. Không cần build hay upload tay.
@@ -26,13 +27,15 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - `src/compare.js` – so sánh 2 sản phẩm: 6 chỉ số trên 100 g / 100 ml, thời gian chờ giữa 2 lần gọi mạng (`compareWaitMs`) (không DOM, không tự tính).
 - `src/backup.js` – xuất / nhập tủ đồ bằng file JSON: tạo file, kiểm định dạng, gộp (không DOM).
 - `src/pwa.js` – đăng ký service worker (chỉ ở bản build) + thanh "Đã có bản mới".
+- `src/auth.js` – phần thuần của đăng nhập (không DOM, không import thư viện): `authConfig` (đọc biến, chặn khóa bí mật), `redirectUrl`, `cleanAuthParams` / `hasAuthParams` / `authErrorFromUrl` (đọc cả `?` và `#`), `emailOf`, `authView`. main.js nối supabase-js (PKCE), khối `#authBox` ở cuối trang ngay trước footer, "Đăng xuất" chỉ máy này (`scope: "local"`).
+- `src/dev-ocr.js` – khu thử gọi máy chủ OCR 127.0.0.1 kèm token, CHỈ nạp khi `import.meta.env.DEV` (bản build không có).
 - `src/style.css` – màu dùng biến trên `:root`, có bản tối.
 - `public/` – `manifest.webmanifest` + `icons/` (PNG), Vite chép nguyên vào `dist/`.
 - `public/ocr-thu.html` (+ `public/ocr-thu/regex.mjs`, `text.mjs`) – trang THỬ OCR riêng (đợt ocr-c), không có link từ app, noindex; PaddleOCR.js + tesseract.js và model tải từ CDN (jsDelivr, HuggingFace) đúng bản cố định của `test-ocr/web-ocr/assets.js`, không vào bundle / package.json của app. `regex.mjs` là bản JS của `extract_regex` (Python là chuẩn; sửa luật thì chạy `test-ocr/web-ocr/regex-parity.mjs`).
 - `public/chup-mat-do.html` (+ `public/chup-mat-do/t1.mjs`, `tar.mjs`, `ocr-chon.mjs`, `danh-muc-vn.json`) – trang THỬ chụp mặt trước (đợt chup-mat-do), không link từ app, noindex; PaddleOCR.js từ CDN đúng bản ghim + T1 (BM25) trên danh mục VN tĩnh (dữ liệu Open Food Facts, ODbL), không gọi Open Food Facts. Đợt thu-r1: ô chọn OCR (`?ocr=1a|r1`, mặc định 1a); R1 = PP-OCRv6 small của RapidOCR (ONNX từ ModelScope tag v3.10.0 + yml HuggingFace ghim, tham số `PARAM_PRESETS.r1`), chỉ tải khi chọn R1 và bấm, chỉ giữ 1 OCR trong bộ nhớ (đổi thì `dispose()` cái cũ); bảng cấu hình + phần thuần ở `ocr-chon.mjs` (URL / tham số phải trùng `test-ocr/web-ocr/assets.js`, test `trang-thu.test.mjs`). `t1.mjs` là bản trình duyệt của T1 trong `test-ocr/chup-mat-do` (Node là chuẩn; sửa luật thì chạy `test-ocr/chup-mat-do/trang-thu-parity.mjs`).
 - `test-ocr/` – so sánh OCR (Python, `test-ocr/README.md`); `test-ocr/web-ocr/` đo OCR trong trình duyệt bằng Playwright (package.json riêng), `test-ocr/vietocr/` PP-OCRv5 det + VietOCR (venv riêng, chỉ để so mức máy chủ), `test-ocr/chup-mat-do/` đo cách chụp mặt trước → nhận ra sản phẩm (package.json riêng, `test-ocr/README.md` Phần E). Không thuộc app.
 - `test-ocr/ocr-mat/` – đo nhiều OCR trên CPU cho chụp mặt trước (Python, venv riêng ở D:, `requirements-*.txt`, `test-ocr/README.md` Phần F); `chup-mat-do/t1-ocr.mjs` chấm T1 cho OCR bất kỳ, `ghep-ocr.mjs` ghép chữ 2 OCR. Không thuộc app.
-- `server/` – máy chủ OCR thử (FastAPI + RapidOCR R1 không cls, Python, venv riêng ở D:, `server/README.md`); KHÔNG thuộc app, không vào build / package.json; chạy thử chỉ 127.0.0.1 (`server/chay-thu.ps1`), chưa Azure, chưa đăng nhập.
+- `server/` – máy chủ OCR thử (FastAPI + RapidOCR R1 không cls, Python, venv riêng ở D:, `server/README.md`); KHÔNG thuộc app, không vào build / package.json; chạy thử chỉ 127.0.0.1 (`server/chay-thu.ps1`, in `AUTH_MODE`), chưa Azure. `server/auth.py`: `AUTH_MODE=supabase` kiểm token Supabase (ES256 / RS256 bằng JWKS tại máy, HS256 hỏi `/auth/v1/user`; Supabase lỗi → 503, không cho qua), giới hạn lượt theo IP rồi theo người dùng.
 - `tools/` – `make-icons.mjs` (vẽ icon, chạy một lần: `node tools/make-icons.mjs`), `sw-build.mjs` (ghép mã sw.js; danh sách lưu sẵn bỏ `ocr-thu*`, `chup-mat-do*`). `sw.js` sinh lúc build bằng plugin trong `vite.config.js`; không sửa tay trong `dist/`.
 
 ## Quy ước
@@ -41,6 +44,7 @@ Web app quét mã vạch đồ ăn: quét mã EAN-13 trên bao bì → tra Open 
 - Mỗi lần thay đổi: nhỏ, chạy được, mô tả rõ phải test gì trên điện thoại.
 - Không bịa dữ liệu sản phẩm. Trường API trống thì hiện "chưa có dữ liệu", không đoán.
 - Không commit `.env`. Chỉ sửa `.env.example` khi thêm biến mới.
+- Không mở file `.env` / `server/.env` bằng công cụ (đọc, in, grep, chép): Vite và máy chủ tự đọc; biết biến đã điền chưa chỉ qua kết quả chạy.
 - Không đổi thư viện quét hay cách gọi API nếu chưa hỏi.
 - Giữ số dependency tối thiểu; cài thêm gói thì nói lý do.
 - Service worker không bao giờ cache request khác tên miền (Open Food Facts, Google Fonts): chỉ giữ giao diện của app.
