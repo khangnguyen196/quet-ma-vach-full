@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File server\chay-thu.ps1 -Threads 1 # giốn
 ```
 
 Script đặt biến ổ D, `CORS_ALLOW_LOCALHOST=1`, rồi chạy
-`uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log --no-proxy-headers`.
+`uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --no-access-log --no-proxy-headers --limit-concurrency 16`.
 **Chỉ 127.0.0.1** (không 0.0.0.0, không mở ra mạng ngoài). Tắt: Ctrl+C. Kiểm đã tắt:
 `Get-NetTCPConnection -LocalPort 8765 -State Listen` không ra gì.
 
@@ -59,7 +59,8 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `RATE_LIMIT_PER_MIN` | 20 | lượt `/ocr` mỗi IP trong 60 giây (cửa sổ trượt, trong RAM) |
 | `RATE_LIMIT_MAX_IPS` | 10000 | số IP tối đa giữ trong RAM (dọn IP hết hạn, đầy thì bỏ IP cũ nhất) |
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
-| `QUEUE_MAX` | 4 | số yêu cầu chờ thêm; đầy -> 503 + `Retry-After` |
+| `QUEUE_MAX` | 4 | số yêu cầu giữ chỗ thêm (đang tải ảnh lên hoặc đang chờ); đầy -> 503 + `Retry-After`, chưa đọc thân ảnh |
+| `BODY_TIMEOUT_S` | 30 | đọc thân ảnh tối đa bấy nhiêu giây (số thực > 0); quá -> 408, trả chỗ |
 | `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình) |
 | `PROXY_COUNT` | 1 | lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI của `X-Forwarded-For` (phần bên trái khách tự ghi được, không tin) |
 | `AUTH_MODE` | off | `off` cho qua; `supabase` chưa làm -> từ chối khởi động ("chưa cài đặt, làm ở đợt dang-nhap"); giá trị lạ -> từ chối khởi động |
@@ -112,17 +113,28 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 | Mã | Khi nào |
 |---|---|
-| 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn |
+| 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn; khách ngắt kết nối giữa chừng (1 dòng log, không traceback) |
+| 408 | gửi thân ảnh quá `BODY_TIMEOUT_S` giây (mạng quá chậm / gửi treo) |
 | 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, bom điểm ảnh của Pillow |
 | 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
 | 422 | yêu cầu không hợp lệ khác |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, có `Retry-After` |
 | 501 | `AUTH_MODE=supabase` lọt vào hàm kiểm (bình thường đã từ chối khởi động) |
-| 503 | hàng đợi đầy hoặc chưa nạp xong model, có `Retry-After` |
+| 503 | hàng đợi đầy hoặc chưa nạp xong model, có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
 
 ## Giới hạn và an toàn
 
 - 5 MB / ảnh, 60 MP, 20 ảnh / phút / IP, 1 ảnh OCR cùng lúc + hàng đợi 4.
+- **Thứ tự trong `/ocr`**: đăng nhập -> giới hạn lượt -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
+  `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
+  giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
+  1 lần (`try/finally`, `ratelimit.Slot.release`). Vì vậy RAM cho ảnh đang nhận có trần: tối đa 5 ảnh × 5 MB, dù gửi
+  song song hay gửi thật chậm. Ảnh nhận về giữ nguyên `bytearray` (không chép sang `bytes`); lúc giải mã Pillow đọc qua
+  `io.BytesIO` (chép thêm 1 bản ≤ 5 MB, chỉ 1 ảnh mỗi lúc vì giải mã nằm trong khóa OCR).
+- **uvicorn `--limit-concurrency 16`** (cả 3 lệnh chạy): quá 16 kết nối / yêu cầu cùng lúc thì uvicorn tự trả 503 dạng
+  chữ, không CORS. Lớp chặn thô phía trước hàng đợi của app.
+- OCR chạy trong threadpool, không huỷ được giữa chừng: khách ngắt khi đang OCR thì OCR vẫn chạy tới xong rồi mới nhả khóa
+  (cố ý: không bao giờ 2 ảnh OCR cùng lúc). Ghi chú ở `ratelimit.py`.
 - **Không file tạm**: không dùng `request.form()` của Starlette (nó đặt file vào `SpooledTemporaryFile` 1 MB rồi ghi ra đĩa
   và đọc hết thân rồi mới trả), mà tách multipart theo luồng bằng `MultipartParser` của python-multipart, giữ ảnh trong RAM,
   đếm byte theo khúc (`upload.py`). Không ghi ảnh ra đĩa ở đâu cả.

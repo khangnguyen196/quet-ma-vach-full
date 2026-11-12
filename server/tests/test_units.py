@@ -188,3 +188,12 @@ def test_settings_mac_dinh_va_loi():
     with pytest.raises(SettingsError):
         load_settings({"CORS_ALLOW_LOCALHOST": "co"})
     assert load_settings({"CORS_ALLOW_LOCALHOST": "1"}).cors_origin_regex is not None
+
+
+def test_body_timeout_s_mac_dinh_30_va_kiem_gia_tri():
+    assert load_settings({}).body_timeout_s == 30.0
+    assert load_settings({"BODY_TIMEOUT_S": "0,5"}).body_timeout_s == 0.5
+    assert load_settings({"BODY_TIMEOUT_S": "12"}).body_timeout_s == 12.0
+    for bad in ("0", "-1", "abc", "nan", "inf"):
+        with pytest.raises(SettingsError):
+            load_settings({"BODY_TIMEOUT_S": bad})

@@ -1,4 +1,5 @@
-"""Giới hạn lượt theo IP (cửa sổ trượt 60 giây, trong RAM) + cổng đồng thời (1 ảnh chạy, hàng đợi có trần).
+"""Giới hạn lượt theo IP (cửa sổ trượt 60 giây, trong RAM) + cổng đồng thời (1 ảnh chạy, hàng đợi có trần, giành chỗ
+trước khi đọc thân ảnh).
 
 IP lấy từ socket. X-Forwarded-For CHỈ dùng khi TRUST_PROXY=1 (máy chủ đứng sau proxy của mình): lấy phần tử thứ
 PROXY_COUNT tính từ PHẢI (proxy cuối cùng của mình ghi IP nó thấy vào cuối danh sách; phần bên trái do khách tự ghi,
@@ -67,25 +68,48 @@ class QueueFull(Exception):
 
 
 class ConcurrencyGate:
-    """Tối đa max_concurrent việc chạy cùng lúc, thêm tối đa queue_max việc chờ; đầy -> QueueFull (503)."""
+    """Tối đa max_concurrent việc chạy OCR cùng lúc, tổng số yêu cầu đang giữ chỗ (đang tải ảnh lên + đang chờ + đang
+    chạy) tối đa capacity = max_concurrent + queue_max; đầy -> QueueFull (503).
+
+    Hai bước, để RAM có trần: reserve() giành chỗ NGAY (chưa đọc thân ảnh; đầy thì 503 luôn), rồi mới đọc ảnh, rồi
+    `await slot.acquire()` chờ khóa OCR. Mọi đường ra gọi slot.release() trong finally (gọi nhiều lần cũng chỉ trả 1 lần).
+
+    Ghi chú cho người sau: OCR chạy bằng run_in_threadpool, KHÔNG huỷ được giữa chừng (luồng chạy tới khi xong dù khách
+    đã ngắt). Khóa OCR chỉ nhả khi OCR xong thật, nên không bao giờ có 2 ảnh OCR cùng lúc. Đừng "sửa" thành huỷ luồng /
+    nhả khóa sớm khi yêu cầu bị huỷ: OCR cũ vẫn đang chạy trong luồng, nhả sớm là 2 ảnh chạy song song, vượt RAM.
+    Huỷ lúc đang CHỜ khóa (chưa giành được) thì acquire() ném CancelledError, release() chỉ trả chỗ.
+    """
 
     def __init__(self, max_concurrent: int = 1, queue_max: int = 4):
         self.capacity = max_concurrent + queue_max
         self._sem = asyncio.Semaphore(max_concurrent)
-        self.inside = 0  # đang chạy + đang chờ
+        self.inside = 0  # số chỗ đang giữ: đang tải lên + đang chờ khóa + đang chạy
 
-    async def __aenter__(self):
+    def reserve(self) -> "Slot":
+        """Giành 1 chỗ ngay (không chờ). Đầy -> QueueFull."""
         if self.inside >= self.capacity:
             raise QueueFull()
         self.inside += 1
-        try:
-            await self._sem.acquire()
-        except BaseException:
-            self.inside -= 1
-            raise
-        return self
+        return Slot(self)
 
-    async def __aexit__(self, *exc):
-        self._sem.release()
-        self.inside -= 1
-        return False
+
+class Slot:
+    """1 chỗ trong ConcurrencyGate: acquire() chờ khóa OCR; release() trả khóa (nếu đã giành) + trả chỗ, đúng 1 lần."""
+
+    def __init__(self, gate: ConcurrencyGate):
+        self._gate = gate
+        self._locked = False
+        self._released = False
+
+    async def acquire(self):
+        await self._gate._sem.acquire()
+        self._locked = True
+
+    def release(self):
+        if self._released:
+            return
+        self._released = True
+        if self._locked:
+            self._locked = False
+            self._gate._sem.release()
+        self._gate.inside -= 1

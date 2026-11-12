@@ -28,6 +28,19 @@ def _int(env, name, default, minimum):
     return value
 
 
+def _float(env, name, default, minimum_exclusive):
+    raw = env.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(str(raw).strip().replace(",", "."))
+    except ValueError:
+        raise SettingsError(f"Biến {name}={raw!r} không phải số.") from None
+    if not value > minimum_exclusive or value != value or value == float("inf"):
+        raise SettingsError(f"Biến {name}={value} phải là số > {minimum_exclusive:g}.")
+    return value
+
+
 def _flag(env, name, default=False):
     raw = env.get(name)
     if raw is None or str(raw).strip() == "":
@@ -51,6 +64,7 @@ class Settings:
     rate_limit_max_ips: int = 10_000  # số IP tối đa giữ trong RAM
     max_concurrent: int = 1         # số ảnh OCR cùng lúc
     queue_max: int = 4              # số yêu cầu chờ tối đa (ngoài ảnh đang chạy)
+    body_timeout_s: float = 30.0    # đọc thân ảnh tối đa bấy nhiêu giây, quá -> 408 (gửi rất chậm không giữ chỗ / RAM mãi)
     trust_proxy: bool = False       # 1 = lấy IP từ X-Forwarded-For (chỉ khi đứng sau proxy của mình)
     proxy_count: int = 1            # số proxy tin cậy phía trước (lấy phần tử thứ proxy_count tính từ phải)
     auth_mode: str = "off"          # off | supabase (supabase chưa làm: từ chối khởi động)
@@ -77,6 +91,7 @@ def load_settings(env=None) -> Settings:
         rate_limit_max_ips=_int(env, "RATE_LIMIT_MAX_IPS", 10_000, 1),
         max_concurrent=_int(env, "MAX_CONCURRENT", 1, 1),
         queue_max=_int(env, "QUEUE_MAX", 4, 0),
+        body_timeout_s=_float(env, "BODY_TIMEOUT_S", 30.0, 0),
         trust_proxy=_flag(env, "TRUST_PROXY"),
         proxy_count=_int(env, "PROXY_COUNT", 1, 1),
         auth_mode=str(env.get("AUTH_MODE") or "off").strip(),

@@ -34,5 +34,6 @@ if (-not (Test-Path $py)) {
 Set-Location $PSScriptRoot
 Write-Host "Máy chủ OCR: http://127.0.0.1:$Port (OCR_THREADS=$Threads). Ctrl+C để tắt."
 # --no-proxy-headers: uvicorn KHÔNG tự thay IP bằng X-Forwarded-For (mặc định nó tin 127.0.0.1) -> TRUST_PROXY của app là công tắc duy nhất
-& $py -m uvicorn app:app --host 127.0.0.1 --port $Port --workers 1 --no-access-log --no-proxy-headers
+# --limit-concurrency 16: quá 16 kết nối / yêu cầu cùng lúc thì uvicorn tự trả 503 (dạng chữ, không CORS)
+& $py -m uvicorn app:app --host 127.0.0.1 --port $Port --workers 1 --no-access-log --no-proxy-headers --limit-concurrency 16
 exit $LASTEXITCODE

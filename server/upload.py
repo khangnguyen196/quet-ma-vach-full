@@ -117,7 +117,10 @@ def boundary_of(content_type: str):
 
 
 async def read_image(request, max_bytes: int, max_body: int):
-    """-> (bytes của ảnh, số byte thân đã đọc). Ném UploadError (400 / 413)."""
+    """-> (bytearray của ảnh, số byte thân đã đọc). Ném UploadError (400 / 413).
+
+    Trả thẳng bytearray đã gom (không chép sang bytes). Không tự đặt hạn giờ: app.py bọc lời gọi trong
+    asyncio.timeout(BODY_TIMEOUT_S). Khách ngắt giữa chừng -> starlette ClientDisconnect bay ra cho app.py bắt."""
     boundary = boundary_of(request.headers.get("content-type", ""))
     if boundary is None:
         raise UploadError(400, "Cần gửi ảnh dạng multipart/form-data trong trường 'image'.")
@@ -154,4 +157,4 @@ async def read_image(request, max_bytes: int, max_body: int):
         raise UploadError(400, "Thiếu trường 'image' chứa ảnh.")
     if not col.image:
         raise UploadError(400, "Ảnh rỗng (0 byte).")
-    return bytes(col.image), total
+    return col.image, total

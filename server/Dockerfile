@@ -37,4 +37,5 @@ EXPOSE 8765
 # 0.0.0.0 CHỈ trong container (để cổng map của Docker tới được); trên máy tính dùng chay-thu.ps1 (127.0.0.1).
 # 1 worker (model nạp 1 lần, ~520 MB RAM), tắt access log của uvicorn (có IP).
 # --no-proxy-headers: uvicorn không tự lấy IP từ X-Forwarded-For; đứng sau proxy của mình thì bật TRUST_PROXY=1 của app.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8765", "--workers", "1", "--no-access-log", "--no-proxy-headers"]
+# --limit-concurrency 16: quá 16 kết nối / yêu cầu cùng lúc thì uvicorn tự trả 503 (dạng chữ, không CORS).
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8765", "--workers", "1", "--no-access-log", "--no-proxy-headers", "--limit-concurrency", "16"]

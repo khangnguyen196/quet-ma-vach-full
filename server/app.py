@@ -5,6 +5,7 @@ Không lưu ảnh, không file tạm, log không có IP / tên file / chữ OCR.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -16,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import ClientDisconnect
 
 import auth
 import imaging
@@ -119,28 +121,42 @@ def create_app(settings: Settings | None = None, engine=None) -> FastAPI:
         if not ok:
             return error(429, f"Gửi quá nhiều ảnh (tối đa {st.rate_limit_per_min} ảnh mỗi phút). Thử lại sau {retry} giây.",
                          {"Retry-After": str(retry)})
-        try:
-            data, nbytes = await upload.read_image(request, st.max_bytes, st.max_body)
-        except upload.UploadError as e:
-            return error(e.status, e.message)
-        request.state.nbytes = nbytes
         eng = request.app.state.engine
         if eng is None or not getattr(eng, "loaded", False):
             return error(503, "Máy chủ chưa nạp xong model OCR.", {"Retry-After": str(QUEUE_RETRY_AFTER)})
+        # Giành chỗ TRƯỚC khi đọc thân ảnh: hàng đợi đầy thì 503 ngay, chưa đọc byte nào (RAM có trần:
+        # tối đa MAX_CONCURRENT + QUEUE_MAX ảnh trong RAM cùng lúc).
         try:
-            async with request.app.state.gate:
-                result = await run_in_threadpool(process, eng, data, st.max_pixels)
+            slot = request.app.state.gate.reserve()
         except QueueFull:
             return error(503, "Máy chủ đang bận (hàng đợi đầy). Thử lại sau ít giây.", {"Retry-After": str(QUEUE_RETRY_AFTER)})
+        try:
+            try:
+                async with asyncio.timeout(st.body_timeout_s):
+                    data, nbytes = await upload.read_image(request, st.max_bytes, st.max_body)
+            except TimeoutError:
+                secs = f"{st.body_timeout_s:g}".replace(".", ",")
+                return error(408, f"Gửi ảnh quá lâu (quá {secs} giây). Kiểm tra mạng rồi thử lại.")
+            except upload.UploadError as e:
+                return error(e.status, e.message)
+            except ClientDisconnect:
+                # khách đóng kết nối giữa chừng: không phải lỗi máy chủ, 1 dòng log, không traceback
+                log.info("khách ngắt kết nối khi đang gửi ảnh")
+                return error(400, "Kết nối bị ngắt khi đang gửi ảnh.")
+            request.state.nbytes = nbytes
+            await slot.acquire()  # chờ khóa OCR (ảnh đã nằm trong RAM, đã tính vào chỗ đã giành)
+            result = await run_in_threadpool(process, eng, data, st.max_pixels)
         except imaging.ImageError as e:
             return error(e.status, e.message)
+        finally:
+            slot.release()  # mọi đường ra (lỗi, 408, 413, 415, ngắt, huỷ) trả chỗ đúng 1 lần
         request.state.nboxes = len(result["items"])
         return result
 
     return app
 
 
-def process(engine, data: bytes, max_pixels: int) -> dict:
+def process(engine, data, max_pixels: int) -> dict:
     """Chạy trong threadpool: giải mã + thu nhỏ + OCR. Tọa độ theo ảnh SAU khi thu nhỏ (width, height)."""
     t0 = time.perf_counter()
     img, (ow, oh) = imaging.decode(data, max_pixels)

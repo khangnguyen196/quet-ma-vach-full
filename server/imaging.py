@@ -48,7 +48,7 @@ def fit_size(w: int, h: int, max_side: int = MAX_SIDE):
     return max(1, round_half_up(w * scale)), max(1, round_half_up(h * scale))
 
 
-def detect_format(data: bytes):
+def detect_format(data):
     """'jpeg' | 'png' | 'heic' | None, chỉ theo vài byte đầu."""
     if data[:3] == b"\xff\xd8\xff":
         return "jpeg"

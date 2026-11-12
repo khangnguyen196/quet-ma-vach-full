@@ -69,7 +69,9 @@ def test_x_forwarded_for_khong_lach_duoc_gioi_han_luot_qua_uvicorn_that(make_app
     assert codes == [200, 200, 429]
 
 
-def test_ba_lenh_chay_deu_co_no_proxy_headers():
+def test_ba_lenh_chay_deu_co_no_proxy_headers_va_limit_concurrency_16():
     for name in COMMAND_FILES:
         src = (SERVER / name).read_text(encoding="utf-8-sig")
         assert "--no-proxy-headers" in src, f"{name} thiếu --no-proxy-headers"
+        flat = src.replace('"', "").replace(", ", " ")  # Dockerfile CMD ["--limit-concurrency", "16"], mjs mảng chuỗi
+        assert "--limit-concurrency 16" in flat, f"{name} thiếu --limit-concurrency 16"
