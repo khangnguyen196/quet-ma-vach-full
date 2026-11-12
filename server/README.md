@@ -162,7 +162,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (149 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (199 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (2 test)
 ```
 
@@ -224,12 +224,44 @@ nên luôn cao hơn; ~540 MB ngay sau ảnh khởi động).
 | JPEG CMYK xoay 6 | 8 | 743 / 699 / 936 | 552 / 551 / 745 |
 | PNG RGB | 8 | 738 / 716 / 932 | 444 / 402 / 638 |
 
-Mọi lần đều HTTP 200. Mã mới, ảnh tới `MAX_PIXELS` = 50 MP, trường hợp xấu nhất đã đo (JPEG CMYK có xoay, 8 luồng):
-peak_wset 552 MB, riêng đỉnh 745 MB, dưới 900 MB. 30 ảnh thật (lượt `may-chu-t8-v2`): peak_wset 549 MB. **Chưa đo trên
-Linux / máy B1s** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux).
+Mọi lần đều HTTP 200.
+
+**Vòng 3: ảnh có thể nặng hơn** (đo cùng cách, 12/11/2026, lúc đo máy còn ~1,5 GB RAM trống). JPEG progressive buộc
+libjpeg giữ hệ số DCT của cả ảnh lúc giải mã (2 byte / điểm / kênh), cộng thêm vào ảnh đã giải mã. Ảnh: JPEG RGB
+progressive 4:4:4 orientation 6 (1,10 MB), JPEG CMYK progressive orientation 6 (1,31 MB), cả hai 8000 × 6250 = 50 MP;
+HEIC 8000 × 6000 = 48 MP orientation 6 (0,86 MB, hộp irot; tạo bằng `do-anh-lon.py tao --heic` trong venv tạm có
+pillow-heif, rồi xoá venv). Cột "giây" = phía khách / phía máy chủ (giải mã + thu nhỏ + OCR) / riêng OCR.
+
+| Ảnh | Luồng | Mã chưa có trần riêng: peak_wset / RSS đỉnh / riêng đỉnh | HTTP | giây |
+|---|---|---|---|---|
+| JPEG CMYK progressive xoay 6, 50 MP | 1 | 738 / 698 / 931 | 200 | 6,1 / 6,1 / 4,3 |
+| JPEG CMYK progressive xoay 6, 50 MP | 8 | **743 / 705 / 936** | 200 | 3,6 / 3,6 / 1,8 |
+| JPEG CMYK progressive, 50 MP, sau 5 ảnh `front.jpg` thật | 8 | 741 / 696 / 934 | 200 | 3,5 / 3,5 / 1,6 |
+| JPEG RGB progressive 4:4:4 xoay 6, 50 MP | 1 | 642 / 635 / 835 | 200 | 5,5 / 5,5 / 4,3 |
+| JPEG RGB progressive 4:4:4 xoay 6, 50 MP | 8 | 647 / 594 / 840 | 200 | 3,0 / 2,9 / 1,8 |
+| HEIC xoay 6, 48 MP | 1 | 498 / 490 / 689 | 200 | 6,4 / 6,4 / 4,2 |
+| HEIC xoay 6, 48 MP | 8 | 503 / 408 / 694 | 200 | 4,0 / 4,0 / 1,8 |
+| JPEG CMYK progressive xoay 6, 40 MP (8000 × 5000) | 1 | 625 / 617 / 818 | 200 | 6,5 / 6,4 / 4,7 |
+| JPEG CMYK progressive xoay 6, 40 MP | 8 | 629 / 609 / 822 | 200 | 3,0 / 3,0 / 1,5 |
+| JPEG CMYK progressive xoay 6, 30 MP (7500 × 4000) | 8 | 513 / 490 / 705 | 200 | 2,5 / 2,5 / 1,4 |
+
+JPEG CMYK progressive 50 MP vượt 900 MB bộ nhớ riêng, nên có **trần riêng `MAX_PIXELS_PROGRESSIVE` = 40 MP** (mức lớn
+nhất trong 40 / 30 MP đạt cả hai ngưỡng: riêng < 900 MB và peak_wset < 800 MB). `imaging.decode` kiểm cỡ + cờ progressive
+của Pillow (đọc từ phần đầu file) TRƯỚC `img.load()`; quá -> 413 "Ảnh JPEG progressive quá nhiều điểm ảnh…" (test
+`tests/test_progressive.py`, có kiểm `load()` không được gọi). Trên mã cuối: 2 ảnh progressive 50 MP -> 413 sau 0,1 giây,
+RAM giữ như sau ảnh khởi động (349 / 543 MB); CMYK progressive 40 MP vẫn 200 (626 / 819 MB). JPEG thường, PNG, HEIC giữ
+`MAX_PIXELS` = 50 MP (JPEG thường 50 MP riêng 745 MB, không sát ngưỡng nên không hạ trần chung).
+
+**Biên an toàn** (mã cuối): ca nặng nhất được nhận (JPEG CMYK progressive 40 MP, 8 luồng) peak_wset 629 MB, bộ nhớ riêng
+822 MB (cách 900 MB khoảng 78 MB), đo trên Windows 10 máy 8 GB; loại ảnh đã đo: JPEG baseline RGB/CMYK, JPEG progressive
+RGB 4:4:4/CMYK, PNG, HEIC 48 MP. 30 ảnh thật (lượt `may-chu-t8-v3`): peak_wset 549 MB, riêng 743 MB. **Linux / B1s chưa
+đo** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux); B1s 1 GiB gồm cả hệ điều hành + Docker nên có thể cần swap hoặc
+hạ `MAX_PIXELS` / `MAX_PIXELS_PROGRESSIVE`.
 
 ```powershell
-D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py tao     # tạo 4 ảnh ở D:\tmp\may-chu-1\anh-lon (không commit)
+D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py tao     # tạo ảnh JPEG / PNG ở D:\tmp\may-chu-1\anh-lon (không commit)
+# HEIC 48 MP: venv tạm có pillow-heif (như mục Test), rồi: D:\tmp\may-chu-1\venv-heic-tao\Scripts\python server\do-anh-lon.py tao --heic
+# --real-before 5: gửi 5 ảnh front.jpg thật trước ảnh lớn
 D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-xoay6 --threads 8 --out D:\tmp\may-chu-1\ket-qua\anh-lon\moi-t8-jpeg-cmyk-xoay6.json
 # đo mã cũ: --code-dir <thư mục server/ của commit cũ, chép bằng git archive ra D:\tmp> (không checkout trong worktree)
 ```
