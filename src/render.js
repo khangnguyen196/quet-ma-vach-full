@@ -440,6 +440,61 @@ export function renderPantry(list, { editingId = null, today = new Date() } = {}
   return `<ul class="pantry-list">${items}</ul>`;
 }
 
+// ---- Chụp mặt trước (đợt chup-mat): chữ đọc được + gợi ý sản phẩm từ danh mục VN tĩnh ----
+
+/** Giấy phép của danh mục (dữ liệu Open Food Facts). */
+export const ODBL_URL = "https://opendatacommons.org/licenses/odbl/1-0/";
+/** Số gợi ý tối đa hiện ra. */
+export const FRONT_MAX_HITS = 5;
+/** id ô sửa chữ: main.js đọc ô này khi bấm "Tìm lại". */
+export const FRONT_TEXT_ID = "frontText";
+
+/** Mã chỉ gồm 8–14 chữ số (data-front-code chỉ chứa mã kiểu này). */
+const isPlainCode = (code) => typeof code === "string" && /^\d{8,14}$/.test(code);
+
+/**
+ * Danh sách gợi ý (vẽ lại riêng khi bấm "Tìm lại"). hits: [{ code, name, brand, image }] (hitProducts của
+ * src/front-search.js). Tối đa FRONT_MAX_HITS; mã không phải 8–14 chữ số thì bỏ. Ảnh qua labelImageUrl (lạ → "chưa có
+ * ảnh"); ảnh tải lỗi thì main.js đổi sang "chưa có ảnh" bằng addEventListener("error") (không có onerror ở đây).
+ * Không có gợi ý → mời quét mã vạch / nhập số (không đoán).
+ */
+export function renderFrontHits(hits) {
+  const list = (Array.isArray(hits) ? hits : []).filter((h) => isPlainCode(h?.code)).slice(0, FRONT_MAX_HITS);
+  if (!list.length) {
+    return '<p class="front-none">Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.</p>';
+  }
+  const items = list.map((h) => {
+    const img = labelImageUrl(h.image);
+    const pic = img
+      ? `<img class="front-img" src="${esc(img)}" width="64" height="64" loading="lazy" alt=""><span class="noimg front-noimg" hidden>chưa có ảnh</span>`
+      : '<span class="noimg front-noimg">chưa có ảnh</span>';
+    const name = h.name ? esc(h.name) : '<span class="empty">chưa có dữ liệu</span>';
+    const brand = h.brand ? esc(h.brand) : '<span class="empty">chưa có dữ liệu</span>';
+    return `<li><button type="button" class="front-hit" data-front-code="${h.code}">${pic}
+<span class="front-info"><span class="front-name">${name}</span><span class="front-brand">${brand}</span><span class="front-code">Mã ${h.code}</span></span></button></li>`;
+  }).join("");
+  return `<p class="front-lead">Kết quả gợi ý, hãy chọn đúng sản phẩm</p><ul class="front-list">${items}</ul>`;
+}
+
+/**
+ * Kết quả "Chụp mặt trước": ô sửa chữ đọc được (mỗi dòng 1 hàng chữ) + nút "Tìm lại" + danh sách gợi ý + dòng nguồn.
+ * lines: chữ từng hàng (từ máy chủ OCR, qua esc()); hits: như renderFrontHits; reencoded false: ảnh đã gửi nguyên bản.
+ * Nút "Tìm lại" có data-front-retry, gợi ý có data-front-code (main.js bắt bằng 1 listener trên #frontBox).
+ */
+export function renderFrontResult({ lines, hits, reencoded } = {}) {
+  const value = (Array.isArray(lines) ? lines : []).map((s) => String(s ?? "")).join("\n");
+  const raw = reencoded === false
+    ? '<p class="front-raw">Ảnh này được gửi nguyên bản (máy không thu nhỏ được).</p>'
+    : "";
+  return `<div class="front-text-box">
+<label for="${FRONT_TEXT_ID}">Chữ đọc được trên ảnh (sửa được, rồi bấm “Tìm lại”)</label>
+<textarea id="${FRONT_TEXT_ID}" class="front-text" rows="4" spellcheck="false" autocomplete="off">${esc(value)}</textarea>
+<div class="actions front-retry"><button class="btn" type="button" data-front-retry>Tìm lại</button></div>
+</div>${raw}
+<div class="front-hits">${renderFrontHits(hits)}</div>
+<p class="src front-source">Gợi ý từ danh mục dữ liệu Open Food Facts (<a href="${esc(ODBL_URL)}" target="_blank" rel="noopener">ODbL</a>)</p>`;
+}
+
 // ---- Tài khoản (đăng nhập Google qua Supabase, đợt dang-nhap; không bắt buộc) ----
 
 /** Dòng giải thích dưới nút đăng nhập. */

@@ -112,6 +112,60 @@ export async function prepareImage(file) {
   }
 }
 
+/**
+ * Nút "Chụp mặt trước" theo trạng thái đăng nhập (authState của main.js: { configured, loading, unavailable, session }).
+ * "hidden": không có cấu hình đăng nhập / không tải được thư viện → ẩn cả nút lẫn ghi chú;
+ * "loading": đang kiểm phiên → nút mờ "Đang kiểm đăng nhập…"; "login": chưa có phiên → "Đăng nhập để dùng";
+ * "ready": có phiên → cho chụp / chọn ảnh.
+ */
+export function frontButtonState(state) {
+  if (!state?.configured || state.unavailable) return "hidden";
+  if (state.loading) return "loading";
+  return state.session ? "ready" : "login";
+}
+
+const SCAN_HINT = "hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+
+/**
+ * Kết quả lỗi của sendOcr ({ kind, retryAfter }) → câu tiếng Việt cho giao diện (đặt bằng textContent).
+ * Không dùng câu của máy chủ (serverMessage). aborted (người dùng chọn ảnh khác) / không phải lỗi → "".
+ * Ví dụ: frontErrorText({ ok: false, kind: "rate", retryAfter: 42 }) → "Gửi nhanh quá, chờ 42 giây rồi thử lại."
+ */
+export function frontErrorText(result) {
+  if (!result || result.ok) return "";
+  const retry = Number.isFinite(result.retryAfter) && result.retryAfter > 0 ? result.retryAfter : null;
+  switch (result.kind) {
+    case "aborted":
+      return "";
+    case "auth":
+      return "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.";
+    case "daily": {
+      let when = "lúc 7 giờ sáng";
+      if (retry != null) {
+        const mins = Math.ceil(retry / 60); // làm tròn lên phút, như câu của máy chủ
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        when = `sau ${h > 0 ? `${h} giờ ${m} phút` : `${m} phút`} (lúc 7 giờ sáng)`;
+      }
+      return `Bạn đã dùng hết lượt chụp hôm nay. Thử lại ${when}. Vẫn quét mã vạch được.`;
+    }
+    case "rate":
+      return `Gửi nhanh quá, chờ ${retry != null ? `${retry} giây` : "ít giây"} rồi thử lại.`;
+    case "busy":
+      return `Máy chủ đọc chữ đang bận, thử lại sau ít giây. Trong lúc chờ, ${SCAN_HINT}`;
+    case "network":
+      return `Không kết nối được máy chủ đọc chữ (mất mạng hoặc máy chủ bận). Thử lại, hoặc ${SCAN_HINT}`;
+    case "timeout":
+      return `Máy chủ đọc chữ không trả lời kịp. Thử lại, hoặc ${SCAN_HINT}`;
+    case "tooBig":
+      return `Ảnh quá lớn. Chụp lại hoặc chọn ảnh khác, hoặc ${SCAN_HINT}`;
+    case "badType":
+      return `Máy chủ không đọc được loại ảnh này. Chọn ảnh JPEG hoặc PNG, hoặc ${SCAN_HINT}`;
+    default:
+      return `Chưa đọc được chữ trên ảnh. Thử lại sau, hoặc ${SCAN_HINT}`;
+  }
+}
+
 /** Số giây trong header Retry-After (chỉ dạng số nguyên); không có / sai → null. */
 function parseRetryAfter(value) {
   const s = String(value ?? "").trim();
