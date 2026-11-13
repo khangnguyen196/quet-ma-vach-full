@@ -14,6 +14,7 @@
  *                   TRƯỚC khi tách từ (STOP_WORDS của T1 có "co", nên "Co.op" thành "op" còn "COOP" thành "coop").
  *  fixWords: true – (a2) từ của câu tìm không có trong chỉ mục: thử thay MỘT chỗ theo FIX_RULES (đúng thứ tự, từ trái
  *                   sang), nhận biến thể đầu tiên có trong chỉ mục; không có thì giữ nguyên.
+ *  brandWeight: h – (c) từ thuộc trường brand nặng điểm hơn (xem weightBrand); 1 = như cũ.
  */
 export const DEFAULT_OPTS = Object.freeze({});
 
@@ -44,9 +45,31 @@ export function fixWord(index, w) {
 export function buildRankIndex(t1, products, opts = DEFAULT_OPTS) {
   const list = Array.isArray(products) ? products : [];
   const o = { ...opts };
-  const docText = (p) => (o.coop ? coopNorm(p.text) : p.text);
-  const index = t1.buildBm25(list.map((p) => ({ code: p.code, text: docText(p) })));
+  const norm = (s) => (o.coop ? coopNorm(s) : s);
+  let index = t1.buildBm25(list.map((p) => ({ code: p.code, text: norm(p.text) })));
+  if (Number.isFinite(o.brandWeight) && o.brandWeight !== 1) index = weightBrand(t1, index, list, o.brandWeight, norm);
   return { opts: o, index };
+}
+
+/**
+ * (c) Thương hiệu nặng điểm: f_eff(w) = f_text(w) + (h − 1) · f_brand(w), f_brand = số lần w có trong trường brand
+ * (qua bm25Tokens). Độ dài tài liệu + độ dài trung bình tính lại theo f_eff; idf (và danh sách tài liệu chứa từ) không đổi.
+ * Chữ tìm (text) đã gồm brand nên từ thương hiệu luôn có trong tài liệu; từ không có trong text thì bỏ qua.
+ * Ví dụ h = 2, text "Kem Co.op Select Co.op Select", brand "Co.op Select": f(select) = 2 + 1·1 = 3.
+ */
+function weightBrand(t1, index, products, h, norm) {
+  let total = 0;
+  const tf = index.tf.map((t, i) => {
+    const m = new Map(t.m);
+    const fb = new Map();
+    for (const w of t1.bm25Tokens(norm(String(products[i]?.brand ?? "")))) fb.set(w, (fb.get(w) || 0) + 1);
+    for (const [w, c] of fb) if (m.has(w)) m.set(w, m.get(w) + (h - 1) * c);
+    let len = 0;
+    for (const c of m.values()) len += c;
+    total += len;
+    return { code: t.code, m, len };
+  });
+  return { ...index, tf, avgdl: index.N ? total / index.N : 0 };
 }
 
 /** Tổng idf của các từ khác nhau trong câu tìm có trong chỉ mục BM25. */

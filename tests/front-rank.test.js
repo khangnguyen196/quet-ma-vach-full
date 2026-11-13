@@ -79,6 +79,37 @@ const MINI = [
   { code: "3", name: "Bánh quy bơ", brand: "Cosy", text: "Bánh quy bơ Cosy" },
 ];
 
+describe("(c) thương hiệu nặng điểm", () => {
+  test("f_eff = f_text + (h − 1)·f_brand, độ dài theo f_eff, idf không đổi", () => {
+    const base = mod.buildRankIndex(t1, MINI);
+    const c = mod.buildRankIndex(t1, MINI, { brandWeight: 2 });
+    assert.deepEqual([...c.index.idf], [...base.index.idf]);
+    // sp 1: text "kem danh rang op select op select", brand "op select" -> op 2+1, select 2+1
+    assert.equal(c.index.tf[0].m.get("select"), 3);
+    assert.equal(c.index.tf[0].m.get("op"), 3);
+    assert.equal(c.index.tf[0].m.get("kem"), 1);
+    assert.equal(c.index.tf[0].len, base.index.tf[0].len + 2);
+    const h15 = mod.buildRankIndex(t1, MINI, { brandWeight: 1.5 });
+    assert.equal(h15.index.tf[2].m.get("cosy"), 1.5);
+    const lens = c.index.tf.map((t) => t.len);
+    assert.equal(c.index.avgdl, lens.reduce((s, x) => s + x, 0) / lens.length);
+    // h = 1 thì như mặc định
+    assert.deepEqual(mod.buildRankIndex(t1, MINI, { brandWeight: 1 }).index, base.index);
+  });
+
+  test("từ thương hiệu được điểm cao hơn khi bật brandWeight", () => {
+    const docs = [
+      { code: "x", brand: "Cosy", text: "Bánh Cosy" },
+      { code: "y", brand: "Kinh Đô", text: "Bánh cosy Kinh Đô" },
+    ];
+    const off = mod.rankFromText(t1, mod.buildRankIndex(t1, docs), "cosy");
+    const on = mod.rankFromText(t1, mod.buildRankIndex(t1, docs, { brandWeight: 3 }), "cosy");
+    assert.ok(on.hits[0].score > off.hits[0].score);
+    assert.equal(on.hits[0].code, "x");
+    assert.equal(on.idfSum, off.idfSum);
+  });
+});
+
 describe("(a) chuẩn hóa hãng / cách viết", () => {
   test("coopNorm: Co.op / co-op / co op / CO. OP / COOP -> coop; không đụng từ khác", () => {
     assert.equal(mod.coopNorm("Co.op Select"), "coop Select");
