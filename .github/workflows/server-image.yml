@@ -13,9 +13,19 @@ on:
   workflow_dispatch:
 
 # Chỉ đọc mã + ghi package (ghcr.io). Không quyền nào khác.
+# Giữ packages: write ở cấp workflow trong 1 job (không tách job build / job đẩy): token chỉ được đưa vào
+# docker/login-action khi ref là main; checkout dùng persist-credentials: false; workflow không chạy pull_request
+# (nên không có lượt từ fork); tách 2 job thì phải chuyển ảnh Docker giữa 2 job, phức tạp hơn lợi ích.
 permissions:
   contents: read
   packages: write
+
+# shell: bash -> GitHub chạy "bash --noprofile --norc -eo pipefail {0}": lệnh hỏng giữa ống "|" (vd docker push | tee)
+# làm bước đỏ. Không khai thì GitHub chạy "bash -e {0}" (không pipefail): push hỏng mà bước vẫn xanh.
+# Ống nào được phép hỏng thì ghi "|| true" rõ ràng.
+defaults:
+  run:
+    shell: bash
 
 # Mỗi nhánh 1 lượt một lúc; nhánh thường thì lượt mới hủy lượt cũ, main thì chờ (không hủy giữa lúc đẩy ảnh).
 concurrency:
@@ -133,8 +143,9 @@ jobs:
           docker tag "$LOCAL" "$IMAGE:latest"
           docker tag "$LOCAL" "$IMAGE:$short"
           docker push "$IMAGE:$short"
-          docker push "$IMAGE:latest" | tee push.log
-          # digest lấy từ dòng "digest: sha256:…" của docker push (RepoDigests có thể trống với kho ảnh containerd)
+          docker push "$IMAGE:latest" | tee push.log  # pipefail: push hỏng thì bước đỏ (không bị tee che)
+          # digest lấy từ dòng "digest: sha256:…" của docker push (RepoDigests có thể trống với kho ảnh containerd);
+          # không tìm thấy digest thì vẫn xanh (ảnh đã đẩy xong): "|| true"
           digest=$(grep -o 'sha256:[0-9a-f]\{64\}' push.log | tail -n 1 || true)
           echo "digest: ${digest:-không đọc được}"
           {
@@ -144,7 +155,8 @@ jobs:
 
       - name: Log container khi hỏng
         if: failure()
-        run: docker logs ocr 2>&1 | tail -n 100 || true
+        # container ocr có thể đã bị xóa ở bước "Không đặt AUTH_MODE": khi đó in log của lượt chạy đó
+        run: docker logs ocr 2>&1 | tail -n 100 || cat macdinh.log 2>/dev/null || true
 
       - name: Dọn container
         if: always()
