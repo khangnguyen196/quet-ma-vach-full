@@ -11,7 +11,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { docText, rankCompare } from "./vn-data.mjs";
-import { displayName, frontImg, catalogMeta, catalogJson } from "./xuat-danh-muc.mjs";
+import { displayName, frontImg, catalogMeta, catalogJson, NGUON_VN, NGUON_VN_893 } from "./xuat-danh-muc.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
@@ -47,9 +47,33 @@ export function dropReasons(r) {
 }
 
 /** Cỡ một danh mục: thô + gzip level 9 (đúng định dạng file của app). */
-export function catalogSize(products) {
-  const s = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date: "2026-11-13" }), products);
+export function catalogSize(products, nguon = NGUON_VN) {
+  const s = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date: "2026-11-13", nguon }), products);
   return { raw: Buffer.byteLength(s), gzip: zlib.gzipSync(s, { level: 9 }).length };
+}
+
+/**
+ * Vòng 2 (P5): danh mục mở rộng THỬ. Luật chọn = luật danh mục cũ, chỉ nới nguồn: bản ghi (en:vietnam HOẶC mã 13 số
+ * đầu 893) có docText khác rỗng. Luật thứ tự: sản phẩm của danh mục cũ trước, đúng thứ tự và đúng bản ghi cũ; sản phẩm
+ * mới (mã chưa có) nối sau, xếp theo rankCompare. Mã trùng trong records: giữ bản đầu. Trả { products, added }.
+ */
+export function buildExtended(oldProducts, records) {
+  const oldCodes = new Set(oldProducts.map((p) => p.code));
+  if (oldCodes.size !== oldProducts.length) throw new Error("danh mục cũ có mã trùng");
+  const seen = new Set();
+  const fresh = [];
+  for (const r of records || []) {
+    if (!r || seen.has(r.code)) continue;
+    seen.add(r.code);
+    if (oldCodes.has(r.code)) continue;
+    if (!(r.vn || is893(r))) continue;
+    if (docText(r).trim() === "") continue;
+    fresh.push(r);
+  }
+  fresh.sort(rankCompare);
+  const products = [...oldProducts, ...fresh.map(catalogProduct)];
+  if (new Set(products.map((p) => p.code)).size !== products.length) throw new Error("danh mục mở rộng có mã trùng");
+  return { products, added: fresh.length };
 }
 
 function arg(name, def) {
@@ -57,7 +81,37 @@ function arg(name, def) {
   return i >= 0 && process.argv[i + 1] != null ? process.argv[i + 1] : def;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+/** Dựng + ghi danh mục mở rộng thử (KHÔNG ghi public/). Trả số liệu. */
+export function writeExtended({ appFile, extFile, outFile, date }) {
+  const oldText = fs.readFileSync(appFile, "utf8");
+  const old = JSON.parse(oldText).products;
+  const ext = JSON.parse(fs.readFileSync(extFile, "utf8"));
+  const { products, added } = buildExtended(old, ext);
+  const s = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date, nguon: NGUON_VN_893 }), products);
+  fs.mkdirSync(path.dirname(outFile), { recursive: true });
+  fs.writeFileSync(outFile, s, "utf8");
+  // kiểm lại từ file đã ghi: 1.452 dòng đầu trùng từng trường với file cũ, không trùng mã
+  const back = JSON.parse(fs.readFileSync(outFile, "utf8")).products;
+  const sameHead = old.every((p, i) => JSON.stringify(p) === JSON.stringify(back[i]));
+  if (!sameHead) throw new Error("phần đầu danh mục mở rộng lệch danh mục cũ");
+  if (new Set(back.map((p) => p.code)).size !== back.length) throw new Error("danh mục mở rộng có mã trùng");
+  return {
+    n: back.length, old: old.length, added, sameHead, raw: Buffer.byteLength(s), gzip: zlib.gzipSync(s, { level: 9 }).length,
+    withImg: back.filter((p) => p.img).length, overCap: zlib.gzipSync(s, { level: 9 }).length > GZIP_CAP,
+  };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes("--dung-mo-rong")) {
+  //   node test-ocr/chup-mat-do/nang-t1-danh-muc.mjs --dung-mo-rong [--mo-rong <file>] [--ra <file>]
+  const r = writeExtended({
+    appFile: path.join(ROOT, "public", "chup-mat-do", "danh-muc-vn.json"),
+    extFile: arg("mo-rong", "D:\\tmp\\nang-t1\\du-lieu\\mo-rong.json"),
+    outFile: arg("ra", "D:\\tmp\\nang-t1\\du-lieu\\danh-muc-mo-rong.json"),
+    date: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }),
+  });
+  console.log(`Danh mục mở rộng thử: ${JSON.stringify(r)}`);
+  if (r.overCap) { console.error("VƯỢT ≈ 300 KB gzip: DỪNG, không dùng."); process.exitCode = 1; }
+} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const vnFile = arg("vn", "D:\\tmp\\chup-mat-do\\du-lieu\\vn-products.json");
   const extFile = arg("mo-rong", "D:\\tmp\\nang-t1\\du-lieu\\mo-rong.json");
   const outDir = arg("out", "D:\\tmp\\nang-t1\\ket-qua");

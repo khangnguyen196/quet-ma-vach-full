@@ -7,8 +7,9 @@ import {
   boxToPoly, toPolyItems, splitGroups, HOLDOUT, ALL_CODES, saltItems, SALT_LINES, queryIdf, normScore, tally, seenMatch, compareSeen, SALT_SEEN,
   regressions, realGain, judge, choosePoint, idfOf,
 } from "../nang-t1-do.mjs";
-import { CRITERIA, catalogProduct, dropReasons, catalogSize } from "../nang-t1-danh-muc.mjs";
-import { catalogJson, catalogMeta } from "../xuat-danh-muc.mjs";
+import { CRITERIA, catalogProduct, dropReasons, catalogSize, buildExtended } from "../nang-t1-danh-muc.mjs";
+import fs from "node:fs";
+import { catalogJson, catalogMeta, NGUON_VN, NGUON_VN_893 } from "../xuat-danh-muc.mjs";
 
 test("boxToPoly: 4 góc theo chiều kim đồng hồ từ trên trái; box hỏng -> null", () => {
   assert.deepEqual(boxToPoly({ minX: 1, minY: 2, maxX: 30, maxY: 40 }), [[1, 2], [30, 2], [30, 40], [1, 40]]);
@@ -204,4 +205,36 @@ test("catalogProduct: đúng dạng danh mục app (img chỉ khi có ảnh fron
   const json = catalogJson(catalogMeta({ withNameBrand: true, count: 1, date: "2026-11-13" }), products);
   assert.equal(s.raw, Buffer.byteLength(json));
   assert.equal(s.gzip, zlib.gzipSync(json, { level: 9 }).length);
+});
+
+test("catalogMeta: nguon mặc định = câu cũ; danh mục app sinh lại trùng từng byte", () => {
+  assert.equal(catalogMeta({ withNameBrand: true, count: 1, date: "x" }).nguon, NGUON_VN);
+  assert.equal(catalogMeta({ withNameBrand: true, count: 1, date: "x", nguon: NGUON_VN_893 }).nguon, NGUON_VN_893);
+  assert.match(NGUON_VN_893, /en:vietnam hoặc mã vạch 13 số bắt đầu bằng 893$/);
+  const file = new URL("../../../public/chup-mat-do/danh-muc-vn.json", import.meta.url);
+  const text = fs.readFileSync(file, "utf8");
+  const { meta, products } = JSON.parse(text);
+  const again = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date: meta.ngayXuat }), products);
+  assert.equal(again, text);
+});
+
+test("buildExtended: danh mục cũ trước (nguyên bản ghi, nguyên thứ tự), sp mới nối sau theo rankCompare; luật chọn như cũ", () => {
+  const old = [{ code: "2", name: "B", brand: "", text: "B cũ" }, { code: "1", name: "A", brand: "", text: "A cũ" }];
+  const rec = (code, extra) => ({ code, names: { product_name: `sp ${code}` }, brands: "", generic: {}, fronts: [], vn: false, ...extra });
+  const records = [
+    rec("1", { vn: true, names: { product_name: "A mới" } }), // đã có trong danh mục cũ: giữ bản cũ
+    rec("8930000000003", { unique_scans_n: 1 }),
+    rec("8930000000004", { unique_scans_n: 5 }),
+    rec("8930000000004", { unique_scans_n: 9 }), // mã trùng: giữ bản đầu
+    rec("5000000000005", { vn: true, completeness: 0.9 }),
+    rec("5000000000006"), // không vn, không 893
+    rec("893000000007"), // 12 số: không tính là đầu 893
+    rec("8930000000008", { names: {} }), // chữ tìm rỗng
+  ];
+  const { products, added } = buildExtended(old, records);
+  assert.equal(added, 3);
+  assert.deepEqual(products.slice(0, 2), old);
+  assert.deepEqual(products.slice(2).map((p) => p.code), ["8930000000004", "8930000000003", "5000000000005"]);
+  assert.deepEqual(products[2], { code: "8930000000004", name: "sp 8930000000004", brand: "", text: "sp 8930000000004 " }); // docText nối cả brand rỗng (như danh mục cũ)
+  assert.throws(() => buildExtended([old[0], old[0]], []), /trùng/);
 });

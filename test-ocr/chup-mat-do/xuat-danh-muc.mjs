@@ -42,10 +42,16 @@ export function frontImg(fronts) {
 
 export const ODBL_URL = "https://opendatacommons.org/licenses/odbl/1-0/";
 
-/** Khối meta của danh mục: nguồn, giấy phép (vòng 6: thêm link ODbL 1.0 + câu cơ sở dữ liệu phái sinh), ngày xuất. */
-export function catalogMeta({ withNameBrand, count, date }) {
+/** Câu nguồn của danh mục app hiện tại (chỉ en:vietnam). */
+export const NGUON_VN = "Open Food Facts (https://world.openfoodfacts.org), bản xuất JSONL chính thức, sản phẩm có countries_tags en:vietnam";
+/** Câu nguồn của danh mục mở rộng (đợt nang-t1): thêm sản phẩm mã 13 số đầu 893. */
+export const NGUON_VN_893 = "Open Food Facts (https://world.openfoodfacts.org), bản xuất JSONL chính thức, sản phẩm có countries_tags en:vietnam hoặc mã vạch 13 số bắt đầu bằng 893";
+
+/** Khối meta của danh mục: nguồn, giấy phép (vòng 6: thêm link ODbL 1.0 + câu cơ sở dữ liệu phái sinh), ngày xuất.
+ *  nguon: câu nguồn (mặc định NGUON_VN = câu cũ, để file app sinh lại trùng từng byte). */
+export function catalogMeta({ withNameBrand, count, date, nguon = NGUON_VN }) {
   return {
-    nguon: "Open Food Facts (https://world.openfoodfacts.org), bản xuất JSONL chính thức, sản phẩm có countries_tags en:vietnam",
+    nguon,
     giayPhep: "ODbL 1.0 (dữ liệu) – © Open Food Facts contributors",
     ngayXuat: date,
     soSanPham: count,

@@ -138,8 +138,27 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     write(`v2-${step}-tong.json`, { nen, choice, chosenOpts, moc: mocSum, base: baseSum, points: all });
     if (choice.kept) write("v2-nen.json", { opts: chosenOpts, kept: [...nen.kept, { cach: step, diem: choice.chosen }] });
     else if (!fs.existsSync(nenFile)) write("v2-nen.json", nen);
+  } else if (step === "mo-rong") {
+    // P5: đo trên danh mục mở rộng thử (--catalog), mốc + cấu hình đã giữ (v2-nen.json), so với mốc trên danh mục CŨ.
+    if (!catalogFile) throw new Error("--buoc mo-rong cần --catalog <danh mục mở rộng>");
+    const mocOld = await measureBoth({}, "front-rank mặc định (danh mục cũ)", null);
+    const nen = JSON.parse(fs.readFileSync(path.join(outDir, "v2-nen.json"), "utf8"));
+    const cfgs = [{ name: "moc", opts: {} }];
+    if (Object.keys(nen.opts).length) cfgs.push({ name: "giu", opts: nen.opts });
+    const all = [];
+    for (const c of cfgs) {
+      const res = c.name === "moc" ? moc : await measureBoth(c.opts, c.name, catalogFile);
+      for (const s of SETS) write(`v2-mo-rong-${c.name}-${s}.json`, { opts: c.opts, ...res[s] });
+      const vsMocOld = judge({ base: mocOld, cand: res });
+      all.push(pointSummary(`${c.name} (danh mục mở rộng)`, res, vsMocOld, vsMocOld));
+    }
+    const mocSum = pointSummary("mốc (danh mục cũ)", mocOld, judge({ base: mocOld, cand: mocOld }), judge({ base: mocOld, cand: mocOld }));
+    console.log(`Danh mục ${catalogFile}; cấu hình đã giữ: ${JSON.stringify(nen.opts)}${cfgs.length === 1 ? " (= mốc)" : ""}`);
+    console.log(tableText([mocSum, ...all]));
+    for (const p of [mocSum, ...all]) console.log(saltText(p));
+    write("v2-mo-rong-tong.json", { catalogFile, nen, mocOld: mocSum, points: all });
   } else {
-    console.error(`--buoc phải là moc hoặc một trong ${METHOD_ORDER.join(", ")}`);
+    console.error(`--buoc phải là moc, mo-rong hoặc một trong ${METHOD_ORDER.join(", ")}`);
     process.exitCode = 1;
   }
 }
