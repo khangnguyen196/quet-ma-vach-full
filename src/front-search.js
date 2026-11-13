@@ -17,9 +17,24 @@ export function catalogUrl(base = APP_BASE) {
   return base + "chup-mat-do/danh-muc-vn.json";
 }
 
-/** Nạp module T1 (import động, Vite không đụng vào). Trình duyệt tự giữ module đã nạp. */
+/**
+ * Địa chỉ đầy đủ tính theo TRANG (page = document.baseURI). Cần vì bản build có base "./" (BASE_URL = "./"):
+ * fetch() tính đường tương đối theo trang, nhưng import() tính theo file JS đang chạy (assets/…), nên
+ * import("./chup-mat-do/t1.mjs") sẽ thành assets/chup-mat-do/t1.mjs (không có). Không có trang (node) → giữ nguyên.
+ * Ví dụ: pageUrl("./chup-mat-do/t1.mjs", "https://x.github.io/app/") → "https://x.github.io/app/chup-mat-do/t1.mjs"
+ */
+export function pageUrl(url, page) {
+  if (!page) return url;
+  try {
+    return new URL(url, page).href;
+  } catch {
+    return url;
+  }
+}
+
+/** Nạp module T1 (import động, Vite không đụng vào), địa chỉ tính theo trang. Trình duyệt tự giữ module đã nạp. */
 export function loadT1(url = t1ModuleUrl()) {
-  return import(/* @vite-ignore */ url);
+  return import(/* @vite-ignore */ pageUrl(url, globalThis.document?.baseURI));
 }
 
 const catalogCache = new Map(); // địa chỉ → promise
