@@ -6,7 +6,16 @@ giữ khóa Azure nào. Ảnh Docker do GitHub Actions build và đẩy lên `gh
 
 Gói: Azure for Students (không thẻ). Chỉ dùng phần miễn phí / credit; luôn để **scale tối thiểu 0** (mục "Chi phí").
 
-Trong file này không có địa chỉ app, URL hay khóa Supabase thật: thay `<...>` bằng giá trị của bạn khi bấm.
+## Máy chủ của dự án (tạo 13/11/2026)
+
+- Địa chỉ app: https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io (dùng `/health` để kiểm).
+- Vùng: **Malaysia West** (`malaysiawest`); Southeast Asia bị Azure for Students chặn (mục 2, Region).
+- Resource group `quet-ma-vach`, environment `quet-ma-vach-env` (không lưu log), app `quet-ma-vach-ocr`.
+- 1 vCPU / 2 GiB, ingress bên ngoài cổng 8080, scale tối thiểu 0, tối đa 1 (cooldown 300 giây), 6 biến môi trường như
+  bảng ở mục 2.
+
+Ngoài mục "Máy chủ của dự án" ở trên, file này không có địa chỉ app; không có URL hay khóa Supabase thật (chủ dự án yêu
+cầu ghi địa chỉ máy chủ). Thay `<...>` bằng giá trị của bạn khi bấm.
 
 ## 1. GitHub: cho package thành Public
 
@@ -21,6 +30,11 @@ chạy xanh (lúc đó package mới có).
 
 Ảnh chỉ có mã máy chủ + model + giấy phép (`LICENSES.md`), không có `.env`, không có khóa nào (xem `.dockerignore`).
 
+**Cảnh báo lần đẩy đầu**: lần đầu workflow đẩy package mới, bước "Đẩy ảnh" có thể đỏ với
+`error from registry: denied` (đã gặp: run 43382142507). Xử lý: chạy tay workflow (Actions → **Server image** → **Run
+workflow** trên `main`), KHÔNG bấm Re-run lượt đỏ. Vẫn `denied` thì vào package → **Package settings** → **Manage
+Actions access** → thêm repo `quet-ma-vach-full` quyền **Write**, rồi chạy tay lại.
+
 ## 2. Tạo Container App
 
 Vào `https://portal.azure.com` → ô tìm kiếm trên cùng gõ **Container Apps** → **Create** (hoặc **+ Create** →
@@ -32,12 +46,12 @@ Vào `https://portal.azure.com` → ô tìm kiếm trên cùng gõ **Container A
 - **Resource group**: bấm **Create new** → `quet-ma-vach` → OK.
 - **Container app name**: tên ngắn chữ thường, vd `quet-ma-vach-ocr` (tên này nằm trong địa chỉ https của app).
 - **Deployment source** (nếu có hỏi): **Container image**.
-- **Region**: **Southeast Asia**.
-  - Azure for Students chỉ cho tạo ở một số vùng. Nếu bấm **Review + create** mà báo lỗi có chữ
-    `RequestDisallowedByAzure`, `disallowed by policy` hoặc "not allowed … location", thì vùng đó bị chặn: quay lại chọn
-    vùng khác gần Việt Nam (vd East Asia, Japan East, Korea Central, Central India), thử lần lượt. Danh sách vùng được
-    phép xem ở Portal: tìm **Policy** → **Assignments** → mục có tên kiểu "Allowed resource deployment regions" /
-    "Allowed locations" → **Parameters**.
+- **Region**: **Malaysia West** (máy chủ của dự án ở vùng này).
+  - Azure for Students của dự án chặn Southeast Asia (**Review + create** báo `RequestDisallowedByAzure`) và chỉ cho 5
+    vùng (mã vùng): `indonesiacentral`, `malaysiawest`, `indiasouthcentral`, `centralindia`, `uaenorth`. Báo lỗi có chữ
+    `RequestDisallowedByAzure`, `disallowed by policy` hoặc "not allowed … location" là vùng đó bị chặn: quay lại chọn 1
+    trong 5 vùng trên. Danh sách vùng được phép xem ở Portal: tìm **Policy** → **Assignments** → mục có tên kiểu
+    "Allowed resource deployment regions" / "Allowed locations" → **Parameters**.
 - **Container Apps environment**: bấm **Create new**:
   - Tab Basics của môi trường: đặt tên, vd `quet-ma-vach-env`; **Environment type** (nếu có hỏi): **Consumption only**
     (Consumption, không chọn Workload profiles / Dedicated).
@@ -90,8 +104,9 @@ Lúc tạo, Portal để mặc định 0 – 10 bản chạy. Máy chủ chỉ �
 Container App → **Overview** → **Application Url** (dạng `https://<app>.<vùng>.azurecontainerapps.io`). Mở
 `https://<app>…/health`:
 
-- Lần đầu (máy chủ đang ngủ) chờ khoảng 20–60 giây (kéo ảnh + nạp model). Phải thấy
-  `{"ok":true,"modelLoaded":true,…}`.
+- Lần đầu (máy chủ đang ngủ) có thể chờ khoảng 20–60 giây (kéo ảnh + nạp model). Phải thấy
+  `{"ok":true,"modelLoaded":true,…}`. Số đo thật (13/11/2026): lần đầu 7,70 giây (không chắc lúc đó máy chủ đã ngủ
+  hẳn), các lần sau 0,27–0,29 giây; xem bảng đo ở `server/README.md`.
 - Mở `https://<app>…/ocr` trên trình duyệt (GET) thấy `{"error":"Phương thức không được hỗ trợ."}` là bình thường.
 - Gửi ảnh không đăng nhập phải bị **401** (kiểm ở Phần B của đợt `may-chu-2`).
 
@@ -101,7 +116,8 @@ Thử từ khu "Thử máy chủ OCR (chỉ khi chạy dev)": thêm vào `.env` 
 ## 4. Cập nhật khi có ảnh mới
 
 Mỗi lần `main` có đổi trong `server/`, workflow "Server image" đẩy ảnh mới với tag `latest` (và tag mã commit).
-Container App KHÔNG tự kéo lại `latest`. Để chạy ảnh mới:
+Commit chỉ đổi tài liệu trong `server/` (vd file này) cũng làm workflow đẩy ảnh mới; khi mã máy chủ không đổi thì không
+cần tạo revision mới. Container App KHÔNG tự kéo lại `latest`. Để chạy ảnh mới:
 
 1. Container App → **Application** → **Revisions and replicas** (hoặc **Containers**) → **Create new revision**
    (hoặc **Edit and deploy**).
@@ -126,7 +142,9 @@ Container App lẫn môi trường. Ảnh trên ghcr.io vẫn còn (xóa ở Git
 | Revision "Failed" / "Provisioning failed", log có `unauthorized`, `denied`, `manifest unknown` khi kéo ảnh | package trên ghcr.io còn Private, hoặc gõ sai tên ảnh / tag, hoặc workflow trên `main` chưa chạy xanh lần nào | làm mục 1; kiểm **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:latest`, registry `ghcr.io` |
 | Revision không chạy được, /health không trả lời, bản chạy khởi động lại liên tục | máy chủ không khởi động vì thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` (câu lỗi chỉ nêu tên biến), dán nhầm khóa bí mật, hoặc `ALLOWED_ORIGINS` sai dạng (có `*`, có đường dẫn) | sửa biến ở **Containers** → **Edit and deploy** → tab Container → Environment variables → tạo revision mới. Xem lỗi: menu **Monitoring** → **Log stream** (xem trực tiếp lúc revision đang khởi động; không lưu lại vì đã chọn "Don't save logs") |
 | Trang github.io / localhost báo "lỗi mạng", tab Network thấy lỗi CORS | nguồn của trang không có trong `ALLOWED_ORIGINS` (phải đúng `https://khangnguyen196.github.io`, không "/" cuối, không đường dẫn `/quet-ma-vach-full`) | sửa `ALLOWED_ORIGINS`, tạo revision mới |
-| Lần gọi đầu rất chậm (20–60 giây) rồi các lần sau nhanh | máy chủ đang ngủ (scale về 0) nên phải bật + nạp model; ngủ lại sau khoảng 5 phút không có yêu cầu | bình thường với scale tối thiểu 0 (để không tốn tiền); app / khu thử nên chờ lâu hơn lần đầu |
+| Lần gọi đầu rất chậm (20–60 giây) rồi các lần sau nhanh | máy chủ đang ngủ (scale về 0) nên phải bật + nạp model; ngủ lại sau khoảng 5 phút không có yêu cầu | bình thường với scale tối thiểu 0 (để không tốn tiền); app / khu thử nên chờ lâu hơn lần đầu. Số đo thật 13/11/2026: lần đầu 7,70 giây (không chắc lúc đó đã ngủ hẳn), lần sau 0,27–0,29 giây (bảng đo ở `server/README.md`) |
+| Workflow "Server image" đỏ ở bước "Đẩy ảnh", `error from registry: denied` | lần đầu tạo package bằng `GITHUB_TOKEN`, hoặc repo chưa có quyền ghi package | chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run lượt đỏ; vẫn `denied` thì package → Package settings → Manage Actions access → thêm repo `quet-ma-vach-full` quyền Write |
+| **Review + create** báo `RequestDisallowedByAzure` | vùng (Region) bị Azure for Students chặn (vd Southeast Asia) | chọn 1 trong 5 vùng được phép: `indonesiacentral`, `malaysiawest`, `indiasouthcentral`, `centralindia`, `uaenorth` (mục 2) |
 | 429 "đã gửi đủ 200 ảnh hôm nay" | `DAILY_LIMIT_PER_USER` (đếm theo ngày UTC, đổi ngày lúc 7 giờ sáng giờ Việt Nam) | chờ sang ngày, hoặc đặt biến lớn hơn |
 | Mọi người cùng bị 429 "tối đa 20 ảnh mỗi phút" | quên `TRUST_PROXY=1`: máy chủ thấy mọi người là cùng 1 IP (IP của proxy Azure) | đặt `TRUST_PROXY=1`, `PROXY_COUNT=1` |
 | Mở địa chỉ app thấy `{"error":"Không có đường dẫn này."}` (404) | trang gốc `/` của máy chủ không có gì, 404 là đúng | dùng `/health` |

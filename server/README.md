@@ -10,6 +10,9 @@ Nhận 1 ảnh mặt trước bao bì, trả các khung chữ để T1 (tìm s�
 **Lên Azure Container Apps** (đợt `may-chu-2`): GitHub Actions (`.github/workflows/server-image.yml`) build ảnh Docker,
 chạy thử, và CHỈ trên `main` đẩy lên `ghcr.io/khangnguyen196/quet-ma-vach-ocr`; chủ dự án tự tạo Container App trên Azure
 Portal theo **`server/AZURE.md`**. Máy dự án không có Docker: Dockerfile chỉ build / chạy được trên CI (mục "Docker").
+Máy chủ đang chạy tại https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io, vùng **Malaysia
+West** (Southeast Asia bị Azure for Students chặn; gói chỉ cho 5 vùng: `indonesiacentral`, `malaysiawest`,
+`indiasouthcentral`, `centralindia`, `uaenorth`). Kết quả kiểm: mục "Trên Azure" dưới mục Docker.
 
 ## Cài (Windows, mọi thứ ở ổ D)
 
@@ -422,6 +425,37 @@ libheif trên Linux) → ghi vào Summary của lượt chạy: cỡ ảnh (MB),
 và khi mọi bước trên đạt: đăng nhập ghcr.io bằng `GITHUB_TOKEN`, đẩy `ghcr.io/khangnguyen196/quet-ma-vach-ocr:latest` và
 `:<7 ký tự đầu mã commit>`, in digest vào Summary. Nhánh khác chỉ build + chạy thử, không đẩy.
 Tạo Container App trỏ vào ảnh này: `server/AZURE.md`.
+
+**Số CI thật** (run 43382316700, chạy tay trên `main` commit a295a86, 13/11/2026): ảnh 198,7 MB (208.316.342 byte), RAM
+đỉnh 293,3 MB (sau 2 ảnh OCR), khởi động tới `/health` 3,2 giây; tag `latest` + `a295a86`.
+
+**Cảnh báo lần đẩy đầu**: lượt push `main` đầu tiên của package mới (run 43382142507) đỏ ở bước "Đẩy ảnh" với
+`error from registry: denied`. Xử lý: chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run
+lượt đỏ. Vẫn `denied` thì package → Package settings → Manage Actions access → thêm repo `quet-ma-vach-full` quyền Write.
+
+### Trên Azure (đợt `may-chu-2` Phần B, 13/11/2026)
+
+Container App ở Malaysia West (1 vCPU / 2 GiB, scale 0–1, `AUTH_MODE=supabase`, `TRUST_PROXY=1`, `PROXY_COUNT=1`). Kiểm
+từ bên ngoài bằng curl, chỉ đọc, ~08:07–08:09 UTC, 12 lần gọi, không token thật:
+
+| # | Gọi | Kết quả |
+|---|---|---|
+| 1 | GET `/health` lần 1 (có thể đang ngủ; không biết lần gọi trước đó lúc nào) | 200, 7,70 giây (connect 2,66 s, TLS 3,35 s) |
+| 2 | GET `/health` 2 lần sau | 200, 0,273 s và 0,292 s |
+| 3 | thân `/health` | `{"ok":true,"modelLoaded":true,"engine":{"name":"rapidocr","version":"3.10.0","model":"PP-OCRv6 small det+rec, no cls"},"version":"0.1.0"}` |
+| 4 | POST `/ocr` không token (`chu.png`) | 401, `WWW-Authenticate: Bearer`, câu "thiếu token đăng nhập" |
+| 5 | POST `/ocr` token giả JWT ES256 `kid` lạ | 401, `WWW-Authenticate: Bearer error="invalid_token"` (không phải 503: máy chủ tải được khóa công khai Supabase) |
+| 6 | OPTIONS `/ocr`, Origin `https://khangnguyen196.github.io` | 200, `Access-Control-Allow-Origin` đúng nguồn; Allow-Methods GET, POST, OPTIONS |
+| 7 | OPTIONS, Origin `https://localhost:5173` | 200, `Access-Control-Allow-Origin` đúng nguồn |
+| 8 | OPTIONS, Origin `https://evil.example` | 400, không có `Access-Control-Allow-Origin` |
+| 9 | OPTIONS, Origin `https://khangnguyen196.github.io.evil.example` | 400, không có `Access-Control-Allow-Origin` |
+| 10 | GET `/` | 404 `{"error":"Không có đường dẫn này."}` |
+| 11 | GET `http://…/health` | 301 -> `https://…/health` |
+
+Lần đầu khi ngủ, lần 2 (sau >= 8 phút không gọi): (chờ số đo ngủ lần 2)
+
+Từ bên ngoài không đọc được Azure ghi `X-Forwarded-For` dạng nào (một dòng hay nhiều dòng header); việc để sau (d) ở
+`PLAN.md`.
 
 ## Giấy phép
 
