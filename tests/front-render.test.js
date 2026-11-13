@@ -89,10 +89,18 @@ describe("renderFrontResult: ô chữ + nút Tìm lại + gợi ý + nguồn", (
     assert.doesNotMatch(html, /<script>/);
   });
 
-  test("không có gợi ý → mời quét mã vạch hoặc nhập số, không có câu 'Kết quả gợi ý'", () => {
+  // Vòng 3 nang-t1: ĐỔI KỲ VỌNG (không nới): câu cũ "Không tìm thấy sản phẩm khớp…" được thay bằng khối
+  // "Không chắc chắn…" + 3 nút (Quét mã vạch / Nhập số mã / Góp sản phẩm), kể cả khi confident = true.
+  test("không có gợi ý → khối 'Không chắc chắn…' + 3 nút (thay câu cũ), không có câu 'Kết quả gợi ý'", () => {
     for (const hits of [[], null, undefined]) {
+      for (const confident of [undefined, false, true]) {
+        const html = R({ lines: ["abc"], hits, confident });
+        assert.match(text(html), /Không chắc chắn, có thể sản phẩm chưa có trong danh mục/);
+        assert.doesNotMatch(text(html), /Không tìm thấy sản phẩm khớp/);
+        assert.equal((html.match(/data-front-action=/g) || []).length, 2);
+        assert.match(html, /<div class="front-hits"><div class="front-unsure"/);
+      }
       const html = R({ lines: ["abc"], hits });
-      assert.match(text(html), /Không tìm thấy sản phẩm khớp\. Hãy quét mã vạch hoặc nhập số dưới mã vạch\./);
       assert.doesNotMatch(html, /Kết quả gợi ý/);
       assert.doesNotMatch(html, /data-front-code/);
       assert.match(html, /<textarea/); // vẫn cho sửa chữ rồi tìm lại
@@ -140,5 +148,59 @@ describe("renderFrontHits: chỉ danh sách gợi ý (vẽ lại khi bấm Tìm 
   test("cùng phần danh sách như renderFrontResult", () => {
     const hits = [hit("8934572260543")];
     assert.ok(R({ lines: ["a"], hits }).includes(render.renderFrontHits(hits)));
+    for (const confident of [true, false]) {
+      const inner = R({ lines: ["a"], hits, confident }).match(/<div class="front-hits">([\s\S]*?)<\/div>\n<p class="src/)[1];
+      assert.equal(inner, render.renderFrontHits(hits, { confident }));
+    }
+  });
+});
+
+describe("khối 'Không chắc chắn…' (vòng 3 nang-t1: confidenceOf của src/front-rank.js)", () => {
+  const UNSURE = /Không chắc chắn, có thể sản phẩm chưa có trong danh mục/;
+  const hits5 = ["8934572260543", "8934588022111", "8934614031322", "8934673300759", "8934803043891"].map((c) => hit(c));
+
+  test("confident false (hoặc không truyền) + có gợi ý → khối + vẫn 5 gợi ý + câu 'Kết quả gợi ý…'; khối đứng trước danh sách", () => {
+    for (const html of [render.renderFrontHits(hits5, { confident: false }), render.renderFrontHits(hits5), R({ lines: ["a"], hits: hits5 })]) {
+      assert.match(text(html), UNSURE);
+      assert.match(text(html), /Kết quả gợi ý, hãy chọn đúng sản phẩm/);
+      assert.equal((html.match(/data-front-code=/g) || []).length, 5);
+      assert.ok(html.indexOf("front-unsure") < html.indexOf("front-list"));
+    }
+  });
+
+  test("confident true + có gợi ý → không có khối (như trước), không có nút data-front-action", () => {
+    const html = R({ lines: ["a"], hits: hits5, confident: true });
+    assert.doesNotMatch(text(html), UNSURE);
+    assert.doesNotMatch(html, /front-unsure|data-front-action/);
+    assert.equal((html.match(/data-front-code=/g) || []).length, 5);
+    // chỉ true thật mới tính (chuỗi "true", 1 → vẫn thận trọng)
+    for (const confident of ["true", 1]) assert.match(text(render.renderFrontHits(hits5, { confident })), UNSURE);
+  });
+
+  test("3 nút: Quét mã vạch (scan), Nhập số mã (code) là button type=button; Góp sản phẩm là a.btn href=OFF_ADD_URL target=_blank rel=noopener", () => {
+    const html = render.renderFrontHits([], { confident: false });
+    const scan = html.match(/<button[^>]*data-front-action="scan"[^>]*>([^<]*)<\/button>/);
+    const code = html.match(/<button[^>]*data-front-action="code"[^>]*>([^<]*)<\/button>/);
+    assert.ok(scan && code);
+    assert.equal(scan[1], "Quét mã vạch");
+    assert.equal(code[1], "Nhập số mã");
+    for (const b of [scan[0], code[0]]) assert.match(b, /type="button"/);
+    const a = html.match(/<a ([^>]*)>([^<]*)<\/a>/);
+    assert.ok(a);
+    assert.equal(a[2], "Góp sản phẩm lên Open Food Facts");
+    const href = render.OFF_ADD_URL.replace(/&/g, "&amp;");
+    assert.ok(a[1].includes(`href="${href}"`), a[1]);
+    assert.match(a[1], /class="btn"/);
+    assert.match(a[1], /target="_blank"/);
+    assert.match(a[1], /rel="noopener"/);
+  });
+
+  test("chữ trong khối qua esc(); tên / thương hiệu gợi ý vẫn escape khi không chắc", () => {
+    assert.equal(render.esc(render.FRONT_UNSURE_TEXT), render.FRONT_UNSURE_TEXT); // câu tĩnh không có ký tự HTML
+    const evil = '<script>alert(1)</script>"\'&';
+    const html = render.renderFrontHits([hit("8934572260543", { name: evil, brand: evil })], { confident: false });
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;&quot;&#39;&amp;/);
+    assert.match(text(html), UNSURE);
   });
 });

@@ -8,7 +8,8 @@ import {
   renderFrontResult, renderFrontHits, frontHitsShown, FRONT_TEXT_ID
 } from "./render.js";
 import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText } from "./front-photo.js";
-import { loadT1, loadCatalog, t1ModuleUrl, suggestFromItems, suggestFromText, hitProducts } from "./front-search.js";
+import { loadT1, loadCatalog, t1ModuleUrl, hitProducts } from "./front-search.js";
+import { buildRankIndex, rankFromItems, rankFromText, confidenceOf } from "./front-rank.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
@@ -138,6 +139,14 @@ btnCam.addEventListener("click", async () => {
   if (busy) return; // phòng xa: sự kiện tới trước khi disabled kịp có hiệu lực
   // Camera đang chạy thì nút là "Tắt camera": không khóa, bấm là tắt.
   if (scanner.running) { await stopCam(); setMsg(); return; }
+  await startCam();
+});
+
+/**
+ * Bật camera (nút "Bật camera" và nút "Quét mã vạch" của "Chụp mặt trước" cùng gọi hàm này). Phải gọi NGAY trong sự kiện
+ * bấm (getUserMedia chạy trước lần chờ đầu tiên), để trình duyệt (nhất là iPhone) cho mở camera.
+ */
+async function startCam() {
   reader.innerHTML = "";
   setMsg("Đang mở camera…");
   setBusy(true); // khóa từ lúc mở camera (có thể đang chờ người dùng cho quyền) tới khi xong hoặc lỗi
@@ -163,7 +172,7 @@ btnCam.addEventListener("click", async () => {
   } finally {
     setBusy(false);
   }
-});
+}
 
 // ---- Chụp ảnh mã ----
 fileInput.addEventListener("change", async (ev) => {
@@ -874,7 +883,7 @@ btnFrontRelogin.addEventListener("click", goToLogin);
 let frontTurn = 0; // số lượt chọn ảnh, như biến current của lookup(): lượt cũ về muộn thì bỏ (đăng xuất cũng tăng)
 let frontPicks = 0; // chỉ đếm số lần chọn ảnh (đăng xuất không tăng): dùng sau khi làm mới phiên lúc gặp 401
 let frontAbort = null; // AbortController của lượt đang gửi (chọn ảnh khác thì hủy)
-let frontSearch = null; // { t1, products, index } khi đã tải xong (dùng cho "Tìm lại")
+let frontSearch = null; // { t1, products, rIndex } khi đã tải xong (dùng cho "Tìm lại")
 let frontSearchPromise = null;
 let frontT1Tries = 0;
 
@@ -894,7 +903,8 @@ function loadFrontSearch() {
       }),
       loadCatalog()
     ]).then(([t1, catalog]) => {
-      frontSearch = { t1, products: catalog.products, index: t1.buildBm25(catalog.products) };
+      // Chỉ mục xếp hạng của src/front-rank.js (mặc định cho đúng gợi ý như T1 cũ, kèm idfSum cho điểm tin cậy)
+      frontSearch = { t1, products: catalog.products, rIndex: buildRankIndex(t1, catalog.products) };
       return frontSearch;
     });
     frontSearchPromise = p;
@@ -911,10 +921,16 @@ function bindFrontImages() {
   }, { once: true }));
 }
 
-/** Câu trạng thái theo đúng số gợi ý được vẽ (frontHitsShown: lọc mã + cắt 5). */
-function hitsText(hits) {
+/** Câu trạng thái theo đúng số gợi ý được vẽ (frontHitsShown: lọc mã + cắt 5); không chắc thì thêm "(không chắc chắn)". */
+function hitsText(hits, confident) {
   const n = frontHitsShown(hits).length;
-  return n ?`Có ${n} gợi ý bên dưới. Hãy chọn đúng sản phẩm.` : "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+  if (!n) return "Không tìm thấy sản phẩm khớp (không chắc chắn). Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+  return `Có ${n} gợi ý bên dưới${confident ? "" : " (không chắc chắn)"}. Hãy chọn đúng sản phẩm.`;
+}
+
+/** Tìm (khung chữ máy chủ hoặc chữ trong ô) → { hits để vẽ, confident } theo src/front-rank.js. */
+function frontFound(s, found) {
+  return { found, hits: hitProducts(s.products, found.hits), confident: confidenceOf(found).confident };
 }
 
 frontFile.addEventListener("change", async (ev) => {
@@ -1010,26 +1026,37 @@ frontFile.addEventListener("change", async (ev) => {
     return;
   }
   if (stale()) return;
-  const found = suggestFromItems(s.t1, s.index, r.items);
-  const hits = hitProducts(s.products, found.hits);
-  frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded });
+  const { found, hits, confident } = frontFound(s, rankFromItems(s.t1, s.rIndex, r.items));
+  frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded, confident });
   frontBox.hidden = false;
   bindFrontImages();
-  sayFront(hitsText(hits));
+  sayFront(hitsText(hits, confident));
 });
 
-// Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô) và bấm gợi ý (tra mã như khi quét).
+// Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối
+// "Không chắc chắn…" ("Quét mã vạch", "Nhập số mã"; nút góp sản phẩm là link thường).
 frontBox.addEventListener("click", (ev) => {
   const pick = ev.target.closest("button[data-front-code]");
   if (pick) { lookup(pick.dataset.frontCode); return; } // không tự chọn thay người dùng: chỉ khi bấm
+  const act = ev.target.closest("button[data-front-action]");
+  if (act) {
+    if (act.dataset.frontAction === "scan") {
+      // Bật camera NGAY trong sự kiện bấm (như nút "Bật camera"), rồi cuộn tới khung camera.
+      if (!busy && !scanner.running) startCam();
+      reader.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (act.dataset.frontAction === "code") {
+      codeInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      codeInput.focus({ preventScroll: true });
+    }
+    return;
+  }
   if (!ev.target.closest("button[data-front-retry]") || !frontSearch) return;
   const text = frontBox.querySelector(`#${FRONT_TEXT_ID}`)?.value || "";
-  const found = suggestFromText(frontSearch.t1, frontSearch.index, text);
-  const hits = hitProducts(frontSearch.products, found.hits);
+  const { hits, confident } = frontFound(frontSearch, rankFromText(frontSearch.t1, frontSearch.rIndex, text));
   const list = frontBox.querySelector(".front-hits");
-  if (list) list.innerHTML = renderFrontHits(hits);
+  if (list) list.innerHTML = renderFrontHits(hits, { confident });
   bindFrontImages();
-  sayFront(hitsText(hits));
+  sayFront(hitsText(hits, confident));
 });
 
 updateFrontButton();

@@ -473,7 +473,12 @@ table.cmp-table .empty { font-size: 13px; }
 .front-retry .btn { flex: 0 0 auto; min-height: 44px; }
 .front-raw { font-size: 13px; color: var(--warn); }
 .front-lead { font-weight: 700; }
-.front-none { font-size: 15px; }
+/* Khối "Không chắc chắn…" (vòng 3 nang-t1): màu theo biến :root (có bản tối); 3 nút xuống dòng gọn ở màn 360 px */
+.front-unsure { margin-bottom: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
+.front-unsure-text { font-weight: 700; color: var(--warn); }
+.front-unsure-actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.front-unsure-actions .btn { flex: 1 1 9em; min-height: 44px; padding: 6px 12px; color: var(--ink); text-decoration: none; }
+.front-unsure-actions a.btn { flex-basis: 100%; }
 .front-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
 .front-hit {
   width: 100%; min-height: 76px; padding: 6px 10px 6px 6px;

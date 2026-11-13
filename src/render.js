@@ -465,13 +465,14 @@ export function frontHitsShown(hits) {
  * Danh sách gợi ý (vẽ lại riêng khi bấm "Tìm lại"). hits: [{ code, name, brand, image }] (hitProducts của
  * src/front-search.js). Tối đa FRONT_MAX_HITS; mã không phải 8–14 chữ số thì bỏ. Ảnh qua labelImageUrl (lạ → "chưa có
  * ảnh"); ảnh tải lỗi thì main.js đổi sang "chưa có ảnh" bằng addEventListener("error") (không có onerror ở đây).
- * Không có gợi ý → mời quét mã vạch / nhập số (không đoán).
+ * confident (confidenceOf của src/front-rank.js): false / không truyền (thận trọng), hoặc không có gợi ý → khối
+ * "Không chắc chắn…" + 3 nút (Quét mã vạch, Nhập số mã, Góp sản phẩm), có gợi ý thì vẫn hiện bên dưới để người dùng
+ * tự chọn (không tự chọn thay). confident true và có gợi ý → chỉ danh sách (như trước vòng 3).
  */
-export function renderFrontHits(hits) {
+export function renderFrontHits(hits, { confident = false } = {}) {
   const list = frontHitsShown(hits);
-  if (!list.length) {
-    return '<p class="front-none">Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.</p>';
-  }
+  const unsure = confident === true && list.length ? "" : renderFrontUnsure();
+  if (!list.length) return unsure;
   const items = list.map((h) => {
     const img = labelImageUrl(h.image);
     const pic = img
@@ -482,15 +483,31 @@ export function renderFrontHits(hits) {
     return `<li><button type="button" class="front-hit" data-front-code="${h.code}">${pic}
 <span class="front-info"><span class="front-name">${name}</span><span class="front-brand">${brand}</span><span class="front-code">Mã ${h.code}</span></span></button></li>`;
   }).join("");
-  return `<p class="front-lead">Kết quả gợi ý, hãy chọn đúng sản phẩm</p><ul class="front-list">${items}</ul>`;
+  return `${unsure}<p class="front-lead">Kết quả gợi ý, hãy chọn đúng sản phẩm</p><ul class="front-list">${items}</ul>`;
+}
+
+/** Câu của khối "không chắc chắn" (vòng 3 nang-t1). */
+export const FRONT_UNSURE_TEXT = "Không chắc chắn, có thể sản phẩm chưa có trong danh mục";
+
+/**
+ * Khối "Không chắc chắn…": câu + "Quét mã vạch" (data-front-action="scan": main.js bật camera như nút "Bật camera"),
+ * "Nhập số mã" (data-front-action="code": cuộn tới ô nhập số) và link góp sản phẩm lên Open Food Facts (như nút góp ở
+ * màn "Chưa có mã"). Nằm trong .front-hits để "Tìm lại" vẽ lại đúng.
+ */
+function renderFrontUnsure() {
+  return `<div class="front-unsure" role="note"><p class="front-unsure-text">${esc(FRONT_UNSURE_TEXT)}</p>
+<div class="front-unsure-actions"><button type="button" class="btn" data-front-action="scan">${esc("Quét mã vạch")}</button>
+<button type="button" class="btn" data-front-action="code">${esc("Nhập số mã")}</button>
+<a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">${esc("Góp sản phẩm lên Open Food Facts")}</a></div></div>`;
 }
 
 /**
  * Kết quả "Chụp mặt trước": ô sửa chữ đọc được (mỗi dòng 1 hàng chữ) + nút "Tìm lại" + danh sách gợi ý + dòng nguồn.
  * lines: chữ từng hàng (từ máy chủ OCR, qua esc()); hits: như renderFrontHits; reencoded false: ảnh đã gửi nguyên bản.
  * Nút "Tìm lại" có data-front-retry, gợi ý có data-front-code (main.js bắt bằng 1 listener trên #frontBox).
+ * confident: như renderFrontHits (false / không truyền → có khối "Không chắc chắn…").
  */
-export function renderFrontResult({ lines, hits, reencoded } = {}) {
+export function renderFrontResult({ lines, hits, reencoded, confident = false } = {}) {
   const value = (Array.isArray(lines) ? lines : []).map((s) => String(s ?? "")).join("\n");
   const raw = reencoded === false
     ? '<p class="front-raw">Ảnh này được gửi nguyên bản (máy không thu nhỏ được).</p>'
@@ -500,7 +517,7 @@ export function renderFrontResult({ lines, hits, reencoded } = {}) {
 <textarea id="${FRONT_TEXT_ID}" class="front-text" rows="4" spellcheck="false" autocomplete="off">${esc(value)}</textarea>
 <div class="actions front-retry"><button class="btn" type="button" data-front-retry>Tìm lại</button></div>
 </div>${raw}
-<div class="front-hits">${renderFrontHits(hits)}</div>
+<div class="front-hits">${renderFrontHits(hits, { confident })}</div>
 <p class="src front-source">Gợi ý từ danh mục dữ liệu Open Food Facts (<a href="${esc(ODBL_URL)}" target="_blank" rel="noopener">ODbL</a>)</p>`;
 }
 
