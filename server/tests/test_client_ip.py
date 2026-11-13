@@ -33,7 +33,12 @@ def test_bo_cong_giu_ip(xff, expected):
     assert client_ip(_req(xff), trust_proxy=True, proxy_count=1) == expected
 
 
-@pytest.mark.parametrize("xff", ["rac", "unknown", "1.2.3.4:abc", "[2001:db8::1", "999.1.1.1", "1.2.3.4:51234:9"])
+@pytest.mark.parametrize("xff", [
+    "rac", "unknown", "1.2.3.4:abc", "[2001:db8::1", "999.1.1.1", "1.2.3.4:51234:9",
+    # cổng quá dài: int() của Python 3.12 ném ValueError với chuỗi > 4300 chữ số -> phải kiểm độ dài trước (vòng 3)
+    "1.2.3.4:" + "9" * 5000,
+    "[2001:db8::1]:" + "9" * 5000,
+])
 def test_sai_dang_dung_ip_socket(xff):
     assert client_ip(_req(xff), trust_proxy=True, proxy_count=1) == SOCK
 
@@ -64,3 +69,9 @@ def test_cung_ip_khac_cong_bi_dem_chung_gioi_han_phut(make_app):
         return a, b, c
 
     assert asyncio.run(go()) == (200, 429, 200)
+
+
+def test_cong_qua_dai_qua_app_khong_loi_500(make_app):
+    """X-Forwarded-For có cổng 5000 chữ số: dùng IP socket, trả 200 (không 500 vì ValueError)."""
+    app = make_app(trust_proxy=True)
+    assert asyncio.run(_apost(app, "203.0.113.20:" + "9" * 5000)) == 200
