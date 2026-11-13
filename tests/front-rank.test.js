@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import * as t1 from "../public/chup-mat-do/t1.mjs";
 import { suggestFromItems, suggestFromText, hitProducts } from "../src/front-search.js";
 
-const mod = await import("../src/front-rank.js").catch(() => ({}));
+import * as mod from "../src/front-rank.js"; // import lỗi thì cả file test đỏ (không nuốt lỗi)
 
 const catalogPath = fileURLToPath(new URL("../public/chup-mat-do/danh-muc-vn.json", import.meta.url));
 const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));

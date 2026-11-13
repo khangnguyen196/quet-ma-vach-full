@@ -7,8 +7,11 @@ import {
   boxToPoly, toPolyItems, splitGroups, HOLDOUT, ALL_CODES, saltItems, SALT_LINES, queryIdf, normScore, tally, seenMatch, compareSeen, SALT_SEEN,
   regressions, realGain, judge, choosePoint, idfOf,
 } from "../nang-t1-do.mjs";
-import { CRITERIA, catalogProduct, dropReasons, catalogSize, buildExtended } from "../nang-t1-danh-muc.mjs";
+import { CRITERIA, catalogProduct, dropReasons, catalogSize, buildExtended, writeExtended } from "../nang-t1-danh-muc.mjs";
+import { diffBaseline, loadNen } from "../nang-t1-thu.mjs";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { catalogJson, catalogMeta, NGUON_VN, NGUON_VN_893 } from "../xuat-danh-muc.mjs";
 
 test("boxToPoly: 4 góc theo chiều kim đồng hồ từ trên trái; box hỏng -> null", () => {
@@ -90,6 +93,15 @@ test("realGain: hơn hẳn gợi ý ngay sau mới tính; bằng điểm thì kh
   assert.equal(realGain(R("a", 5, [9, 8, 7, 6, 5, 5])), false); // vị trí 5 bằng gợi ý thứ 6
   assert.equal(realGain(R("a", 3, [9, 8, 7])), true); // không có gợi ý sau
   assert.equal(realGain(R("a", null, [9])), false);
+});
+
+test("realGain: dòng có hạng mà không có scores -> lỗi rõ (không âm thầm false)", () => {
+  assert.throws(() => realGain(R("a", 1)), /a.*không có scores/);
+  assert.throws(() => realGain({ code: "b", rank: 2, scores: "1,2" }), /không có scores/);
+  // judge trên rows vòng 1 (không scores) có mã tăng -> lỗi, không ra gainChinh 0
+  const base = ALL_CODES.map((code) => ({ code, rank: 2 }));
+  const cand = ALL_CODES.map((code) => ({ code, rank: 1 }));
+  assert.throws(() => judge({ base: { A: base, B: base }, cand: { A: cand, B: cand } }), /không có scores/);
 });
 
 /** Dựng 30 dòng (theo ALL_CODES) với hạng mặc định 1, điểm hơn hẳn; ghi đè vài mã. */
@@ -237,4 +249,78 @@ test("buildExtended: danh mục cũ trước (nguyên bản ghi, nguyên thứ t
   assert.deepEqual(products.slice(2).map((p) => p.code), ["8930000000004", "8930000000003", "5000000000005"]);
   assert.deepEqual(products[2], { code: "8930000000004", name: "sp 8930000000004", brand: "", text: "sp 8930000000004 " }); // docText nối cả brand rỗng (như danh mục cũ)
   assert.throws(() => buildExtended([old[0], old[0]], []), /trùng/);
+});
+
+// ---- gợi ý reviewer vòng 2 (vòng 3 P1) ----
+const mkTmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "nang-t1-test-"));
+
+test("writeExtended: gzip tính một lần, kiểm trần TRƯỚC khi ghi (vượt trần -> không ghi file)", () => {
+  const dir = mkTmp();
+  try {
+    const appFile = path.join(dir, "app.json");
+    const extFile = path.join(dir, "ext.json");
+    const old = [{ code: "1", name: "A", brand: "", text: "A cũ" }];
+    fs.writeFileSync(appFile, catalogJson(catalogMeta({ withNameBrand: true, count: 1, date: "x" }), old), "utf8");
+    const recs = [{ code: "8930000000003", names: { product_name: "Muối" }, brands: "Co.op", generic: {}, fronts: [], vn: false }];
+    fs.writeFileSync(extFile, JSON.stringify(recs), "utf8");
+    const over = path.join(dir, "over.json");
+    const r1 = writeExtended({ appFile, extFile, outFile: over, date: "x", cap: 10 });
+    assert.equal(r1.overCap, true);
+    assert.equal(r1.written, false);
+    assert.equal(fs.existsSync(over), false, "vượt trần thì không được ghi file");
+    const ok = path.join(dir, "ok.json");
+    const r2 = writeExtended({ appFile, extFile, outFile: ok, date: "x" });
+    assert.equal(r2.overCap, false);
+    assert.equal(r2.written, true);
+    assert.equal(r2.sameHead, true);
+    assert.equal(r2.n, 2);
+    const s = fs.readFileSync(ok, "utf8");
+    assert.equal(r2.raw, Buffer.byteLength(s));
+    assert.equal(r2.gzip, zlib.gzipSync(s, { level: 9 }).length);
+    assert.equal(r1.gzip, r2.gzip); // cùng nội dung -> cùng số, dù không ghi
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("diffBaseline: so vị trí, câu tìm, top5, mọi điểm scores (cả vị trí 3–6), idfSum, norm", () => {
+  const row = (over = {}) => ({ code: "a", rank: 1, query: "q", top5: ["a", "b"], top1Score: 9, top2Score: 5, idfSum: 10, norm: 0.9, scores: [9, 5, 4, 3, 2, 1], ...over });
+  assert.deepEqual(diffBaseline([row()], [row()]), []);
+  assert.deepEqual(diffBaseline([row({ scores: [9, 5, 4, 3, 2, 1.5] })], [row()]), ["a"]); // điểm vị trí 6
+  assert.deepEqual(diffBaseline([row({ scores: [9, 5, 4.2, 3, 2, 1] })], [row()]), ["a"]); // điểm vị trí 3
+  assert.deepEqual(diffBaseline([row({ scores: [9, 5, 4, 3, 2] })], [row()]), ["a"]); // thiếu điểm
+  assert.deepEqual(diffBaseline([row({ idfSum: 10.5 })], [row()]), ["a"]);
+  assert.deepEqual(diffBaseline([row({ norm: 0.8 })], [row()]), ["a"]);
+  assert.deepEqual(diffBaseline([row({ query: "x" })], [row()]), ["a"]);
+  assert.deepEqual(diffBaseline([row({ rank: 2 })], [row()]), ["a"]);
+  assert.deepEqual(diffBaseline([row({ top5: ["b", "a"] })], [row()]), ["a"]);
+  // mốc vòng 1 không có scores: bỏ qua phần scores, trừ khi requireScores
+  const { scores, ...old } = row();
+  assert.equal(scores.length, 6);
+  assert.deepEqual(diffBaseline([row()], [old]), []);
+  assert.deepEqual(diffBaseline([row()], [old], { requireScores: true }), ["a"]);
+  assert.deepEqual(diffBaseline([row(), row({ code: "b" })], [row()]), ["b", "số dòng 2 ≠ 1"]);
+});
+
+test("loadNen: chưa có file nền -> lỗi (không tự tạo); --nen-moi -> ghi nền mới từ mốc; có file -> đọc + thời gian", () => {
+  const dir = mkTmp();
+  try {
+    const file = path.join(dir, "v2-nen.json");
+    assert.throws(() => loadNen(file), /--nen-moi/);
+    assert.equal(fs.existsSync(file), false, "không được tự tạo file nền");
+    const writes = [];
+    const fresh = loadNen(file, { nenMoi: true, write: (n) => { writes.push(n); fs.writeFileSync(file, JSON.stringify(n), "utf8"); } });
+    assert.deepEqual(fresh.nen, { opts: {}, kept: [] });
+    assert.equal(fresh.fresh, true);
+    assert.equal(fresh.stamp, null);
+    assert.equal(writes.length, 1);
+    fs.writeFileSync(file, JSON.stringify({ opts: { x: 1 }, kept: [{ cach: "a", diem: "a1" }] }), "utf8");
+    const got = loadNen(file);
+    assert.deepEqual(got.nen.opts, { x: 1 });
+    assert.equal(got.fresh, false);
+    assert.match(got.stamp, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(got.file, file);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -81,13 +81,21 @@ function arg(name, def) {
   return i >= 0 && process.argv[i + 1] != null ? process.argv[i + 1] : def;
 }
 
-/** Dựng + ghi danh mục mở rộng thử (KHÔNG ghi public/). Trả số liệu. */
-export function writeExtended({ appFile, extFile, outFile, date }) {
+/**
+ * Dựng + ghi danh mục mở rộng thử (KHÔNG ghi public/). Trả số liệu.
+ * gzip tính MỘT lần và kiểm vượt trần (GZIP_CAP, ≈ 300 KB) TRƯỚC khi ghi: vượt thì KHÔNG ghi file, trả
+ * { overCap: true, written: false, ... } (nơi gọi báo DỪNG).
+ */
+export function writeExtended({ appFile, extFile, outFile, date, cap = GZIP_CAP }) {
   const oldText = fs.readFileSync(appFile, "utf8");
   const old = JSON.parse(oldText).products;
   const ext = JSON.parse(fs.readFileSync(extFile, "utf8"));
   const { products, added } = buildExtended(old, ext);
   const s = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date, nguon: NGUON_VN_893 }), products);
+  const raw = Buffer.byteLength(s);
+  const gzip = zlib.gzipSync(s, { level: 9 }).length;
+  const withImg = products.filter((p) => p.img).length;
+  if (gzip > cap) return { n: products.length, old: old.length, added, sameHead: null, raw, gzip, withImg, overCap: true, written: false };
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(outFile, s, "utf8");
   // kiểm lại từ file đã ghi: 1.452 dòng đầu trùng từng trường với file cũ, không trùng mã
@@ -95,10 +103,7 @@ export function writeExtended({ appFile, extFile, outFile, date }) {
   const sameHead = old.every((p, i) => JSON.stringify(p) === JSON.stringify(back[i]));
   if (!sameHead) throw new Error("phần đầu danh mục mở rộng lệch danh mục cũ");
   if (new Set(back.map((p) => p.code)).size !== back.length) throw new Error("danh mục mở rộng có mã trùng");
-  return {
-    n: back.length, old: old.length, added, sameHead, raw: Buffer.byteLength(s), gzip: zlib.gzipSync(s, { level: 9 }).length,
-    withImg: back.filter((p) => p.img).length, overCap: zlib.gzipSync(s, { level: 9 }).length > GZIP_CAP,
-  };
+  return { n: back.length, old: old.length, added, sameHead, raw, gzip, withImg: back.filter((p) => p.img).length, overCap: false, written: true };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv.includes("--dung-mo-rong")) {
@@ -110,7 +115,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     date: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }),
   });
   console.log(`Danh mục mở rộng thử: ${JSON.stringify(r)}`);
-  if (r.overCap) { console.error("VƯỢT ≈ 300 KB gzip: DỪNG, không dùng."); process.exitCode = 1; }
+  if (r.overCap) { console.error("VƯỢT ≈ 300 KB gzip: DỪNG, không ghi file, không dùng."); process.exitCode = 1; }
 } else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const vnFile = arg("vn", "D:\\tmp\\chup-mat-do\\du-lieu\\vn-products.json");
   const extFile = arg("mo-rong", "D:\\tmp\\nang-t1\\du-lieu\\mo-rong.json");

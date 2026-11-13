@@ -144,10 +144,12 @@ export function regressions(baseRows, newRows, { strict = false } = {}) {
 const GAIN_EPS = 1e-9;
 
 /** "Tăng thật": ở vị trí mới, điểm của đáp án lớn hơn hẳn điểm gợi ý ngay sau (row.scores = điểm top 6, theo thứ tự).
- *  Không có gợi ý sau thì tính là hơn. Bằng điểm (chỉ nhờ thứ tự trong danh mục) thì không tính. */
+ *  Không có gợi ý sau thì tính là hơn. Bằng điểm (chỉ nhờ thứ tự trong danh mục) thì không tính.
+ *  Dòng không có scores (vd rows vòng 1) -> lỗi rõ, không âm thầm trả false (gainChinh sẽ luôn 0). */
 export function realGain(row) {
   if (!row || row.rank == null) return false;
-  const s = row.scores || [];
+  if (!Array.isArray(row.scores)) throw new Error(`realGain: dòng ${row.code ?? "?"} không có scores (điểm top 6) – cần kết quả measure vòng 2 trở đi`);
+  const s = row.scores;
   const mine = s[row.rank - 1];
   if (!Number.isFinite(mine)) return false;
   const next = s[row.rank];
