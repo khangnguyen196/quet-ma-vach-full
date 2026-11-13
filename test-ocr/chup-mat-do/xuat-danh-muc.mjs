@@ -40,7 +40,7 @@ export function frontImg(fronts) {
   return f ? `${f.key}.${f.rev}` : "";
 }
 
-export const ODBL_URL ="https://opendatacommons.org/licenses/odbl/1-0/";
+export const ODBL_URL = "https://opendatacommons.org/licenses/odbl/1-0/";
 
 /** Khối meta của danh mục: nguồn, giấy phép (vòng 6: thêm link ODbL 1.0 + câu cơ sở dữ liệu phái sinh), ngày xuất. */
 export function catalogMeta({ withNameBrand, count, date }) {

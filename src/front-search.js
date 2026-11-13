@@ -4,8 +4,9 @@
 // MỘT bản danh mục: public/chup-mat-do/danh-muc-vn.json (dữ liệu Open Food Facts, ODbL).
 // Các hàm tìm nhận module T1 (t1) làm tham số để test node truyền thẳng file public/chup-mat-do/t1.mjs.
 
-// import.meta.env?. : chạy test bằng node (không qua Vite) thì không có import.meta.env → base "/"
-const APP_BASE = import.meta.env?.BASE_URL || "/";
+// Viết thẳng import.meta.env.BASE_URL (không dùng ?.) để Vite chắc chắn thay bằng chuỗi base lúc build ("./" ở bản
+// build, "/" khi dev). Chạy test bằng node (không qua Vite) thì không có import.meta.env → typeof kiểm trước → "/".
+const APP_BASE = (typeof import.meta.env !== "undefined" && import.meta.env.BASE_URL) || "/";
 
 /** Địa chỉ module T1 trong bản build / dev (vd "/quet-ma-vach-full/chup-mat-do/t1.mjs"). */
 export function t1ModuleUrl(base = APP_BASE) {

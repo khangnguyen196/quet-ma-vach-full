@@ -1,7 +1,9 @@
 // "Chụp mặt trước" (đợt chup-mat): chuẩn bị ảnh và gửi máy chủ OCR. Không DOM ở cấp module, không import thư viện,
 // không gọi mạng lúc nạp (chỉ gọi khi người dùng đã đăng nhập và chọn ảnh).
 // - ocrServerUrl(env): chọn địa chỉ máy chủ OCR (mặc định máy chủ trên Azure).
-// - fitSize / prepareImage: thu cạnh dài về 1600 px, mã hóa lại JPEG 0,9 (bỏ EXIF / GPS).
+// - fitSize / prepareImage: thu cạnh dài về 1600 px, mã hóa lại JPEG 0,9 (bỏ EXIF / GPS) KHI trình duyệt giải mã được
+//   ảnh; không giải mã được (vd HEIC trên máy tính) thì gửi nguyên file ≤ 5 MB (còn EXIF / GPS, reencoded: false:
+//   giao diện hỏi người dùng trước khi gửi).
 // - sendOcr: POST <máy chủ>/ocr kèm token đăng nhập, hết giờ 45 giây, báo "chậm" sau 5 giây, đổi mã HTTP thành
 //   { kind, message } tiếng Việt. Chữ từ máy chủ (serverMessage, items) giao diện phải đặt bằng textContent.
 
@@ -13,8 +15,14 @@ export const FRONT_JPEG_QUALITY = 0.9;
 export const OCR_TIMEOUT_MS = 45000;        // máy chủ ngủ dậy đo được ~14 giây; 45 giây là trần
 export const OCR_SLOW_MS = 5000;            // quá chừng này thì giao diện báo "máy chủ đang khởi động"
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-/** 429 có Retry-After lớn hơn chừng này (giây) = hết lượt trong ngày (giới hạn theo phút chỉ chờ ≤ 60 giây). */
-export const DAILY_RETRY_MIN_S = 300;
+/**
+ * 429 có Retry-After lớn hơn chừng này (giây) = hết lượt trong ngày.
+ * Vì sao 60: server/ratelimit.py SlidingWindowLimiter (giới hạn theo phút, theo IP và theo người dùng) trả
+ * ceil(60 - (now - lượt cũ nhất)) với now - lượt cũ nhất ≥ 0, nên luôn ≤ 60; DailyLimiter trả số giây tới 0 giờ UTC
+ * (7 giờ sáng Việt Nam). Chỉ phút cuối trước 7 giờ sáng (Retry-After ≤ 60) hết lượt ngày bị hiểu là "chờ N giây":
+ * chờ xong thì đúng là đã sang ngày mới.
+ */
+export const DAILY_RETRY_MIN_S = 60;
 
 // Máy được gửi token qua http:// (không mã hóa) chỉ khi là chính máy này.
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
@@ -72,8 +80,9 @@ export function fitSize(w, h, maxSide = FRONT_MAX_SIDE) {
 /**
  * (Cần trình duyệt, không test bằng node.) Ảnh người dùng chọn → { ok: true, blob, width, height, reencoded }
  * hoặc { ok: false, message }. Giải mã bằng <img>.decode() (trình duyệt tự xoay theo EXIF), vẽ canvas theo fitSize,
- * mã hóa lại JPEG 0,9 → luôn bỏ EXIF / GPS. Không giải mã được (vd HEIC trên máy tính) → gửi file gốc nếu ≤ 5 MB
- * (máy chủ đọc được HEIC), không thì báo lỗi tiếng Việt.
+ * mã hóa lại JPEG 0,9 → bỏ EXIF / GPS (reencoded: true). Không giải mã được (vd HEIC trên máy tính) → trả file gốc
+ * nếu ≤ 5 MB (máy chủ đọc được HEIC; file gốc CÒN EXIF / GPS, reencoded: false: giao diện phải hỏi trước khi gửi),
+ * không thì báo lỗi tiếng Việt.
  */
 export async function prepareImage(file) {
   if (!file) return { ok: false, message: "Chưa chọn ảnh." };
@@ -140,6 +149,20 @@ function failFromStatus(status, retryAfter, serverMessage) {
   return fail("other", `Máy chủ trả lỗi (HTTP ${status}). Thử lại sau.`, extra);
 }
 
+/** <base>/ocr khi base là địa chỉ http(s):// đọc được (có tên máy); sai → "". */
+function ocrEndpoint(base) {
+  if (typeof base !== "string") return "";
+  const b = base.trim().replace(/\/+$/, "");
+  let u;
+  try {
+    u = new URL(b);
+  } catch {
+    return "";
+  }
+  if ((u.protocol !== "http:" && u.protocol !== "https:") || !u.hostname) return "";
+  return b + "/ocr";
+}
+
 /**
  * Gửi ảnh tới <base>/ocr kèm token đăng nhập.
  * Trả { ok: true, items, ms } hoặc { ok: false, kind, message, retryAfter, serverMessage, status }.
@@ -157,7 +180,13 @@ export async function sendOcr({
 } = {}) {
   const tok = typeof token === "string" ? token.trim() : "";
   if (!tok) return fail("auth", "Cần đăng nhập để đọc chữ trên ảnh.");
-  if (!blob) return fail("other", "Chưa có ảnh để gửi.");
+  // Kiểm địa chỉ + dựng FormData TRƯỚC khối try: lỗi lập trình (base rỗng, ảnh không phải Blob) ra kind other,
+  // không bị coi là lỗi mạng, và không gọi mạng.
+  const endpoint = ocrEndpoint(base);
+  if (!endpoint) return fail("other", "Địa chỉ máy chủ đọc chữ không hợp lệ.");
+  if (typeof Blob === "undefined" || !(blob instanceof Blob)) return fail("other", "Chưa có ảnh để gửi.");
+  const fd = new FormData();
+  fd.append("image", blob, filename);
   if (signal?.aborted) return fail("aborted", "Đã hủy.");
 
   const ctrl = new AbortController();
@@ -168,9 +197,7 @@ export async function sendOcr({
   signal?.addEventListener?.("abort", onAbort, { once: true });
   const t0 = Date.now();
   try {
-    const fd = new FormData();
-    fd.append("image", blob, filename);
-    const res = await fetchImpl(String(base).replace(/\/+$/, "") + "/ocr", {
+    const res = await fetchImpl(endpoint, {
       method: "POST",
       headers: { Authorization: "Bearer " + tok },
       body: fd,
