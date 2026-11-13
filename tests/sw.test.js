@@ -437,3 +437,37 @@ describe("precacheList: không lưu sẵn trang thử ocr-thu* / chup-mat-do* (c
     assert.ok(!code.includes("chup-mat-do"), "sw.js không được có 'chup-mat-do'");
   });
 });
+
+describe("Chụp mặt trước (đợt chup-mat): service worker không đụng danh mục, T1, máy chủ OCR", () => {
+  // App tải danh mục + T1 bằng fetch / import() (mode cors) chỉ khi người dùng dùng tính năng; máy chủ OCR khác tên miền.
+  const OCR = "https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io";
+
+  test("danh-muc-vn.json và t1.mjs (cùng tên miền, trong phạm vi) → skip, không lưu, không trả từ cache", () => {
+    for (const p of ["chup-mat-do/danh-muc-vn.json", "chup-mat-do/t1.mjs"]) {
+      for (const mode of ["cors", "no-cors", "same-origin"]) assert.equal(routeFor(SCOPE + p, SCOPE, mode), "skip", p + " " + mode);
+    }
+  });
+
+  test("máy chủ OCR (khác tên miền): /ocr và /health → skip ở mọi mode", () => {
+    for (const url of [OCR + "/ocr", OCR + "/health", "http://127.0.0.1:8765/ocr"]) {
+      for (const mode of ["cors", "no-cors", "navigate"]) assert.equal(routeFor(url, SCOPE, mode), "skip", url + " " + mode);
+    }
+  });
+
+  test("danh sách lưu sẵn từ file thật trong public/ không có chup-mat-do*, sw.js không nhắc máy chủ OCR", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const pub = fileURLToPath(new URL("../public/", import.meta.url));
+    const list = (dir, prefix = "") => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? list(path.join(dir, e.name), prefix + e.name + "/") : [prefix + e.name]);
+    const names = [...list(pub), "index.html", "assets/index-abc.js", "assets/front-search-abc.js"];
+    assert.ok(names.includes("chup-mat-do/danh-muc-vn.json") && names.includes("chup-mat-do/t1.mjs"), "public/ phải có 2 file này");
+    const files = swBuild.precacheList(names);
+    assert.ok(files.every((f) => !f.startsWith("./chup-mat-do")), files.join(" "));
+    const code = buildServiceWorker({ version: "vcm", files });
+    assert.ok(!code.includes("danh-muc-vn"), "sw.js không được có danh mục");
+    assert.ok(!code.includes("t1.mjs"), "sw.js không được có t1.mjs");
+    assert.ok(!code.includes("azurecontainerapps"), "sw.js không được nhắc máy chủ OCR");
+  });
+});
