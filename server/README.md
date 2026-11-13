@@ -5,9 +5,11 @@ Máy chủ nhỏ (FastAPI + uvicorn) chạy **RapidOCR R1** bằng Python, đún
 Nhận 1 ảnh mặt trước bao bì, trả các khung chữ để T1 (tìm sản phẩm) dùng.
 
 **KHÔNG thuộc app**: không nằm trong bản build GitHub Pages (`npm run build` không đụng tới `server/`), không thêm gì vào
-`package.json` của app. **Chưa đưa lên Azure.** Đăng nhập: `AUTH_MODE=supabase` kiểm token Supabase (đợt `dang-nhap`,
-mục "Đăng nhập" dưới đây); mặc định `off`.
-**Dockerfile chưa build** (máy không có Docker), mới kiểm bằng đọc.
+`package.json` của app. Đăng nhập: `AUTH_MODE=supabase` kiểm token Supabase (đợt `dang-nhap`, mục "Đăng nhập" dưới
+đây); chạy trên máy mặc định `off`, **ảnh Docker mặc định `supabase`**.
+**Lên Azure Container Apps** (đợt `may-chu-2`): GitHub Actions (`.github/workflows/server-image.yml`) build ảnh Docker,
+chạy thử, và CHỈ trên `main` đẩy lên `ghcr.io/khangnguyen196/quet-ma-vach-ocr`; chủ dự án tự tạo Container App trên Azure
+Portal theo **`server/AZURE.md`**. Máy dự án không có Docker: Dockerfile chỉ build / chạy được trên CI (mục "Docker").
 
 ## Cài (Windows, mọi thứ ở ổ D)
 
@@ -67,14 +69,17 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
 | `QUEUE_MAX` | 4 | số yêu cầu giữ chỗ thêm (đang tải ảnh lên hoặc đang chờ); đầy -> 503 + `Retry-After`, chưa đọc thân ảnh |
 | `BODY_TIMEOUT_S` | 30 | đọc thân ảnh tối đa bấy nhiêu giây (số thực > 0); quá -> 408, trả chỗ |
-| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình) |
+| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình). Trên Azure Container Apps đặt 1 (ingress thêm IP khách vào cuối header; `AZURE.md` mục "TRUST_PROXY") |
 | `PROXY_COUNT` | 1 | lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI của `X-Forwarded-For` (phần bên trái khách tự ghi được, không tin) |
-| `AUTH_MODE` | off | `off` cho qua (chạy thử, test); `supabase` = `/ocr` phải có token đăng nhập Supabase (mục "Đăng nhập"), thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` -> từ chối khởi động (câu lỗi chỉ nêu tên biến, không in giá trị); giá trị lạ -> từ chối khởi động |
+| `AUTH_MODE` | off (ảnh Docker: supabase) | `off` cho qua (chạy thử, test); `supabase` = `/ocr` phải có token đăng nhập Supabase (mục "Đăng nhập"), thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` -> từ chối khởi động (câu lỗi chỉ nêu tên biến, không in giá trị); giá trị lạ -> từ chối khởi động |
 | `SUPABASE_URL` | (trống) | Project URL `https://<ref>.supabase.co` (phải https) |
 | `SUPABASE_PUBLISHABLE_KEY` | (trống) | publishable key: khóa CÔNG KHAI (app trên trình duyệt cũng có). Máy chủ KHÔNG dùng JWT secret / service_role |
 | `RATE_LIMIT_USER_PER_MIN` | 10 | lượt `/ocr` mỗi người dùng (user id) trong 60 giây, cộng thêm với giới hạn theo IP |
-| `RATE_LIMIT_MAX_USERS` | 10000 | số người dùng tối đa giữ trong RAM |
-| `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng) |
+| `RATE_LIMIT_MAX_USERS` | 10000 | số người dùng tối đa giữ trong RAM (cả giới hạn phút lẫn giới hạn ngày; đầy thì bỏ người ít dùng gần nhất) |
+| `DAILY_LIMIT_PER_USER` | 200 | ảnh mỗi người dùng mỗi **ngày UTC** (đổi ngày lúc 00:00 UTC = 7 giờ sáng giờ Việt Nam), chỉ khi `AUTH_MODE=supabase`; `0` = tắt. Cộng thêm với 2 giới hạn phút. Quá -> 429, `Retry-After` = số giây tới 00:00 UTC. **Đếm trong RAM**: máy chủ ngủ (scale về 0) / khởi động lại thì về 0; chỉ đúng khi tối đa 1 bản chạy (replica). Lớp chống dùng chùa, không phải sổ cái |
+| `ALLOWED_ORIGINS` | (trống = chỉ `https://khangnguyen196.github.io`) | nguồn (trang web) được gọi máy chủ, cách nhau dấu phẩy, dạng `http(s)://tên-miền[:cổng]`; bỏ khoảng trắng, phần tử rỗng, "/" cuối, nguồn trùng; đổi về chữ thường, bỏ cổng mặc định. `*`, có đường dẫn / `?` / `#` / tên đăng nhập -> từ chối khởi động. Có giá trị thì THAY mặc định (muốn giữ github.io phải ghi vào danh sách). Azure: `https://khangnguyen196.github.io,https://localhost:5173` |
+| `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng), **cộng thêm** với `ALLOWED_ORIGINS` (không thay). `chay-thu.ps1` luôn đặt 1, nên chạy trên máy = `ALLOWED_ORIGINS` (mặc định github.io) + mọi localhost; ảnh Docker đặt 0 |
+| `PORT` | 8080 | cổng máy chủ nghe TRONG Docker (`CMD` của Dockerfile đọc `${PORT:-8080}`, `HEALTHCHECK` cũng đọc). `chay-thu.ps1` không đọc biến này (dùng tham số `-Port`, mặc định 8765) |
 
 ## API
 
@@ -129,7 +134,7 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 | 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
 | 422 | yêu cầu không hợp lệ khác |
 | 401 | (`AUTH_MODE=supabase`) thiếu token, token sai / hết hạn / alg không nhận; có `WWW-Authenticate: Bearer` |
-| 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, hoặc quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng; có `Retry-After` |
+| 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng, hoặc quá `DAILY_LIMIT_PER_USER` ảnh / người / ngày UTC; có `Retry-After` (giới hạn ngày: số giây tới 00:00 UTC) |
 | 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi); lỗi lạ trong lúc kiểm token ("Lỗi khi kiểm đăng nhập trên máy chủ.", có CORS, log chỉ tên lỗi, không bao giờ cho qua); cấu hình đăng nhập sai lọt qua bước khởi động ("Cấu hình đăng nhập sai trên máy chủ.", không bao giờ cho qua) |
 | 503 | hàng đợi đầy, chưa nạp xong model, hoặc (`AUTH_MODE=supabase`) chưa kiểm được token vì Supabase lỗi / không trả lời; có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
 
@@ -195,7 +200,9 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   giới hạn theo IP vẫn chạy trước).
 - **503** (`Retry-After: 5`): tải JWKS lỗi mạng / 5xx / JSON hỏng, hoặc `/auth/v1/user` trả 429 / 5xx / lỗi mạng / hết
   giờ. **Không bao giờ cho qua khi chưa kiểm được.** Tải JWKS lỗi thì 5 giây sau mới thử lại (giữa chừng trả 503 ngay).
-- **Thứ tự**: giới hạn IP -> kiểm token -> giới hạn người dùng -> model đã nạp -> hàng đợi -> đọc ảnh. IP trước để token rác
+- **429 (ngày)**: quá `DAILY_LIMIT_PER_USER` (mặc định 200) ảnh / ngày UTC cho MỘT người dùng (đếm trong RAM, mất khi
+  máy chủ ngủ / khởi động lại; kiểm sau giới hạn phút theo người, lượt bị chặn ở giới hạn phút không trừ lượt ngày).
+- **Thứ tự**: giới hạn IP -> kiểm token -> giới hạn người dùng (phút, rồi ngày) -> model đã nạp -> hàng đợi -> đọc ảnh. IP trước để token rác
   gửi dồn dập không làm máy chủ gọi Supabase liên tục; token sai không bị tính vào lượt của người dùng.
 - Gọi mạng (JWKS, `/user`) chạy trong threadpool, không chặn vòng sự kiện.
 - **Giới hạn đã biết**: token đã đăng xuất (hoặc tài khoản bị xoá) VẪN qua tới khi token hết hạn (~1 giờ, mặc định của
@@ -205,9 +212,10 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ## Giới hạn và an toàn
 
-- 5 MB / ảnh, 50 MP (JPEG nhiều lượt quét 40 MP), 20 ảnh / phút / IP (+ 10 ảnh / phút / người dùng khi `AUTH_MODE=supabase`), 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
+- 5 MB / ảnh, 50 MP (JPEG nhiều lượt quét 40 MP), 20 ảnh / phút / IP (+ 10 ảnh / phút / người dùng và 200 ảnh / người /
+  ngày UTC khi `AUTH_MODE=supabase`), 1 ảnh OCR cùng lúc + hàng đợi 4, đọc thân ảnh tối đa 30 giây.
 - **Thứ tự trong `/ocr`**: giới hạn lượt theo IP -> kiểm token (chỉ `AUTH_MODE=supabase`) -> giới hạn lượt theo người
-  dùng (chỉ `supabase`) -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
+  dùng: phút rồi ngày UTC (chỉ `supabase`) -> (model đã nạp?) -> **giành chỗ** trong hàng đợi (tối đa
   `MAX_CONCURRENT + QUEUE_MAX` = 5 chỗ; đầy -> 503 ngay, CHƯA đọc byte thân nào) -> đọc thân ảnh (tối đa `BODY_TIMEOUT_S`
   giây, quá -> 408) -> chờ khóa OCR -> OCR. Mọi đường ra (400 / 408 / 413 / 415 / ngắt kết nối / huỷ / 500) trả chỗ đúng
   1 lần (`try/finally`, `ratelimit.Slot.release`). Vì vậy RAM cho ảnh đang nhận có trần: tối đa 5 ảnh × 5 MB, dù gửi
@@ -224,11 +232,13 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   Thiếu cờ này, uvicorn mặc định tin `127.0.0.1` và tự thay IP bằng `X-Forwarded-For` trước khi app thấy, nên ai gửi từ
   localhost kèm `X-Forwarded-For` khác nhau mỗi lần là lách được giới hạn lượt (đã thử: 3 lần đều 200). Với cờ này,
   `TRUST_PROXY` của app là công tắc DUY NHẤT để dùng `X-Forwarded-For`. Test: `tests/test_uvicorn.py` (chạy uvicorn thật).
-- **CORS**: chỉ khớp chính xác `https://khangnguyen196.github.io` (+ localhost khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
+- **CORS**: chỉ khớp chính xác các nguồn trong `ALLOWED_ORIGINS` (mặc định `https://khangnguyen196.github.io`) (+ localhost
+  khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;
   `Access-Control-Expose-Headers: Retry-After` (trang github.io đọc được số giây chờ của 429 / 503).
 - **Log**: tắt access log của uvicorn (có IP). Log riêng chỉ có thời gian, phương thức, đường dẫn, mã, số byte, số khung chữ, giây.
-  Không IP, không tên file, không chữ OCR. Lỗi lạ trong lúc OCR: `/ocr` tự bắt, log 1 dòng "lỗi máy chủ: <tên lỗi>" (không
+  Không IP, không tên file, không chữ OCR, không ảnh, không token / email / header Authorization (test
+  `tests/test_log_privacy.py` đi qua 200 / 401 / 429 / 503 / 500 với token giả có email giả). Lỗi lạ trong lúc OCR: `/ocr` tự bắt, log 1 dòng "lỗi máy chủ: <tên lỗi>" (không
   chi tiết), trả 500 JSON CÓ header CORS (trang trên github.io đọc được câu lỗi). Riêng lỗi 500 lạ ở chỗ khác (ngoài phần
   `/ocr` đã bọc) đi qua bộ xử lý lỗi chung của Starlette: khách vẫn nhận JSON không traceback, nhưng log `uvicorn.error`
   trên máy chủ CÓ THỂ in traceback (không có IP, không ra ngoài; chỉ người xem log máy chủ thấy).
@@ -242,12 +252,20 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (319 test)
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (2 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (367 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (3 test)
 ```
 
-(nhớ đặt biến ổ D ở mục Cài.) Lượt thường bỏ test `real_model` (pytest in "2 deselected", không skip ẩn); thiếu model thì
+(nhớ đặt biến ổ D ở mục Cài.) Lượt thường bỏ test `real_model` (pytest in "3 deselected", không skip ẩn); thiếu model thì
 test `real_model` FAIL.
+
+- Đợt `may-chu-2`: `tests/test_cors_origins.py` (`ALLOWED_ORIGINS`), `tests/test_daily_limit.py` (giới hạn ngày UTC, đồng
+  hồ giả qua 00:00 UTC), `tests/test_log_privacy.py` (log không lộ token / email / Bearer), `tests/test_dockerfile.py`
+  (đọc nguồn Dockerfile / `.dockerignore` / requirements chỉ ASCII; máy không có Docker), test `real_model` đọc ảnh CI
+  `tests/fixtures/chu.png`.
+- Ảnh CI `tests/fixtures/chu.png` (3 dòng chữ in, 13 KB, tự vẽ) tạo bằng venv máy chủ:
+  `D:\tmp\may-chu-1\venv\Scripts\python server\tests\fixtures\tao_chu.py`. Danh sách chữ phải đọc ra (`CHU_PNG_WORDS`)
+  nằm trong `tao_chu.py`, dùng chung cho test và workflow.
 
 - `tests/test_uvicorn.py` chạy uvicorn THẬT trong luồng nền (127.0.0.1, cổng trống ngẫu nhiên, hạn giờ 10 giây, tắt trong
   `finally`, kiểm cổng đã đóng). `tests/test_gate.py` gọi ASGI thô để điều khiển từng khúc thân yêu cầu (gửi treo, ngắt
@@ -346,11 +364,13 @@ Bị chặn trước `load()` (test byte tự ghép trong `tests/test_progressiv
 màu hơn ảnh) tối đa 40 MP; các loại khác (JPEG thường, PNG, HEIC) 50 MP.
 - Ca nặng nhất được nhận: JPEG nhiều lượt quét tới 40 MP, đo bằng JPEG CMYK progressive 40 MP (8 luồng) peak_wset 629 MB,
   bộ nhớ riêng 822 MB. JPEG không progressive nhưng nhiều lượt quét ở 40 MP chưa đo, ước tương đương.
-- 78 MB (900 − 822) chỉ là biên so với ngưỡng 900 MB đặt cho đợt này, **chưa phải biên trên B1s**: riêng 30 ảnh thật
-  (lượt `may-chu-t8-v3`) đã peak_wset 549 MB (riêng 743 MB), mà B1s 1 GiB còn phải chứa hệ điều hành + Docker (chưa đo).
-  Đo trên Windows 10 máy 8 GB; **Linux / B1s chưa đo** (`do_rss.py` ghi thêm `VmHWM` khi chạy trên Linux).
-- Khuyến nghị lần đầu lên B1s: `MAX_PIXELS=24000000`, `MAX_PIXELS_PROGRESSIVE=20000000`, bật swap, đo `VmHWM`, rồi mới
-  nâng dần. Ảnh vẫn được thu về 1.600 px nên trần thấp không làm giảm chất lượng đọc chữ, chỉ từ chối ảnh quá to.
+- 78 MB (900 − 822) chỉ là biên so với ngưỡng 900 MB đặt ở đợt `may-chu-1` (lúc đó định lên máy ảo B1s 1 GiB). Đợt
+  `may-chu-2` chọn Azure Container Apps **1 vCPU / 2 GiB** (không có hệ điều hành + Docker chung trong 2 GiB đó), nên giữ
+  `MAX_PIXELS=50000000` / `MAX_PIXELS_PROGRESSIVE=40000000`. Đo trên Windows 10 máy 8 GB; **Linux chưa đo** ảnh lớn:
+  workflow `server-image.yml` ghi `memory.peak` (cgroup) sau 2 ảnh thử nhỏ; ảnh lớn trên Linux là việc để sau.
+- Nếu sau này chạy ở máy ít RAM hơn (vd 1 GiB): bắt đầu `MAX_PIXELS=24000000`, `MAX_PIXELS_PROGRESSIVE=20000000`, đo
+  `VmHWM`, rồi mới nâng dần. Ảnh vẫn được thu về 1.600 px nên trần thấp không làm giảm chất lượng đọc chữ, chỉ từ chối
+  ảnh quá to.
 - Loại ảnh đã đo: JPEG baseline RGB/CMYK, JPEG progressive RGB 4:4:4/CMYK, PNG RGB, HEIC 48 MP (ảnh tự vẽ). Chưa đo: PNG
   RGBA / LA / 16 bit 50 MP (ước như JPEG CMYK baseline, khoảng 745 MB riêng), PNG interlaced, JPEG nhiều lượt quét không
   progressive, HEIC iPhone thật.
@@ -363,16 +383,37 @@ D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-x
 # đo mã cũ: --code-dir <thư mục server/ của commit cũ, chép bằng git archive ra D:\tmp> (không checkout trong worktree)
 ```
 
-## Docker (để sau, chưa build)
+## Docker (build + chạy thử trên CI, đợt `may-chu-2`)
 
 `Dockerfile`: `python:3.12-slim`, `pip install --no-cache-dir -r requirements.txt`, bước build kiểm sha256 model, chuyển
 sang người dùng không phải root `ocr` rồi MỚI nạp thử RapidOCR với `OCR_OFFLINE=1` (chứng minh người dùng chạy thật đọc
-được model), `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, `OCR_THREADS=1` (B1s 1 vCPU), `MAX_PIXELS=50000000`, `MAX_PIXELS_PROGRESSIVE=40000000`,
-`BODY_TIMEOUT_S=30`, `HEALTHCHECK` gọi `/health` bằng Python urllib (hạn 3 giây, cần `"ok": true`; test
-`test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that` chạy đúng câu lệnh đó với uvicorn thật), uvicorn 1 worker
+được model). Biến chạy thật: `PORT=8080`, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, **`AUTH_MODE=supabase`** (quên đặt
+`SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` thì máy chủ KHÔNG khởi động; chạy thử không đăng nhập phải tự đặt
+`-e AUTH_MODE=off`), `OCR_THREADS=1` (Container App 1 vCPU / 2 GiB), `MAX_PIXELS=50000000`,
+`MAX_PIXELS_PROGRESSIVE=40000000` (ca nặng nhất đo được 822 MB riêng trên Windows, dưới 2 GiB), `BODY_TIMEOUT_S=30`.
+**Cổng 8080**: `EXPOSE 8080`; `CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port \"${PORT:-8080}\" …"]`
+(đọc `PORT`, `exec` để uvicorn là tiến trình chính); `HEALTHCHECK` gọi `http://127.0.0.1:$PORT/health` bằng Python urllib
+(hạn 3 giây, cần `"ok": true`; test `test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that` chạy đúng câu lệnh đó với
+uvicorn thật và biến `PORT`). Azure Container Apps không dùng `HEALTHCHECK` (có probe riêng). uvicorn 1 worker
 `--no-access-log --no-proxy-headers --limit-concurrency 16`. Host `0.0.0.0` **chỉ trong container**; trên máy tính dùng
-`chay-thu.ps1` (127.0.0.1). `.dockerignore` bỏ venv, tests, `__pycache__`, `.env*`, công cụ đo, `*.md` trừ `LICENSES.md`
+`chay-thu.ps1` (127.0.0.1:8765). `LABEL org.opencontainers.image.source` gắn ảnh ghcr.io với repo. `.dockerignore` bỏ
+venv, tests, `__pycache__`, `.env*` (trừ `.env.example`, không được chép vào ảnh), công cụ đo, `*.md` trừ `LICENSES.md`
 (được chép vào image).
+
+```bash
+docker build -t ocr-r1 server/
+docker run --rm -e AUTH_MODE=off -p 127.0.0.1:8080:8080 ocr-r1    # chạy thử không đăng nhập: http://127.0.0.1:8080/health
+```
+
+**Workflow `.github/workflows/server-image.yml`** ("Server image"): chạy khi push BẤT KỲ nhánh nào có đổi `server/**` hoặc
+chính workflow, và chạy tay (Actions → Server image → Run workflow). Quyền chỉ `contents: read` + `packages: write`, chỉ
+`GITHUB_TOKEN`. Các bước: `docker build` → chạy container `AUTH_MODE=off PORT=8080` → chờ `/health` 200 (tối đa 90 giây)
+→ `/ocr` với `tests/fixtures/chu.png` (200 + có các chữ `CHU_PNG_WORDS`) và `tests/fixtures/xoay6.heic` (200, kiểm
+libheif trên Linux) → ghi vào Summary của lượt chạy: cỡ ảnh (MB), RAM (`docker stats`, `memory.peak` của cgroup sau 2
+ảnh OCR), thời gian khởi động → chạy container KHÔNG đặt `AUTH_MODE` phải thoát lỗi (mặc định an toàn). CHỈ trên `main`
+và khi mọi bước trên đạt: đăng nhập ghcr.io bằng `GITHUB_TOKEN`, đẩy `ghcr.io/khangnguyen196/quet-ma-vach-ocr:latest` và
+`:<7 ký tự đầu mã commit>`, in digest vào Summary. Nhánh khác chỉ build + chạy thử, không đẩy.
+Tạo Container App trỏ vào ảnh này: `server/AZURE.md`.
 
 ## Giấy phép
 
