@@ -5,6 +5,8 @@
 //   node test-ocr/chup-mat-do/nang-t1-thu.mjs --buoc a|c|b          đo mọi điểm lưới của một cách trên nền, chọn theo luật
 //   [--out <thư mục>] [--catalog <file danh mục>]
 //
+// Vòng 2: (a), (c), (b) đều KHÔNG giữ nên đã gỡ khỏi src/front-rank.js; muốn chạy lại --buoc a|c|b thì dùng
+// src/front-rank.js của commit "test(nang-t1): cách (b) — không giữ" (có đủ 3 cách). --buoc moc vẫn chạy được.
 // Nền = cấu hình đã giữ trước đó, lưu ở <out>\v2-nen.json ({ opts, kept: [{ cach, diem }] }); chưa có thì nền = mốc (opts {}).
 // Mỗi điểm lưới: <out>\v2-<cách>-<điểm>-<A|B>.json; tổng hợp một cách: <out>\v2-<cách>-tong.json.
 import fs from "node:fs";
