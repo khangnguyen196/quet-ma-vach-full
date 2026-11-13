@@ -1,41 +1,15 @@
 // Khu thử máy chủ OCR (đợt dang-nhap): CHỈ nạp khi chạy dev (main.js: if (import.meta.env.DEV) import("./dev-ocr.js")),
 // nên không có trong bản build / GitHub Pages. Chuỗi đánh dấu để kiểm dist: dev-ocr-khu-thu
 // Người đã đăng nhập chọn 1 ảnh → POST <địa chỉ máy chủ>/ocr kèm token đăng nhập, hiện mã HTTP + chữ ghép từ items.
-// Địa chỉ: VITE_OCR_SERVER_URL (vd máy chủ trên Azure), dự phòng tên cũ VITE_OCR_DEV_URL, mặc định http://127.0.0.1:8765.
+// Địa chỉ: ocrServerUrl của src/front-photo.js (đợt chup-mat): mặc định máy chủ trên Azure; VITE_OCR_SERVER_URL
+// (dự phòng tên cũ VITE_OCR_DEV_URL) để đổi, vd máy chủ trên máy: VITE_OCR_SERVER_URL=http://127.0.0.1:8765.
 // Không lưu gì (không localStorage, không giữ ảnh). Mọi chữ từ máy chủ đặt bằng textContent (không bao giờ thành HTML).
+import { ocrServerUrl } from "./front-photo.js";
+
+// Giữ tên cũ cho ai import từ đây (tests/dev-ocr.test.js kiểm 2 chỗ là cùng một hàm)
+export { ocrServerUrl };
 
 const MARKER = "dev-ocr-khu-thu";
-const DEFAULT_URL = "http://127.0.0.1:8765";
-
-/**
- * Chọn địa chỉ máy chủ OCR từ object biến môi trường (thuần, test bằng node).
- * VITE_OCR_SERVER_URL || VITE_OCR_DEV_URL (tên cũ) || mặc định; bỏ khoảng trắng và "/" cuối.
- * Chỉ nhận http(s)://… không có tên đăng nhập, ?, #; sai dạng → mặc định + warning (câu tiếng Việt).
- * Ví dụ: ocrServerUrl({ VITE_OCR_SERVER_URL: "https://x.azurecontainerapps.io/" }) → { url: "https://x.azurecontainerapps.io", warning: "" }
- */
-export function ocrServerUrl(env) {
-  const e = env || {};
-  let name = "";
-  let raw = "";
-  for (const key of ["VITE_OCR_SERVER_URL", "VITE_OCR_DEV_URL"]) {
-    const v = String(e[key] ?? "").trim();
-    if (v) { name = key; raw = v; break; }
-  }
-  if (!raw) return { url: DEFAULT_URL, warning: "" };
-  const url = raw.replace(/\/+$/, "");
-  let ok = false;
-  try {
-    const u = new URL(url);
-    ok = (u.protocol === "http:" || u.protocol === "https:") && Boolean(u.hostname)
-      && !u.username && !u.password && !u.search && !u.hash && !url.includes("?") && !url.includes("#");
-  } catch {
-    ok = false;
-  }
-  if (!ok) {
-    return { url: DEFAULT_URL, warning: `Biến ${name} không phải địa chỉ http(s)://… hợp lệ; khu thử dùng ${DEFAULT_URL}.` };
-  }
-  return { url, warning: "" };
-}
 
 /** Câu tiếng Việt cho mã HTTP của máy chủ OCR. */
 function statusText(status, retryAfter) {
@@ -70,7 +44,8 @@ export function initDevOcr({ anchor, getAccessToken, onAuthChange }) {
   const title = document.createElement("h2");
   title.textContent = "Thử máy chủ OCR (chỉ khi chạy dev)";
   const help = document.createElement("p");
-  help.textContent = `Chọn 1 ảnh, app gửi tới ${base}/ocr kèm token đăng nhập. Máy chủ trên máy: server\\chay-thu.ps1; máy chủ trên Azure: đặt VITE_OCR_SERVER_URL trong .env. Không lưu gì.`;
+  help.textContent = `Chọn 1 ảnh, app gửi tới ${base}/ocr kèm token đăng nhập. Mặc định là máy chủ trên Azure; `
+    + `muốn dùng máy chủ trên máy (server\\chay-thu.ps1) thì đặt VITE_OCR_SERVER_URL=http://127.0.0.1:8765 trong .env. Không lưu gì.`;
   const actions = document.createElement("div");
   actions.className = "actions";
   const label = document.createElement("label");
