@@ -28,6 +28,9 @@ def _req(xff: str | None, sock: str = SOCK):
     ("2001:db8::1", "2001:db8::1"),  # IPv6 trần: không cắt sau dấu ":" cuối
     ("1.2.3.4", "1.2.3.4"),
     ("9.9.9.9, 1.2.3.4:51234", "1.2.3.4"),  # vẫn lấy phần tử phải nhất, chỉ bỏ cổng
+    # IPv4 gói trong IPv6 đếm chung với IPv4 (vòng 3)
+    ("::ffff:1.2.3.4", "1.2.3.4"),
+    ("[::ffff:1.2.3.4]:443", "1.2.3.4"),
 ])
 def test_bo_cong_giu_ip(xff, expected):
     assert client_ip(_req(xff), trust_proxy=True, proxy_count=1) == expected
@@ -38,6 +41,9 @@ def test_bo_cong_giu_ip(xff, expected):
     # cổng quá dài: int() của Python 3.12 ném ValueError với chuỗi > 4300 chữ số -> phải kiểm độ dài trước (vòng 3)
     "1.2.3.4:" + "9" * 5000,
     "[2001:db8::1]:" + "9" * 5000,
+    # IPv6 có zone id: khách qua ingress không bao giờ có, phần sau "%" dài tùy ý -> IP socket (vòng 3)
+    "fe80::1%eth0",
+    "[fe80::1%eth0]:443",
 ])
 def test_sai_dang_dung_ip_socket(xff):
     assert client_ip(_req(xff), trust_proxy=True, proxy_count=1) == SOCK
