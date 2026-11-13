@@ -86,8 +86,8 @@ def _healthcheck_code() -> str:
 
 def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
     code = _healthcheck_code()
-    # cổng đọc từ biến PORT (mặc định 8080) như CMD của Dockerfile; không ghi cứng cổng
-    assert "os.environ.get('PORT', '8080')" in code and "'http://127.0.0.1:%s/health'" in code and "timeout=3" in code
+    # cổng đọc từ biến PORT (thiếu HOẶC rỗng -> 8080, giống ${PORT:-8080} của CMD); không ghi cứng cổng
+    assert "os.environ.get('PORT') or '8080'" in code and "'http://127.0.0.1:%s/health'" in code and "timeout=3" in code
     assert "8765" not in code
     loaded = make_app()
     not_loaded_engine = FakeEngine()
@@ -101,6 +101,31 @@ def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
             results.append(p.returncode)
         assert not port_listening(port)
     assert results == [0, 1]  # model đã nạp -> khỏe; chưa nạp (ok=false) -> không khỏe
+
+
+def test_healthcheck_port_rong_dung_8080():
+    """PORT="" (đặt nhưng rỗng): CMD dùng ${PORT:-8080} -> 8080, HEALTHCHECK cũng phải gọi cổng 8080
+    (không phải "http://127.0.0.1:/health"). Thay urlopen bằng hàm giả ghi lại URL, không mở mạng."""
+    code = _healthcheck_code()
+    probe = (
+        "import sys, urllib.request\n"
+        "class R:\n"
+        "    status = 200\n"
+        "    def read(self, *a):\n"
+        "        return b'{\"ok\": true}'\n"
+        "def fake(url, timeout=None):\n"
+        "    print('URL=' + url)\n"
+        "    return R()\n"
+        "urllib.request.urlopen = fake\n"
+        f"exec({code!r})\n"
+    )
+    for env_port in ("", None):
+        env = {k: v for k, v in os.environ.items() if k != "PORT"}
+        if env_port is not None:
+            env["PORT"] = env_port
+        p = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=20, env=env)
+        assert p.returncode == 0, p.stderr
+        assert "URL=http://127.0.0.1:8080/health" in p.stdout, (env_port, p.stdout)
 
 
 def test_ba_lenh_chay_deu_co_no_proxy_headers_va_limit_concurrency_16():
