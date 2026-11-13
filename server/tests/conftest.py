@@ -100,7 +100,7 @@ def multipart(fields, boundary="----bienranhgioi7MA4YWxk") -> tuple[bytes, str]:
 def _no_env_leak(monkeypatch):
     # test không phụ thuộc biến môi trường của máy
     for k in ("AUTH_MODE", "CORS_ALLOW_LOCALHOST", "TRUST_PROXY", "OCR_OFFLINE", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY",
-              "RATE_LIMIT_USER_PER_MIN", "RATE_LIMIT_MAX_USERS"):
+              "RATE_LIMIT_USER_PER_MIN", "RATE_LIMIT_MAX_USERS", "ALLOWED_ORIGINS", "DAILY_LIMIT_PER_USER", "PORT"):
         monkeypatch.delenv(k, raising=False)
     yield
 

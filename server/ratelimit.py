@@ -1,4 +1,5 @@
-"""Giới hạn lượt theo IP (cửa sổ trượt 60 giây, trong RAM) + cổng đồng thời (1 ảnh chạy, hàng đợi có trần, giành chỗ
+"""Giới hạn lượt theo IP / người dùng (cửa sổ trượt 60 giây, trong RAM), giới hạn lượt mỗi người mỗi ngày UTC
+(DailyLimiter, trong RAM) + cổng đồng thời (1 ảnh chạy, hàng đợi có trần, giành chỗ
 trước khi đọc thân ảnh).
 
 IP lấy từ socket. X-Forwarded-For CHỈ dùng khi TRUST_PROXY=1 (máy chủ đứng sau proxy của mình): lấy phần tử thứ
@@ -60,6 +61,50 @@ class SlidingWindowLimiter:
             retry = max(1, math.ceil(WINDOW_SECONDS - (now - q[0])))
             return False, retry
         q.append(now)
+        return True, 0
+
+
+DAY_SECONDS = 86400
+
+
+class DailyLimiter:
+    """Số lượt mỗi người dùng trong NGÀY UTC hiện tại (đổi ngày lúc 00:00 UTC), trong RAM.
+
+    per_day = 0 -> tắt (luôn cho qua, không giữ gì). Giữ tối đa max_users người: đầy thì bỏ người của ngày cũ trước,
+    vẫn đầy thì bỏ người ít dùng gần nhất. clock = giờ thật dạng epoch giây (time.time; test thay bằng đồng hồ giả).
+    Mất hết khi máy chủ khởi động lại / ngủ (scale về 0); chỉ đúng khi 1 bản chạy. Lớp chống dùng chùa, không phải sổ cái.
+    """
+
+    def __init__(self, per_day: int, max_users: int = 10_000, clock=time.time):
+        self.per_day = per_day
+        self.max_users = max_users
+        self.clock = clock
+        self._users: OrderedDict[str, list] = OrderedDict()  # user id -> [ngày UTC (số ngày từ 1970), số lượt]
+
+    def __len__(self):
+        return len(self._users)
+
+    def check(self, user_id: str):
+        """(cho qua?, số giây tới 00:00 UTC nếu bị chặn). Cho qua thì ghi lượt luôn."""
+        if self.per_day <= 0:
+            return True, 0
+        now = self.clock()
+        day = int(now // DAY_SECONDS)
+        entry = self._users.get(user_id)
+        if entry is None:
+            if len(self._users) >= self.max_users:
+                for uid in [u for u, (d, _) in self._users.items() if d != day]:
+                    del self._users[uid]
+                while len(self._users) >= self.max_users:
+                    self._users.popitem(last=False)
+            entry = self._users[user_id] = [day, 0]
+        self._users.move_to_end(user_id)
+        if entry[0] != day:
+            entry[0], entry[1] = day, 0
+        if entry[1] >= self.per_day:
+            retry = max(1, math.ceil((day + 1) * DAY_SECONDS - now))
+            return False, retry
+        entry[1] += 1
         return True, 0
 
 

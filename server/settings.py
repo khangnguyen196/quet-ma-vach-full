@@ -10,6 +10,7 @@ import base64
 import binascii
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -62,6 +63,45 @@ def _flag(env, name, default=False):
 def _text(env, name):
     raw = env.get(name)
     return "" if raw is None else str(raw).strip()
+
+
+_HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(item: str) -> str:
+    """1 nguồn dạng http(s)://host[:port] -> dạng trình duyệt gửi (chữ thường, bỏ cổng mặc định). Sai -> SettingsError."""
+    bad = SettingsError(f"Biến ALLOWED_ORIGINS có nguồn sai dạng: {item!r}. Mỗi nguồn phải là http(s)://tên-miền[:cổng], "
+                        "không có đường dẫn / dấu ? / # / tên đăng nhập, không dùng \"*\"; nhiều nguồn cách nhau dấu phẩy.")
+    if any(c.isspace() for c in item) or "*" in item:
+        raise bad
+    try:
+        parts = urlsplit(item)
+        port = parts.port
+    except ValueError:
+        raise bad from None
+    scheme = parts.scheme.lower()
+    host = parts.hostname or ""
+    if scheme not in _DEFAULT_PORTS or parts.path or parts.query or parts.fragment or "#" in item or "?" in item \
+            or parts.username is not None or parts.password is not None or not _HOST_RE.fullmatch(host):
+        raise bad
+    if port is not None and port != _DEFAULT_PORTS[scheme]:
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+def parse_allowed_origins(raw) -> tuple:
+    """ALLOWED_ORIGINS: nguồn cách nhau dấu phẩy; bỏ khoảng trắng, phần tử rỗng, "/" cuối, nguồn trùng.
+    Trống / không đặt -> chỉ DEFAULT_ORIGIN. Có giá trị thì THAY mặc định (muốn giữ github.io thì ghi vào danh sách)."""
+    out = []
+    for piece in str(raw or "").split(","):
+        item = piece.strip().rstrip("/")
+        if not piece.strip():
+            continue
+        origin = _origin(item)
+        if origin not in out:
+            out.append(origin)
+    return tuple(out) if out else (DEFAULT_ORIGIN,)
 
 
 def normalize_supabase_url(url: str) -> str:
@@ -133,7 +173,10 @@ class Settings:
     supabase_url: str = ""          # Project URL (https://<ref>.supabase.co), đã bỏ "/" cuối
     supabase_publishable_key: str = ""  # khóa CÔNG KHAI (publishable / anon), không phải secret / service_role
     rate_limit_user_per_min: int = 10   # lượt /ocr mỗi người dùng (user id) trong 60 giây (chỉ khi AUTH_MODE=supabase)
-    rate_limit_max_users: int = 10_000  # số người dùng tối đa giữ trong RAM
+    rate_limit_max_users: int = 10_000  # số người dùng tối đa giữ trong RAM (cả giới hạn phút lẫn giới hạn ngày)
+    # ảnh mỗi người dùng mỗi NGÀY UTC (chỉ khi AUTH_MODE=supabase; 0 = tắt). Đếm trong RAM: máy chủ ngủ / khởi động lại
+    # thì về 0; đúng khi chỉ có 1 bản chạy (replica). Lớp chống dùng chùa, không phải sổ cái.
+    daily_limit_per_user: int = 200
     cors_allow_localhost: bool = False
     allowed_origins: tuple = field(default=(DEFAULT_ORIGIN,))
 
@@ -173,5 +216,7 @@ def load_settings(env=None) -> Settings:
         supabase_publishable_key=supabase_key,
         rate_limit_user_per_min=_int(env, "RATE_LIMIT_USER_PER_MIN", 10, 1),
         rate_limit_max_users=_int(env, "RATE_LIMIT_MAX_USERS", 10_000, 1),
+        daily_limit_per_user=_int(env, "DAILY_LIMIT_PER_USER", 200, 0),
         cors_allow_localhost=_flag(env, "CORS_ALLOW_LOCALHOST"),
+        allowed_origins=parse_allowed_origins(env.get("ALLOWED_ORIGINS")),
     )

@@ -23,7 +23,7 @@ import auth
 import imaging
 import upload
 from ocr_engine import ENGINE_INFO
-from ratelimit import ConcurrencyGate, QueueFull, SlidingWindowLimiter, client_ip
+from ratelimit import ConcurrencyGate, DailyLimiter, QueueFull, SlidingWindowLimiter, client_ip
 from settings import Settings, load_settings
 
 SERVER_VERSION = "0.1.0"
@@ -76,6 +76,8 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
     app.state.limiter = SlidingWindowLimiter(settings.rate_limit_per_min, settings.rate_limit_max_ips)
     # giới hạn theo người dùng (user id của Supabase), cộng thêm với giới hạn theo IP
     app.state.user_limiter = SlidingWindowLimiter(settings.rate_limit_user_per_min, settings.rate_limit_max_users)
+    # giới hạn mỗi người mỗi ngày UTC (trong RAM, mất khi máy chủ ngủ / khởi động lại), cộng thêm với 2 giới hạn phút
+    app.state.daily_limiter = DailyLimiter(settings.daily_limit_per_user, settings.rate_limit_max_users)
     app.state.gate = ConcurrencyGate(settings.max_concurrent, settings.queue_max)
 
     app.add_middleware(
@@ -122,7 +124,7 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
     @app.post("/ocr")
     async def ocr(request: Request):
         st: Settings = request.app.state.settings
-        # Thứ tự: giới hạn IP -> kiểm token -> giới hạn theo người dùng -> model -> hàng đợi -> đọc ảnh.
+        # Thứ tự: giới hạn IP -> kiểm token -> giới hạn theo người dùng (phút, rồi ngày UTC) -> model -> hàng đợi -> đọc ảnh.
         # IP trước để ai gửi dồn dập token rác không làm máy chủ gọi Supabase liên tục.
         ok, retry = request.app.state.limiter.check(client_ip(request, st.trust_proxy, st.proxy_count))
         if not ok:
@@ -141,6 +143,12 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
             if not ok:
                 return error(429, f"Tài khoản này gửi quá nhiều ảnh (tối đa {st.rate_limit_user_per_min} ảnh mỗi phút). "
                                   f"Thử lại sau {retry} giây.", {"Retry-After": str(retry)})
+            ok, retry = request.app.state.daily_limiter.check(user_id)
+            if not ok:
+                hours, minutes = divmod((retry + 59) // 60, 60)  # làm tròn lên tới phút
+                return error(429, f"Tài khoản này đã gửi đủ {st.daily_limit_per_user} ảnh hôm nay (ngày tính theo giờ UTC, "
+                                  f"đổi ngày lúc 7 giờ sáng giờ Việt Nam). Thử lại sau {hours} giờ {minutes} phút.",
+                             {"Retry-After": str(retry)})
         eng = request.app.state.engine
         if eng is None or not getattr(eng, "loaded", False):
             return error(503, "Máy chủ chưa nạp xong model OCR.", {"Retry-After": str(QUEUE_RETRY_AFTER)})
