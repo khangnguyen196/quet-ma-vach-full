@@ -1,16 +1,24 @@
-// Test phần thuần của khu thử máy chủ OCR (src/dev-ocr.js, đợt may-chu-2): chọn địa chỉ máy chủ từ biến môi trường.
-// Chạy bằng node (không cần import.meta.env, không cần trình duyệt: hàm nhận object env).
-// Chạy: npm test
+// Test chọn địa chỉ máy chủ OCR từ biến môi trường: ocrServerUrl(env).
+// Đợt chup-mat: hàm chuyển từ src/dev-ocr.js sang src/front-photo.js (app chính dùng), dev-ocr.js import lại từ đó.
+// ĐỔI HÀNH VI CÓ CHỦ ĐÍCH (đợt chup-mat): mặc định không còn là http://127.0.0.1:8765 mà là địa chỉ máy chủ trên Azure;
+// http:// chỉ nhận khi máy là localhost / 127.0.0.1 / [::1] (token đăng nhập đi kèm ảnh nên phải https).
+// Chạy bằng node (không cần import.meta.env, không cần trình duyệt: hàm nhận object env). Chạy: npm test
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 // import động + catch: chưa có hàm thì từng test đỏ riêng (thử đỏ / xanh), không phải lỗi cả file
-const mod = await import("../src/dev-ocr.js").catch(() => ({}));
+const mod = await import("../src/front-photo.js").catch(() => ({}));
+const dev = await import("../src/dev-ocr.js").catch(() => ({}));
 const pick = (env) => mod.ocrServerUrl(env);
-const DEFAULT = "http://127.0.0.1:8765";
+const DEFAULT = "https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io";
 
 describe("ocrServerUrl(env)", () => {
-  test("không đặt biến nào / rỗng / chỉ khoảng trắng → mặc định 127.0.0.1:8765, không cảnh báo", () => {
+  test("hằng OCR_DEFAULT_URL là địa chỉ Azure; dev-ocr.js dùng chung đúng hàm này", () => {
+    assert.equal(mod.OCR_DEFAULT_URL, DEFAULT);
+    assert.equal(dev.ocrServerUrl, mod.ocrServerUrl);
+  });
+
+  test("không đặt biến nào / rỗng / chỉ khoảng trắng → mặc định Azure, không cảnh báo", () => {
     assert.deepEqual(pick({}), { url: DEFAULT, warning: "" });
     assert.deepEqual(pick({ VITE_OCR_SERVER_URL: "", VITE_OCR_DEV_URL: "  " }), { url: DEFAULT, warning: "" });
     assert.deepEqual(pick(undefined), { url: DEFAULT, warning: "" });
@@ -25,8 +33,26 @@ describe("ocrServerUrl(env)", () => {
 
   test("bỏ khoảng trắng và mọi / cuối", () => {
     assert.deepEqual(pick({ VITE_OCR_SERVER_URL: " https://a.example/// " }), { url: "https://a.example", warning: "" });
-    assert.equal(pick({ VITE_OCR_SERVER_URL: "http://127.0.0.1:8765/" }).url, DEFAULT);
+    assert.deepEqual(pick({ VITE_OCR_SERVER_URL: "http://127.0.0.1:8765/" }), { url: "http://127.0.0.1:8765", warning: "" });
   });
+
+  test("http:// nhận cho máy chủ trên máy: localhost, 127.0.0.1, [::1]", () => {
+    for (const u of ["http://localhost:8765", "http://127.0.0.1:8765", "http://[::1]:8765", "http://LOCALHOST:8765"]) {
+      const r = pick({ VITE_OCR_SERVER_URL: u });
+      assert.equal(r.warning, "", u);
+      assert.equal(r.url.toLowerCase(), u.toLowerCase(), u);
+    }
+  });
+
+  for (const bad of ["http://a.example", "http://quet-ma-vach-ocr.example.azurecontainerapps.io", "http://192.168.1.5:8765",
+    "http://127.0.0.2:8765", "http://localhost.example.com", "http://0.0.0.0:8765"]) {
+    test(`http:// tới máy khác (${bad}) → mặc định + cảnh báo https`, () => {
+      const r = pick({ VITE_OCR_SERVER_URL: bad });
+      assert.equal(r.url, DEFAULT);
+      assert.match(r.warning, /VITE_OCR_SERVER_URL/);
+      assert.match(r.warning, /https/);
+    });
+  }
 
   for (const bad of ["ftp://a.example", "javascript:alert(1)", "a.example", "https://", "khong phai url",
     "https://user:pw@a.example", "https://a.example/?q=1", "https://a.example#x"]) {
