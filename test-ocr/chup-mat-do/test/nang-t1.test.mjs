@@ -2,10 +2,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as page from "../../../public/chup-mat-do/t1.mjs";
+import zlib from "node:zlib";
 import {
-  boxToPoly, toPolyItems, splitGroups, HOLDOUT, saltItems, SALT_LINES, queryIdf, normScore, tally, seenMatch, compareSeen, SALT_SEEN,
+  boxToPoly, toPolyItems, splitGroups, HOLDOUT, ALL_CODES, saltItems, SALT_LINES, queryIdf, normScore, tally, seenMatch, compareSeen, SALT_SEEN,
+  regressions, realGain, judge, choosePoint, idfOf,
 } from "../nang-t1-do.mjs";
 import { CRITERIA, catalogProduct, dropReasons, catalogSize } from "../nang-t1-danh-muc.mjs";
+import { catalogJson, catalogMeta } from "../xuat-danh-muc.mjs";
 
 test("boxToPoly: 4 góc theo chiều kim đồng hồ từ trên trái; box hỏng -> null", () => {
   assert.deepEqual(boxToPoly({ minX: 1, minY: 2, maxX: 30, maxY: 40 }), [[1, 2], [30, 2], [30, 40], [1, 40]]);
@@ -38,6 +41,101 @@ test("HOLDOUT: 10 mã, tăng dần, không trùng", () => {
   assert.equal(new Set(HOLDOUT).size, 10);
 });
 
+test("ALL_CODES: 30 mã tăng dần; luật chia nhóm trên ALL_CODES ra đúng HOLDOUT", () => {
+  assert.equal(ALL_CODES.length, 30);
+  assert.equal(new Set(ALL_CODES).size, 30);
+  assert.deepEqual([...ALL_CODES].sort(), ALL_CODES);
+  const g = splitGroups(ALL_CODES);
+  assert.deepEqual(g.holdout, HOLDOUT);
+  assert.equal(g.tune.length, 20);
+});
+
+// ---- hàm giảm / judge / luật chọn (vòng 2) ----
+const R = (code, rank, scores) => ({ code, rank, ...(scores ? { scores } : {}) });
+
+test("regressions: 1→2 là lostTop1 (không ok)", () => {
+  const r = regressions([R("a", 1)], [R("a", 2)]);
+  assert.deepEqual(r.lostTop1, ["a"]);
+  assert.deepEqual(r.droppedTop5, []);
+  assert.equal(r.ok, false);
+});
+
+test("regressions: 3→null là droppedTop5 (không ok); 1→null vừa lostTop1 vừa droppedTop5", () => {
+  const r = regressions([R("a", 3), R("b", 1)], [R("a", null), R("b", null)]);
+  assert.deepEqual(r.droppedTop5, ["a", "b"]);
+  assert.deepEqual(r.lostTop1, ["b"]);
+  assert.equal(r.ok, false);
+});
+
+test("regressions: 2→4 là movedDown; ok khi không strict, không ok khi strict", () => {
+  const r = regressions([R("a", 2)], [R("a", 4)]);
+  assert.deepEqual(r.movedDown, ["a"]);
+  assert.equal(r.ok, true);
+  assert.equal(regressions([R("a", 2)], [R("a", 4)], { strict: true }).ok, false);
+  // lên trong 2–5 thì không phải movedDown
+  assert.deepEqual(regressions([R("a", 4)], [R("a", 2)], { strict: true }), { lostTop1: [], droppedTop5: [], movedDown: [], gained: [], ok: true });
+});
+
+test("regressions: null→3 và 3→1 là gained (ok); thiếu mã thì lỗi", () => {
+  const r = regressions([R("a", null), R("b", 3), R("c", 1)], [R("a", 3), R("b", 1), R("c", 1)], { strict: true });
+  assert.deepEqual(r.gained, ["a", "b"]);
+  assert.equal(r.ok, true);
+  assert.throws(() => regressions([R("a", 1)], [R("b", 1)]));
+});
+
+test("realGain: hơn hẳn gợi ý ngay sau mới tính; bằng điểm thì không", () => {
+  assert.equal(realGain(R("a", 1, [5, 5, 3])), false); // 2→1 nhờ bằng điểm
+  assert.equal(realGain(R("a", 1, [5.1, 5, 3])), true);
+  assert.equal(realGain(R("a", 5, [9, 8, 7, 6, 5, 5])), false); // vị trí 5 bằng gợi ý thứ 6
+  assert.equal(realGain(R("a", 3, [9, 8, 7])), true); // không có gợi ý sau
+  assert.equal(realGain(R("a", null, [9])), false);
+});
+
+/** Dựng 30 dòng (theo ALL_CODES) với hạng mặc định 1, điểm hơn hẳn; ghi đè vài mã. */
+function rows30(over = {}) {
+  return ALL_CODES.map((code) => ({ code, rank: 1, scores: [10, 5, 4, 3, 2, 1], ...(over[code] || {}) }));
+}
+const TUNE0 = ALL_CODES.find((c) => !HOLDOUT.includes(c));
+const TUNE1 = ALL_CODES.filter((c) => !HOLDOUT.includes(c))[1];
+
+test("judge: 2→1 bằng điểm không tính tăng thật; 2→1 hơn hẳn thì tính, đếm theo cặp bộ/mã", () => {
+  const base = rows30({ [TUNE0]: { rank: 2 } });
+  const tie = rows30({ [TUNE0]: { rank: 1, scores: [5, 5, 4, 3, 2, 1] } });
+  const j1 = judge({ base: { A: base, B: base }, cand: { A: tie, B: tie } });
+  assert.equal(j1.chinhOk, true);
+  assert.equal(j1.gainChinh, 0);
+  assert.deepEqual(j1.sets.A.chinh.gained, [TUNE0]);
+  const good = rows30({ [TUNE0]: { rank: 1, scores: [6, 5, 4, 3, 2, 1] } });
+  const j2 = judge({ base: { A: base, B: base }, cand: { A: good, B: tie } });
+  assert.equal(j2.gainChinh, 1);
+  assert.deepEqual(j2.sets.A.realGains, [TUNE0]);
+});
+
+test("judge: giảm ở nhóm chỉnh (bộ B) -> chinhOk false; nhóm giữ riêng xét strict", () => {
+  const base = rows30({ [HOLDOUT[0]]: { rank: 2 } });
+  const lost = rows30({ [TUNE1]: { rank: 3 } });
+  const jl = judge({ base: { A: base, B: base }, cand: { A: base, B: lost } });
+  assert.equal(jl.chinhOk, false);
+  assert.deepEqual(jl.sets.B.chinh.lostTop1, [TUNE1]);
+  const down = rows30({ [HOLDOUT[0]]: { rank: 4 } });
+  const jd = judge({ base: { A: base, B: base }, cand: { A: down, B: base } });
+  assert.equal(jd.chinhOk, true);
+  assert.equal(jd.giuRiengOk, false);
+  assert.deepEqual(jd.sets.A.giuRieng.movedDown, [HOLDOUT[0]]);
+});
+
+test("choosePoint: chỉ điểm chinhOk; gain lớn nhất, bằng thì điểm trước; giữ riêng không đạt thì không giữ (không chọn lại)", () => {
+  const J = (chinhOk, giuRiengOk, gainChinh) => ({ chinhOk, giuRiengOk, gainChinh });
+  const p = (name, base, moc = base) => ({ name, vsBase: base, vsMoc: moc });
+  assert.deepEqual(choosePoint([p("x1", J(true, true, 2)), p("x2", J(true, true, 2)), p("x3", J(false, true, 5))]).chosen, "x1");
+  assert.equal(choosePoint([p("x1", J(true, true, 1), J(false, true, 1)), p("x2", J(true, true, 1))]).chosen, "x2");
+  assert.equal(choosePoint([p("x1", J(true, true, 0))]).kept, false);
+  const r = choosePoint([p("x1", J(true, false, 3)), p("x2", J(true, true, 1))]);
+  assert.equal(r.kept, false);
+  assert.equal(r.chosen, "x1");
+  assert.equal(choosePoint([p("x1", J(true, true, 1), J(true, false, 1))]).kept, false);
+});
+
 test("saltItems: 4 khung không chồng lấn -> 4 hàng riêng qua rowLineInfo, giữ nguyên chữ", () => {
   const items = saltItems();
   assert.equal(items.length, 4);
@@ -49,9 +147,19 @@ test("saltItems: 4 khung không chồng lấn -> 4 hàng riêng qua rowLineInfo,
 test("queryIdf / normScore: chỉ cộng từ có trong chỉ mục, mỗi từ một lần", () => {
   const idx = { idf: new Map([["a", 2], ["b", 3]]) };
   assert.equal(queryIdf(idx, ["a", "b", "a", "z"]), 5);
+  // chỉ mục không có idf kiểu Map (vd n-gram) -> lỗi rõ, không âm thầm ra 0
+  assert.throws(() => queryIdf({ grams: new Map() }, ["a"]), /idf/);
+  assert.throws(() => queryIdf(undefined, ["a"]), /idf/);
   assert.equal(normScore(10, 5), 2);
   assert.equal(normScore(null, 5), 0);
   assert.equal(normScore(3, 0), 0);
+});
+
+test("idfOf (G1): measure dùng idfSum ranker trả; ranker không trả -> lỗi rõ kèm tên ranker", () => {
+  assert.equal(idfOf({ name: "x" }, { query: ["a"], hits: [], idfSum: 3.5 }), 3.5);
+  assert.equal(idfOf({ name: "x" }, { query: [], hits: [], idfSum: 0 }), 0);
+  assert.throws(() => idfOf({ name: "ngram-thu" }, { query: ["a"], hits: [] }), /ngram-thu.*idfSum/);
+  assert.throws(() => idfOf({ name: "x" }, { query: ["a"], hits: [], idfSum: NaN }), /idfSum/);
 });
 
 test("tally: đếm vị trí 1 và trong 5", () => {
@@ -91,6 +199,9 @@ test("catalogProduct: đúng dạng danh mục app (img chỉ khi có ảnh fron
   const r = { code: "8930000000001", names: { product_name_vi: "Muối", product_name: "Salt" }, brands: "Co.op", generic: {}, fronts: [{ key: "front_vi", imgid: "1", rev: "4" }] };
   assert.deepEqual(catalogProduct(r), { code: "8930000000001", name: "Muối", brand: "Co.op", img: "front_vi.4", text: "Muối Salt Co.op" });
   assert.equal("img" in catalogProduct({ ...r, fronts: [] }), false);
-  const s = catalogSize([catalogProduct(r)]);
-  assert.ok(s.raw > 0 && s.gzip > 0);
+  const products = [catalogProduct(r)];
+  const s = catalogSize(products);
+  const json = catalogJson(catalogMeta({ withNameBrand: true, count: 1, date: "2026-11-13" }), products);
+  assert.equal(s.raw, Buffer.byteLength(json));
+  assert.equal(s.gzip, zlib.gzipSync(json, { level: 9 }).length);
 });
