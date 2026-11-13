@@ -41,15 +41,30 @@
   <div id="screenLookup">
   <section aria-label="Quét mã">
     <div id="reader" class="viewfinder"></div>
-    <div class="actions">
+    <div class="actions scan-actions">
       <button id="btnCam" class="btn primary" type="button">Bật camera</button>
       <label class="btn">Chụp ảnh mã<input id="file" type="file" accept="image/*" capture="environment"></label>
+      <!-- Chụp mặt trước (đợt chup-mat): main.js hiện theo trạng thái đăng nhập (frontButtonState). Input KHÔNG có
+           capture để điện thoại cho chọn chụp mới hoặc lấy ảnh trong thư viện. -->
+      <label id="frontLabel" class="btn front-btn" hidden>Chụp mặt trước<input id="frontFile" type="file" accept="image/*"></label>
+      <button id="btnFrontLogin" class="btn front-btn" type="button" hidden>Đăng nhập để dùng</button>
     </div>
     <!-- Đèn pin / phóng to: main.js chỉ hiện khi camera đang bật và máy báo hỗ trợ (track.getCapabilities) -->
     <div id="camTools" class="actions cam-tools" hidden>
       <button id="btnTorch" class="btn" type="button" aria-pressed="false" hidden>Bật đèn</button>
       <button id="btnZoom" class="btn" type="button" hidden>Phóng to 2×</button>
     </div>
+    <!-- Chụp mặt trước: ghi chú (hiện cùng nút), dòng trạng thái cố định (#frontMsg chỉ đổi chữ), nút tới phần đăng nhập
+         khi phiên hết hạn, khối gợi ý (#frontBox, render.js renderFrontResult). -->
+    <div id="frontInfo" class="front-info-box" hidden>
+      <p id="frontHint" class="front-hint" hidden>Chụp mặt trước cần đăng nhập. Chưa đăng nhập vẫn quét mã vạch được.</p>
+      <p class="front-note">Ảnh được gửi lên máy chủ chỉ để đọc chữ, máy chủ không lưu ảnh. Thông tin và dị ứng lấy theo mã sản phẩm bạn chọn trên Open Food Facts, không đoán từ ảnh.</p>
+    </div>
+    <p id="frontMsg" class="msg front-msg" role="status" aria-live="polite"></p>
+    <div id="frontRelogin" class="actions front-relogin" hidden>
+      <button id="btnFrontRelogin" class="btn" type="button">Tới phần đăng nhập</button>
+    </div>
+    <section id="frontBox" class="front-box" aria-label="Gợi ý từ ảnh mặt trước" hidden></section>
     <form id="manual" class="manual" autocomplete="off">
       <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" placeholder="Hoặc nhập số dưới mã vạch" aria-label="Số mã vạch">
       <button class="btn" type="submit">Tra cứu</button>

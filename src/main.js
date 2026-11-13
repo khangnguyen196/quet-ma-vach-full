@@ -4,8 +4,11 @@ import { getProduct, isProductCached, normalize, cleanAllergyProfile, matchAller
 import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
-  renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox
+  renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
+  renderFrontResult, renderFrontHits, FRONT_TEXT_ID
 } from "./render.js";
+import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText } from "./front-photo.js";
+import { loadT1, loadCatalog, t1ModuleUrl, suggestFromItems, suggestFromText, hitProducts } from "./front-search.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
@@ -738,6 +741,7 @@ function setAuth(patch) {
   for (const fn of authListeners) {
     try { fn(!!authState.session); } catch (e) { console.error(e); }
   }
+  updateFrontButton(); // nút "Chụp mặt trước" theo trạng thái đăng nhập
 }
 
 async function initAuth() {
@@ -813,6 +817,183 @@ window.addEventListener("pageshow", (e) => {
   if (e.persisted && authState.busy) setAuth({ busy: false });
 });
 
+// ---- Chụp mặt trước (đợt chup-mat): ảnh mặt trước → máy chủ OCR (cần đăng nhập) → T1 → tối đa 5 gợi ý ----
+// Không đọc ảnh trên máy (chỉ thu nhỏ rồi gửi), không lấy dị ứng từ ảnh: bấm gợi ý thì tra mã như khi quét.
+// T1 (public/chup-mat-do/t1.mjs) và danh mục (danh-muc-vn.json) chỉ tải khi người dùng chọn ảnh lần đầu.
+const frontLabel = $("#frontLabel"), frontFile = $("#frontFile"), btnFrontLogin = $("#btnFrontLogin");
+const frontInfo = $("#frontInfo"), frontHint = $("#frontHint"), frontMsg = $("#frontMsg");
+const frontRelogin = $("#frontRelogin"), btnFrontRelogin = $("#btnFrontRelogin"), frontBox = $("#frontBox");
+// Chỉ đưa 2 biến cần dùng (không truyền cả object env). Trống = máy chủ trên Azure (OCR_DEFAULT_URL).
+const ocrPick = ocrServerUrl({
+  VITE_OCR_SERVER_URL: import.meta.env.VITE_OCR_SERVER_URL,
+  VITE_OCR_DEV_URL: import.meta.env.VITE_OCR_DEV_URL
+});
+if (ocrPick.warning) console.warn(ocrPick.warning);
+
+/** Dòng trạng thái của "Chụp mặt trước": chỉ đổi chữ (textContent), chữ máy chủ không bao giờ thành HTML. */
+function sayFront(text = "", warn = false) {
+  frontMsg.textContent = text;
+  frontMsg.classList.toggle("warn", warn);
+}
+
+/** Hiện nút theo frontButtonState(authState): hidden / loading / login / ready. */
+function updateFrontButton() {
+  const st = frontButtonState(authState);
+  frontInfo.hidden = st === "hidden";
+  frontLabel.hidden = st !== "ready";
+  frontFile.disabled = st !== "ready";
+  btnFrontLogin.hidden = st !== "login" && st !== "loading";
+  btnFrontLogin.disabled = st === "loading";
+  btnFrontLogin.textContent = st === "loading" ? "Đang kiểm đăng nhập…" : "Đăng nhập để dùng";
+  frontHint.hidden = st !== "login";
+  if (st === "ready") frontRelogin.hidden = true;
+  if (st === "hidden") { ++frontTurn; frontAbort?.abort(); sayFront(); frontRelogin.hidden = true; frontBox.hidden = true; frontBox.innerHTML = ""; }
+}
+
+/** Cuộn tới khối tài khoản, đặt focus vào nút "Đăng nhập bằng Google" (KHÔNG mở chọn ảnh, KHÔNG gửi gì). */
+function goToLogin() {
+  authBox.scrollIntoView({ behavior: "smooth", block: "center" });
+  const btn = authBody.querySelector('button[data-auth="login"]');
+  (btn || authBox).focus?.({ preventScroll: true });
+}
+btnFrontLogin.addEventListener("click", goToLogin);
+btnFrontRelogin.addEventListener("click", goToLogin);
+
+let frontTurn = 0; // số lượt chọn ảnh, như biến current của lookup(): lượt cũ về muộn thì bỏ
+let frontAbort = null; // AbortController của lượt đang gửi (chọn ảnh khác thì hủy)
+let frontSearch = null; // { t1, products, index } khi đã tải xong (dùng cho "Tìm lại")
+let frontSearchPromise = null;
+let frontT1Tries = 0;
+
+/**
+ * Tải T1 + danh mục (lần đầu dùng tính năng), dựng chỉ mục BM25. Giữ promise; lỗi thì xóa để lần sau tải lại
+ * (import() lỗi có thể bị trình duyệt nhớ, nên lần thử lại thêm ?lan=N vào địa chỉ T1).
+ */
+function loadFrontSearch() {
+  if (frontSearch) return Promise.resolve(frontSearch);
+  if (!frontSearchPromise) {
+    const n = frontT1Tries++;
+    const t1Url = t1ModuleUrl() + (n ? `?lan=${n}` : "");
+    const p = Promise.all([
+      loadT1(t1Url).catch((e) => {
+        console.error(e);
+        throw new Error("Không tải được bộ tìm sản phẩm (mất mạng?). Chọn ảnh lại để thử lại.");
+      }),
+      loadCatalog()
+    ]).then(([t1, catalog]) => {
+      frontSearch = { t1, products: catalog.products, index: t1.buildBm25(catalog.products) };
+      return frontSearch;
+    });
+    frontSearchPromise = p;
+    p.catch(() => { if (frontSearchPromise === p) frontSearchPromise = null; });
+  }
+  return frontSearchPromise;
+}
+
+/** Vẽ kết quả vào #frontBox; ảnh gợi ý tải lỗi thì thay bằng "chưa có ảnh". */
+function bindFrontImages() {
+  frontBox.querySelectorAll("img.front-img").forEach((img) => img.addEventListener("error", () => {
+    img.hidden = true;
+    if (img.nextElementSibling) img.nextElementSibling.hidden = false;
+  }, { once: true }));
+}
+
+function hitsText(n) {
+  return n ? `Có ${n} gợi ý bên dưới. Hãy chọn đúng sản phẩm.` : "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+}
+
+frontFile.addEventListener("change", async (ev) => {
+  const file = ev.target.files?.[0];
+  ev.target.value = ""; // chọn lại đúng ảnh đó lần sau vẫn có sự kiện change
+  if (!file) return;
+  if (frontButtonState(authState) !== "ready" || !authClient) { goToLogin(); return; }
+  if (busy) { sayFront("Đợi mở camera hoặc đọc ảnh mã xong rồi hãy chụp mặt trước.", true); return; }
+  if (scanner.running) { await stopCam(); setMsg(); } // như "Chụp ảnh mã": tắt camera trước
+
+  frontAbort?.abort(); // lượt cũ đang gửi: hủy
+  const ctrl = new AbortController();
+  frontAbort = ctrl;
+  const id = ++frontTurn;
+  const stale = () => id !== frontTurn;
+  frontRelogin.hidden = true;
+  frontBox.hidden = true;
+  frontBox.innerHTML = "";
+  sayFront("Đang chuẩn bị ảnh…");
+
+  // Lần đầu dùng tính năng: bắt đầu tải T1 + danh mục song song với lúc gửi ảnh (không tải lúc mở app).
+  const searchReady = loadFrontSearch();
+  searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
+
+  const prep = await prepareImage(file);
+  if (stale()) return;
+  if (!prep.ok) { sayFront(prep.message, true); return; }
+  if (prep.reencoded === false
+    && !confirm("Không thu nhỏ được ảnh này trên máy, ảnh sẽ được gửi nguyên bản và có thể kèm thông tin vị trí chụp. Vẫn gửi?")) {
+    sayFront("Chưa gửi ảnh. Có thể chụp lại hoặc chọn ảnh JPEG / PNG khác.");
+    return;
+  }
+
+  // Token lấy NGAY lúc gửi (thư viện tự làm mới), chỉ giữ trong lượt này, không ghi ra console.
+  let token = "";
+  try {
+    const { data } = await authClient.auth.getSession();
+    token = data?.session?.access_token || "";
+  } catch (e) {
+    console.warn("Chụp mặt trước: không lấy được phiên đăng nhập", e?.name || "");
+  }
+  if (stale()) return;
+
+  sayFront("Đang gửi ảnh tới máy chủ đọc chữ…");
+  const r = await sendOcr({
+    base: ocrPick.url,
+    token,
+    blob: prep.blob,
+    signal: ctrl.signal,
+    onSlow: () => { if (!stale()) sayFront("Máy chủ đang khởi động, có thể mất khoảng 15 giây…"); }
+  });
+  token = "";
+  if (stale()) return;
+  if (frontAbort === ctrl) frontAbort = null;
+  if (!r.ok) {
+    const text = frontErrorText(r);
+    sayFront(text, true);
+    frontRelogin.hidden = r.kind !== "auth";
+    return;
+  }
+
+  sayFront("Đang tìm sản phẩm khớp…");
+  let s;
+  try {
+    s = await searchReady;
+  } catch (e) {
+    if (stale()) return;
+    sayFront(e?.message || "Không tải được danh mục sản phẩm. Chọn ảnh lại để thử lại.", true);
+    return;
+  }
+  if (stale()) return;
+  const found = suggestFromItems(s.t1, s.index, r.items);
+  const hits = hitProducts(s.products, found.hits);
+  frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded });
+  frontBox.hidden = false;
+  bindFrontImages();
+  sayFront(hitsText(hits.length));
+});
+
+// Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô) và bấm gợi ý (tra mã như khi quét).
+frontBox.addEventListener("click", (ev) => {
+  const pick = ev.target.closest("button[data-front-code]");
+  if (pick) { lookup(pick.dataset.frontCode); return; } // không tự chọn thay người dùng: chỉ khi bấm
+  if (!ev.target.closest("button[data-front-retry]") || !frontSearch) return;
+  const text = frontBox.querySelector(`#${FRONT_TEXT_ID}`)?.value || "";
+  const found = suggestFromText(frontSearch.t1, frontSearch.index, text);
+  const hits = hitProducts(frontSearch.products, found.hits);
+  const list = frontBox.querySelector(".front-hits");
+  if (list) list.innerHTML = renderFrontHits(hits);
+  bindFrontImages();
+  sayFront(hitsText(hits.length));
+});
+
+updateFrontButton();
 initAuth();
 
 // Khu thử máy chủ OCR: CHỈ khi chạy dev (npm run dev). Bản build bỏ hẳn đoạn này và file dev-ocr.js.

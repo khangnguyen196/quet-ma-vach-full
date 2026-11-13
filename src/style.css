@@ -449,6 +449,48 @@ table.cmp-table .empty { font-size: 13px; }
 .auth-msg:empty { margin-top: 0; }
 .auth-msg.warn { color: var(--warn); }
 
+/* Chụp mặt trước (đợt chup-mat): nút xuống hàng riêng dưới "Bật camera" / "Chụp ảnh mã", rộng hết hàng */
+.scan-actions { flex-wrap: wrap; }
+.scan-actions .front-btn { flex: 1 1 100%; }
+.scan-actions .front-btn[hidden] { display: none; }
+.front-info-box { margin-top: 8px; display: grid; gap: 4px; }
+.front-info-box[hidden], .front-hint[hidden], .front-relogin[hidden], .front-box[hidden] { display: none; }
+.front-hint { font-size: 14px; color: var(--ink); }
+.front-note { font-size: 13px; color: var(--ink-2); }
+/* Dòng trạng thái luôn có trong trang (role="status"); rỗng thì không chiếm chỗ */
+.front-msg:empty { min-height: 0; margin-top: 0; }
+.front-msg.warn { color: var(--warn); }
+.front-relogin { margin-top: 8px; }
+.front-box { margin-top: 14px; padding: 12px 14px; border: 2px solid var(--rule-strong); border-radius: 6px; display: grid; gap: 10px; }
+.front-text-box { display: grid; gap: 6px; }
+.front-text-box label { font-size: 14px; font-weight: 500; }
+.front-text {
+  width: 100%; min-height: 6.5em; padding: 8px 10px; resize: vertical;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--well); color: var(--ink);
+  font: inherit; font-size: 15px; line-height: 1.4;
+}
+.front-retry { margin-top: 0; }
+.front-retry .btn { flex: 0 0 auto; min-height: 44px; }
+.front-raw { font-size: 13px; color: var(--warn); }
+.front-lead { font-weight: 700; }
+.front-none { font-size: 15px; }
+.front-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
+.front-hit {
+  width: 100%; min-height: 76px; padding: 6px 10px 6px 6px;
+  display: flex; gap: 10px; align-items: center; text-align: left;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.front-hit:hover { border-color: var(--rule-strong); }
+.front-hit .front-img, .front-hit .noimg { flex: 0 0 auto; width: 64px; height: 64px; }
+.front-hit .front-img { object-fit: contain; background: #fff; border: 1px solid var(--rule); border-radius: 4px; }
+.front-hit .front-img[hidden] { display: none; }
+.front-info { display: grid; gap: 2px; min-width: 0; }
+.front-name { font-weight: 700; overflow-wrap: anywhere; }
+.front-brand { font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.front-code { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.front-source { padding-top: 0; }
+
 /* Khu thử máy chủ OCR: CHỈ khi chạy dev (src/dev-ocr.js), không có trong bản build */
 .dev-ocr {
   margin-bottom: 18px; padding: 12px 14px;
