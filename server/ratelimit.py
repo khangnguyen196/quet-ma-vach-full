@@ -4,16 +4,48 @@ trước khi đọc thân ảnh).
 
 IP lấy từ socket. X-Forwarded-For CHỈ dùng khi TRUST_PROXY=1 (máy chủ đứng sau proxy của mình): lấy phần tử thứ
 PROXY_COUNT tính từ PHẢI (proxy cuối cùng của mình ghi IP nó thấy vào cuối danh sách; phần bên trái do khách tự ghi,
-không tin). Header thiếu / ngắn hơn PROXY_COUNT -> dùng IP socket.
+không tin). Header thiếu / ngắn hơn PROXY_COUNT -> dùng IP socket. Phần tử đã chọn: phần :cổng (nếu có) được bỏ
+("1.2.3.4:51234" -> "1.2.3.4", "[v6]:443" -> "v6"); không phải IP hợp lệ (rác, rỗng, "unknown") -> dùng IP socket.
 """
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import math
 import time
 from collections import OrderedDict, deque
 
 WINDOW_SECONDS = 60.0
+
+
+def _port_ok(port: str) -> bool:
+    return port.isascii() and port.isdigit() and int(port) <= 65535
+
+
+def clean_ip(value: str) -> str | None:
+    """Một phần tử X-Forwarded-For -> IP (bỏ ":cổng"), hoặc None nếu không phải IP hợp lệ.
+
+    "1.2.3.4:51234" -> "1.2.3.4"; "[2001:db8::1]:443" / "[2001:db8::1]" -> "2001:db8::1";
+    IPv6 trần "2001:db8::1" giữ nguyên (không cắt sau dấu ":" cuối); "rac", "unknown", "" -> None.
+    """
+    v = value.strip()
+    if v.startswith("["):
+        end = v.find("]")
+        if end < 0:
+            return None
+        host, rest = v[1:end], v[end + 1:]
+        if rest and not (rest.startswith(":") and _port_ok(rest[1:])):
+            return None
+    elif v.count(":") == 1:  # IPv4:cổng (IPv6 trần luôn có từ 2 dấu ":" trở lên)
+        host, port = v.split(":")
+        if not _port_ok(port):
+            return None
+    else:
+        host = v
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return None
 
 
 def client_ip(request, trust_proxy: bool, proxy_count: int = 1) -> str:
@@ -23,7 +55,7 @@ def client_ip(request, trust_proxy: bool, proxy_count: int = 1) -> str:
     raw = request.headers.get("x-forwarded-for", "")
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     if len(parts) >= proxy_count:
-        return parts[-proxy_count]
+        return clean_ip(parts[-proxy_count]) or sock
     return sock
 
 
