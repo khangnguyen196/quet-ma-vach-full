@@ -207,7 +207,7 @@ test("chup-mat-do.html (thu-r1 vòng 2): rời / tải lại trang thì xóa d�
 });
 
 // ---------- danh mục ----------
-test("danh-muc-vn.json: meta nguồn + giấy phép, 1.452 sản phẩm, chỉ code / name / brand / text", () => {
+test("danh-muc-vn.json: meta nguồn + giấy phép, 1.452 sản phẩm, chỉ code / name / brand / text (+ img nếu có ảnh, đợt chup-mat)", () => {
   const cat = JSON.parse(read("chup-mat-do/danh-muc-vn.json"));
   assert.match(cat.meta.giayPhep, /ODbL 1\.0/);
   assert.match(cat.meta.nguon, /Open Food Facts/);
@@ -215,7 +215,9 @@ test("danh-muc-vn.json: meta nguồn + giấy phép, 1.452 sản phẩm, chỉ c
   assert.equal(cat.meta.soSanPham, cat.products.length);
   assert.equal(cat.products.length, 1452);
   for (const p of cat.products) {
-    assert.deepEqual(Object.keys(p).sort(), ["brand", "code", "name", "text"]);
+    const keys = Object.keys(p).sort();
+    if ("img" in p) assert.deepEqual(keys, ["brand", "code", "img", "name", "text"]);
+    else assert.deepEqual(keys, ["brand", "code", "name", "text"]);
     assert.match(p.code, /^\d+$/);
     assert.ok(p.text.trim());
   }
