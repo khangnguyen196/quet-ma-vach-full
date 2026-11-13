@@ -258,7 +258,7 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (384 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (391 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (3 test)
 ```
 
