@@ -514,6 +514,61 @@ Nếu có máy chủ: 1d PP-OCRv5 det + VietOCR + T1 (miễn phí, không giới
 - Kết quả 30 ảnh trên Pages (12/11/2026, đợt `thu-r1`, sau khi lên main 0bda03d): `trang-thu-check.mjs --base https://khangnguyen196.github.io/quet-ma-vach-full/ --all --gap 5`, Chromium 156.0.8078.4 (headless shell 1248 qua `PW_CHROMIUM`) / WebKit 26.0 (webkit-2215, `PLAYWRIGHT_BROWSERS_PATH=D:\cache\ms-playwright`; Playwright 1.56.1 không dùng được webkit-2370), chạy lần lượt; file kết quả `D:\tmp\chup-mat-do\ket-qua\thu-r1-pages-1a-chromium.json`, `thu-r1-pages-1a-webkit.json`, `thu-r1-pages-r1-chromium.json`, `thu-r1-pages-r1-webkit.json`. Cả 4 lượt n = 30, 0 ảnh lỗi, đúng mốc: 1a Chromium vị trí 1 10/30, 5 đầu 19/30, top5 trùng `t1.json` 30/30; 1a WebKit 8 / 19, trùng 30/30; R1 Chromium 14 / 22, top5 trùng R1-trình-duyệt `ocr-mat` 30/30; R1 WebKit 13 / 21, trùng 30/30. Giây tải model lần đầu (gồm thư viện): 1a 35,3 / 16,2; R1 72,0 / 75,1 (chậm hơn lần đo bản build ở máy: tải phụ thuộc mạng lúc đo, mạng hôm đó chập chờn). Giây đọc chữ trung vị (lớn nhất): 1a 3,4 (5,4) / 4,6 (6,6); R1 4,3 (6,6) / 6,0 (8,7). 20 request mỗi lượt, 0 POST, 0 tới openfoodfacts.org, 0 host lạ (1a: github.io, jsDelivr, huggingface.co, us.aws.cdn.hf.co; R1: github.io, jsDelivr, huggingface.co, www.modelscope.cn, cdn-lfs-cn-1.modelscope.cn); request R1 lúc mở trang 0 cả 4 lượt, cả lượt 1a 0, R1 8; bước service worker đạt cả 4 lượt (Cache Storage 10 URL, không có trang thử / khác tên miền); `index.html` của app mở được (200, 0 lỗi trang). Lượt 1a WebKit chạy lại 1 lần: lần đầu mạng tới jsDelivr chậm (đo bằng curl: 60 giây chỉ tải 9,8 KB `opencv.js`), ảnh đầu báo "Không tải được …opencv.js", 29 ảnh sau "Cannot access 'PaddleOCR' before initialization." (trình duyệt nhớ lỗi import, đúng giới hạn đã biết bên dưới), bước service worker / `index.html` quá 30 giây; giữ ở `thu-r1-pages-1a-webkit-lan1.json`; chạy lại khi mạng ổn thì đạt như trên.
 - Giới hạn đã biết: sửa trang thử vẫn đổi VERSION app (thanh "Đã có bản mới"); mất mạng / mạng chậm quá 3 giây thì địa chỉ trang thử có thể trả `index.html` của app (như `ocr-thu.html`; kéo xuống để tải lại); chưa có integrity (SRI) cho file CDN; chạy chung tên miền với app (script CDN đọc được `localStorage` của app, mọi bản đều ghim); hết giờ nạp (120 / 180 giây) chỉ hủy phần tải file, còn biên dịch wasm / tạo phiên onnxruntime có thể vẫn chạy nền, xong thì trang tự giải phóng (`dispose()`); nếu lần đầu tải thư viện PaddleOCR.js lỗi mạng, trình duyệt có thể nhớ lỗi đó (module đã import lỗi), phải tải lại trang mới thử lại được. Dấu "đang chạy R1" được xóa khi người dùng tự tải lại / rời trang (`pagehide`) nên không báo nhầm; tab bị đóng vì hết bộ nhớ ngay lúc đang mở thì không có `pagehide` nên vẫn được báo (quay lại trang từ bộ nhớ đệm mà R1 còn chạy thì ghi lại dấu); nhưng nếu trang đã vào bộ nhớ đệm / chạy nền (`pagehide` đã chạy, dấu đã xóa) rồi mới bị đóng vì hết bộ nhớ thì KHÔNG được báo.
 
+## Đợt `nang-t1` (13/11/2026): nâng tìm theo chữ của "Chụp mặt trước" trong app
+
+Ca thật của chủ dự án: gói muối Co.op Select "Muối Biển Tinh Sấy I-Ốt"; máy chủ OCR đọc 4 dòng "COOP" / "Select" / "Mui Bin Tinh Sấy l-t" / "IODIZES REFINED SEA SALT"; app ra 5 gợi ý đều sai (Lorenz naturals, Cơm Sấy, Argeta Salt, Ham Select, Kem đánh răng Co.op Select). Mã chủ dự án đưa 8934673218368 trên Open Food Facts (1 lượt API) là "Creamer Ngôi Sao phương Nam" của Vinamilk, trong danh mục app cũng vậy; bản xuất Open Food Facts (08/11/2026, đọc 1 lượt) không có sản phẩm muối Co.op nào. Vậy kết quả đúng của ca muối là "không chắc", tìm theo chữ không thể ra đúng mã.
+
+### Cách đo (chốt trước khi chạy)
+
+- Bộ chữ A = chữ máy chủ R1 trên ảnh gốc (`D:\tmp\may-chu-1\ocr\may-chu-t8-v3\`, đổi box → poly); bộ chữ B = chữ máy chủ trả về khi chọn ảnh qua luồng app (Chromium, ảnh nén 1.600 px, `D:\tmp\nang-t1\ocr-app\`). A và B là CÙNG 30 ảnh đọc 2 lần (không phải 60 ảnh khác nhau). Chấm vị trí 1 / trong 5 bằng `rankOf` của `lib.mjs`, đáp án = thư mục `photos/<mã>` có `front.jpg`.
+- Chia nhóm cố định: 30 mã xếp tăng dần, vị trí 3, 6, …, 30 = nhóm GIỮ RIÊNG (10 mã): 8934614031322, 8934804025766, 8935001214274, 8935049511021, 8936017367107, 8936028641487, 8936036027099, 8936071070340, 8936221043071, 8938501141477; 20 mã còn lại = nhóm CHỈNH. Ca muối dựng 2 biến thể (m1: 4 khung chữ qua `rankFromItems`; m2: 4 dòng qua `rankFromText`), chỉ báo, không dùng để chọn.
+- Luật giữ một cách (chốt trước, `nang-t1-do.mjs` `regressions` / `judge` / `choosePoint`): "giảm" = một ảnh mất vị trí 1 hoặc rơi khỏi 5 đầu trên BẤT KỲ bộ chữ nào; giữ khi nhóm chỉnh không giảm ở cả A và B, nhóm giữ riêng không giảm, và có ảnh tăng thật ở nhóm chỉnh; điểm lưới chọn theo thứ tự ghi trước, không quay lại chọn điểm khác.
+
+### Trước / sau từng cách (vị trí 1 / trong 5; chỉnh = 20 ảnh, giữ riêng = 10 ảnh)
+
+| Cách | A chỉnh | A giữ riêng | B chỉnh | B giữ riêng | Ca muối (gợi ý 1) | Giữ? |
+|---|---|---|---|---|---|---|
+| Mốc (T1 hiện tại) | 10/15 | 3/7 | 11/15 | 3/6 | Lorenz naturals 13,30 (sai) | – |
+| (a1) chuẩn hóa co.op | 10/15 | 3/7 | 11/15 | 3/6 | Kem đánh răng Co.op 16,20 (sai) | không (không ảnh nào tăng) |
+| (a2) a1 + sửa 1 ký tự | như mốc | như mốc | như mốc | như mốc | như a1 | không (sửa được 0 từ) |
+| (c) thương hiệu nặng ×1,5 | 10/15 | 3/7 | 10/15 | 3/7 | Lorenz (sai) | không (8936045081310 mất vị trí 1 ở B) |
+| (c) ×2 | 10/15 | 3/7 | 10/15 | 3/7 | Lorenz (sai) | không (như trên) |
+| (c) ×3 | 11/14 | 3/7 | 11/15 | 3/7 | Lorenz (sai) | không (như trên; A còn rơi khỏi 5 đầu) |
+| (b) n-gram cộng điểm α 0,2 | 10/15 | 3/7 | 10/15 | 3/7 | Lorenz (sai) | không (như trên) |
+| (b) α 0,3 | 12/15 | 3/7 | 11/15 | 3/7 | Lorenz (sai) | không (như trên) |
+| (b) α 0,5 | 12/14 | 4/6 | 12/14 | 4/6 | Lorenz (sai) | không (giảm cả chỉnh lẫn giữ riêng) |
+| (b) RRF k 60 / k 10 | 12/14 | 3/6 | 12/14 | 3/6 | Lorenz (sai) | không (như trên) |
+| (d) danh mục mở rộng thử | 7/13 | 2/5 | 8/13 | 2/5 | Natural sea salt 8936071331106 (không phải muối Co.op) | không (tổng A 9/18, B 10/18) |
+
+Mốc tổng: A 13/22, B 14/21; cấu hình cuối = mốc. Mã + test của (a)(c)(b) còn ở commit 30727c1 (`nang-t1-thu.mjs --buoc a|c|b` chạy với `src/front-rank.js` của commit đó); đã gỡ khỏi app.
+
+Cỡ danh mục: app giữ `public/chup-mat-do/danh-muc-vn.json` 1.452 sản phẩm (gzip 50.328 B). Danh mục mở rộng thử (en:vietnam hoặc mã đầu 893, có tên): 6.970 sản phẩm (1.452 cũ + 5.518 mới), thô 1.047.616 B, gzip 214.798 B (dưới trần ≈ 300 KB), 5.153 có ảnh; không đưa vào app vì làm kém đi (bảng trên), không ghi vào `public/`.
+
+### Điểm tin cậy (e)
+
+Đặc trưng (thứ tự ưu tiên F1 → F4): top1 = điểm BM25 gợi ý 1; gap = top1 − top2; norm = top1 / tổng idf câu tìm; rel = gap / top1. Luật chốt trước: một đặc trưng, ngưỡng = điểm giữa 2 giá trị liên tiếp trên nhóm chỉnh (A + B = 40 dòng, 21 dòng đúng ở vị trí 1), chỉ xét precision ≥ 0,9, lấy recall lớn nhất; recall tốt nhất < 6/21 thì "luôn không chắc". Tốt nhất mỗi đặc trưng trên nhóm chỉnh:
+
+| Đặc trưng | Ngưỡng | Số "chắc" | Chắc và đúng | Precision | Recall |
+|---|---|---|---|---|---|
+| top1 | ≥ 24,40 | 11 | 11 | 1,00 | 11/21 |
+| gap | ≥ 4,87 | 13 | 12 | 0,92 | 12/21 |
+| norm | không ngưỡng nào đạt precision 0,9 | – | – | – | – |
+| rel | ≥ 0,2468 | 15 | 14 | 0,93 | 14/21 (chọn) |
+
+Kiểm luật rel trên phần không dùng để chọn: nhóm giữ riêng A 5 chắc / 2 đúng, B 5 / 2, gộp 10 chắc / 4 đúng (precision 0,40, recall 4/6); chắc mà sai: 8934614031322 (đúng ở vị trí 3, cả A và B), 8934804025766 (A vị trí 5, B không có trong 5 đầu), 8936071070340 (không có trong 5 đầu, cả A và B). Ca muối (m1 = m2): top1 13,30, gap 4,42, norm 0,439, rel 0,3325 → "chắc" (sai). Lưu ý cỡ mẫu: 15 lần "chắc" của nhóm chỉnh chỉ ứng 8 ảnh (A và B cùng ảnh).
+
+Quyết định (13/11/2026, đợt nang-t1 vòng 4): bỏ luật rel, app dùng "luôn không chắc" (`CONFIDENCE_RULE` = `{ feature: null, threshold: null }` trong `src/front-rank.js`): mọi kết quả "Chụp mặt trước" có khối "Không chắc chắn, có thể sản phẩm chưa có trong danh mục" + 3 nút, gợi ý vẫn hiện. Quyết SAU KHI THẤY SỐ nhóm giữ riêng, nên nhóm giữ riêng không còn là bằng chứng độc lập; không chọn ngưỡng mới, không thêm đặc trưng. Muốn có luật "chắc" thật thì cần ảnh mới độc lập (chủ dự án chụp 20–30 gói, có cả gói không có trong danh mục), chốt luật trước khi đo.
+
+Kiểm qua app (vòng 4, Playwright Chromium + WebKit, máy chủ OCR trên máy `AUTH_MODE=off`, phiên giả): 30 ảnh vị trí 1 / trong 5 = 14/21 cả hai trình duyệt, top5 trùng lần đo trước 30/30, khối hiện 30/30; ca muối có khối + 3 nút.
+
+### Chạy lại (trong thư mục gốc repo; kết quả ra `D:\tmp\nang-t1\ket-qua\`)
+
+- Mốc bộ A / B: `node test-ocr/chup-mat-do/nang-t1-do.mjs --set A` và `--set B` (chữ bộ B mặc định ở `D:\tmp\nang-t1\ocr-app`; phải ra 13/22 và 14/21).
+- front-rank mặc định trùng mốc từng ảnh: `node test-ocr/chup-mat-do/nang-t1-thu.mjs --buoc moc` (lần đầu thêm `--nen-moi` để ghi file nền); thử lại các cách: `--buoc a|c|b` với `src/front-rank.js` của commit 30727c1; danh mục thử: `--buoc mo-rong --catalog D:\tmp\nang-t1\du-lieu\danh-muc-mo-rong.json`.
+- Danh mục: `node test-ocr/chup-mat-do/nang-t1-danh-muc.mjs` (phân tích 3 tiêu chí) và `--dung-mo-rong` (dựng danh mục mở rộng thử, kiểm trần gzip trước khi ghi, không ghi `public/`). Cần `D:\tmp\nang-t1\du-lieu\mo-rong.json` (đọc bản xuất 1 lượt bằng script ngoài repo `D:\tmp\nang-t1\doc-ban-xuat.mjs`, ~17 phút).
+- Điểm tin cậy: `node test-ocr/chup-mat-do/nang-t1-tin-cay.mjs` (đọc `v2-moc-A.json` + `v2-moc-B.json`, ghi `v3-tin-cay.json`: bảng mọi ngưỡng ứng viên, điểm chọn, nhóm giữ riêng, ca muối).
+- Test: `npm test` trong `test-ocr/chup-mat-do` (đặt `TEMP` hoặc `NANG_T1_TMP` ở ổ D để file tạm không vào ổ C); test app `npm test` ở thư mục gốc (`tests/front-rank.test.js`, `tests/front-render.test.js`).
+
 ---
 
 # Phần F – Thử nhiều model OCR cho "chụp mặt trước" (đợt `ocr-mat`)
