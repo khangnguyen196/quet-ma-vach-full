@@ -4,24 +4,14 @@
 // Địa chỉ: ocrServerUrl của src/front-photo.js (đợt chup-mat): mặc định máy chủ trên Azure; VITE_OCR_SERVER_URL
 // (dự phòng tên cũ VITE_OCR_DEV_URL) để đổi, vd máy chủ trên máy: VITE_OCR_SERVER_URL=http://127.0.0.1:8765.
 // Không lưu gì (không localStorage, không giữ ảnh). Mọi chữ từ máy chủ đặt bằng textContent (không bao giờ thành HTML).
-import { ocrServerUrl } from "./front-photo.js";
+// Gửi bằng sendOcr của front-photo.js (cùng cách gửi, cùng câu lỗi với nút "Chụp mặt trước"; ảnh gửi nguyên bản,
+// không thu nhỏ, để thử máy chủ với ảnh gốc).
+import { ocrServerUrl, sendOcr } from "./front-photo.js";
 
 // Giữ tên cũ cho ai import từ đây (tests/dev-ocr.test.js kiểm 2 chỗ là cùng một hàm)
 export { ocrServerUrl };
 
 const MARKER = "dev-ocr-khu-thu";
-
-/** Câu tiếng Việt cho mã HTTP của máy chủ OCR. */
-function statusText(status, retryAfter) {
-  const wait = retryAfter ? ` Chờ ${retryAfter} giây rồi thử lại.` : "";
-  if (status === 200) return "Đọc xong.";
-  if (status === 401) return "Máy chủ từ chối token đăng nhập (401): đăng xuất rồi đăng nhập lại, hoặc kiểm AUTH_MODE / SUPABASE_URL của máy chủ.";
-  if (status === 429) return "Gửi quá nhiều ảnh (429)." + wait;
-  if (status === 503) return "Máy chủ đang bận, chưa nạp xong model, hoặc chưa kiểm được đăng nhập vì Supabase không trả lời (503)." + wait;
-  if (status === 413) return "Ảnh quá lớn cho máy chủ (413).";
-  if (status === 415) return "Máy chủ không đọc được loại ảnh này (415).";
-  return `Máy chủ trả lỗi (HTTP ${status}).`;
-}
 
 /**
  * Gắn khu thử vào trang, ngay sau anchor (khối tài khoản).
@@ -83,24 +73,24 @@ export function initDevOcr({ anchor, getAccessToken, onAuthChange }) {
     input.disabled = true;
     const t0 = performance.now();
     try {
-      const fd = new FormData();
-      fd.append("image", file);
-      const res = await fetch(base + "/ocr", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd });
-      let body = null;
-      try { body = await res.json(); } catch { body = null; }
+      const r = await sendOcr({
+        base, token, blob: file, filename: file.name || "anh.jpg",
+        onSlow: () => say("Máy chủ đang khởi động, có thể mất khoảng 15 giây…"),
+      });
       const secs = ((performance.now() - t0) / 1000).toFixed(1).replace(".", ",");
-      const head = `HTTP ${res.status} · ${secs} giây. ${statusText(res.status, res.headers.get("Retry-After"))}`;
-      if (res.ok && Array.isArray(body?.items)) {
-        say(`${head} ${body.items.length} khung chữ.`);
-        out.textContent = body.items.map((it) => String(it?.text ?? "")).join("\n") || "(không có chữ)";
+      if (r.ok) {
+        say(`Đọc xong · ${secs} giây. ${r.items.length} khung chữ.`);
+        out.textContent = r.items.map((it) => String(it?.text ?? "")).join("\n") || "(không có chữ)";
         out.hidden = false;
-      } else {
-        say(body?.error ? `${head} Máy chủ: ${body.error}` : head, true);
+        return;
       }
-    } catch (e) {
-      console.error(e);
-      say(`Không kết nối được máy chủ ở ${base} (máy chủ trên máy: đã chạy server\\chay-thu.ps1 chưa? máy chủ trên Azure: `
-        + `ALLOWED_ORIGINS có https://localhost:5173 chưa? máy chủ đang ngủ thì lần đầu chậm, thử lại).`, true);
+      const status = r.status ? `HTTP ${r.status} · ` : "";
+      const server = r.serverMessage ? ` Máy chủ: ${r.serverMessage}` : "";
+      const hint = r.kind === "network"
+        ? ` (máy chủ ở ${base}; máy chủ trên máy: đã chạy server\\chay-thu.ps1 chưa? máy chủ trên Azure: `
+          + `ALLOWED_ORIGINS có https://localhost:5173 chưa?)`
+        : "";
+      say(`${status}${secs} giây. ${r.message}${server}${hint}`, true);
     } finally {
       input.disabled = false;
     }
