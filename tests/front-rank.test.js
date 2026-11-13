@@ -71,10 +71,75 @@ describe("front-rank mặc định = front-search (đường B / ô sửa chữ)
     }
   });
 
+  test("confidenceOf: ca muối trên danh mục thật (m1 khung chữ, m2 ô chữ) → kết quả thật: confident, rel 0,3325", () => {
+    // Ghi kết quả THẬT của luật đã chọn (không phải kết quả mong muốn): ca muối không có trong danh mục, đúng ra là
+    // "không chắc", nhưng luật rel ≥ 0,2468 (chọn trên nhóm chỉnh, không chỉnh theo ca muối) cho ra confident.
+    const lines = SALT.split("\n");
+    const items = lines.map((text, k) => ({ text, poly: [[10, 10 + k * 60], [410, 10 + k * 60], [410, 50 + k * 60], [10, 50 + k * 60]], score: 0.9 }));
+    for (const r of [mod.rankFromItems(t1, rIndex, items), mod.rankFromText(t1, rIndex, SALT)]) {
+      assert.equal(r.hits[0].code, "4018077712999"); // Lorenz naturals
+      const c = mod.confidenceOf(r);
+      assert.equal(c.feature, "rel");
+      assert.equal(c.threshold, mod.CONFIDENCE_RULE.threshold);
+      assert.ok(Math.abs(c.value - 0.3324803517241829) < 1e-9, String(c.value));
+      assert.equal(c.confident, true);
+      const v = mod.confidenceValues({ top1: r.hits[0].score, top2: r.hits[1].score, idfSum: r.idfSum });
+      assert.ok(Math.abs(v.norm - 0.43866114381745464) < 1e-9);
+      assert.ok(Math.abs(v.gap - 4.422650357212021) < 1e-9);
+    }
+  });
+
   test("i = vị trí trong products: hitProducts dùng được", () => {
     const r = mod.rankFromItems(t1, rIndex, fixture.anh[0].items);
     const shown = hitProducts(catalog.products, r.hits);
     assert.equal(shown.length, r.hits.length);
     assert.deepEqual(shown.map((p) => p.code), r.hits.map((h) => h.code));
+  });
+});
+
+describe("confidenceOf: điểm tin cậy (vòng 3, luật chốt trước)", () => {
+  const H = (...scores) => scores.map((score, i) => ({ code: String(8930000000000 + i), score, i }));
+  const res = (hits, idfSum = 20, query = ["a"]) => ({ query, hits, idfSum });
+
+  test("CONFIDENCE_RULE: rel, ngưỡng = điểm giữa 2 giá trị rel của nhóm chỉnh; không sửa được", () => {
+    assert.equal(mod.CONFIDENCE_RULE.feature, "rel");
+    assert.equal(mod.CONFIDENCE_RULE.threshold, (0.21616184197410665 + 0.2774309394601073) / 2);
+    assert.ok(Object.isFrozen(mod.CONFIDENCE_RULE));
+    assert.deepEqual([...mod.CONFIDENCE_FEATURES], ["top1", "gap", "norm", "rel"]);
+  });
+
+  test("không có gợi ý / câu tìm rỗng / kết quả hỏng → không chắc, value null", () => {
+    for (const r of [res([]), res(H(9, 1), 20, []), null, undefined, {}, res(H(NaN))]) {
+      const c = mod.confidenceOf(r);
+      assert.equal(c.confident, false);
+      assert.equal(c.value, null);
+    }
+    // kết quả thật: câu rỗng
+    assert.equal(mod.confidenceOf(mod.rankFromText(t1, mod.buildRankIndex(t1, catalog.products), "")).confident, false);
+  });
+
+  test("1 gợi ý: top2 = 0 → gap = top1, rel = 1 (chắc chắn với luật rel)", () => {
+    const c = mod.confidenceOf(res(H(7)));
+    assert.equal(c.value, 1);
+    assert.equal(c.confident, true);
+    assert.equal(mod.confidenceOf(res(H(7)), { feature: "gap", threshold: 7 }).value, 7);
+  });
+
+  test("ngưỡng biên: bằng ngưỡng → chắc; dưới một chút → không", () => {
+    const rule = { feature: "gap", threshold: 3 };
+    assert.equal(mod.confidenceOf(res(H(10, 7)), rule).confident, true); // gap 3 = ngưỡng
+    assert.equal(mod.confidenceOf(res(H(10, 7.000001)), rule).confident, false);
+    const t = mod.CONFIDENCE_RULE.threshold;
+    // rel = (top1 − top2) / top1: top2 = top1 · (1 − rel)
+    assert.equal(mod.confidenceOf(res(H(10, 10 * (1 - t) - 1e-9))).confident, true);
+    assert.equal(mod.confidenceOf(res(H(10, 10 * (1 - t) + 1e-9))).confident, false);
+    assert.equal(mod.confidenceOf(res(H(10, 4)), { feature: "norm", threshold: 0.5 }).value, 0.5);
+    assert.equal(mod.confidenceOf(res(H(10, 4)), { feature: "top1", threshold: 10 }).confident, true);
+  });
+
+  test("luật 'luôn không chắc' (feature null) hoặc luật lạ → không chắc", () => {
+    for (const rule of [{ feature: null, threshold: null }, { feature: "xyz", threshold: 0 }, { feature: "rel", threshold: NaN }]) {
+      assert.equal(mod.confidenceOf(res(H(30, 1)), rule).confident, false);
+    }
   });
 });

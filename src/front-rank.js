@@ -49,6 +49,52 @@ export function rankFromItems(t1, rIndex, items, k = 5, opts = rIndex.opts) {
   return rankLines(t1, rIndex, rows, k, opts);
 }
 
+// ---- Điểm tin cậy (vòng 3, cách e): kết quả có "chắc chắn" không ----
+// Luật chọn ngưỡng CHỐT TRƯỚC khi đo (test-ocr/chup-mat-do/nang-t1-tin-cay.mjs chooseRule): chỉ MỘT đặc trưng,
+// ngưỡng = điểm giữa 2 giá trị liên tiếp trên nhóm CHỈNH (bộ A + B = 40 ảnh); precision ≥ 0,9, recall lớn nhất.
+// Đặc trưng (thứ tự ưu tiên khi bằng): top1 = điểm BM25 gợi ý 1; gap = top1 − top2 (1 gợi ý thì top2 = 0);
+// norm = top1 / idfSum; rel = gap / top1.
+// Ví dụ: confidenceOf({ query: ["vissan"], hits: [{ score: 9 }, { score: 4 }], idfSum: 10 }, { feature: "gap", threshold: 3 })
+//   → { confident: true, feature: "gap", value: 5, threshold: 3 }
+
+/** Tên các đặc trưng, theo thứ tự ưu tiên F1 → F4. */
+export const CONFIDENCE_FEATURES = Object.freeze(["top1", "gap", "norm", "rel"]);
+
+/** Giá trị 4 đặc trưng từ { top1, top2, idfSum } (top2 thiếu = 0; idfSum ≤ 0 → norm 0; top1 ≤ 0 → rel 0). */
+export function confidenceValues({ top1, top2, idfSum }) {
+  const t2 = Number.isFinite(top2) ? top2 : 0;
+  const gap = top1 - t2;
+  return { top1, gap, norm: idfSum > 0 ? top1 / idfSum : 0, rel: top1 > 0 ? gap / top1 : 0 };
+}
+
+/**
+ * Luật đang dùng: { feature, threshold }; feature null = "luôn không chắc" (khi không tách được ca đúng / sai).
+ * Nguồn số đo (13/11/2026, test-ocr/chup-mat-do/nang-t1-tin-cay.mjs trên D:\tmp\nang-t1\ket-qua\v2-moc-A.json +
+ * v2-moc-B.json, kết quả v3-tin-cay.json): nhóm chỉnh 40 ảnh (21 ảnh đúng ở vị trí 1), tốt nhất mỗi đặc trưng:
+ *   top1 ≥ 24,40: 11 confident, 11 đúng (precision 1,00, recall 11/21); gap ≥ 4,87: 13 / 12 (0,92, 12/21);
+ *   norm: không ngưỡng nào đạt precision 0,9; rel ≥ 0,2468: 15 / 14 (0,93, 14/21) → CHỌN rel (recall lớn nhất).
+ * Ngưỡng = điểm giữa 0,21616… và 0,27743… (2 giá trị rel liên tiếp của nhóm chỉnh).
+ * Chỉ báo, KHÔNG dùng để chọn: nhóm giữ riêng 20 ảnh: 10 confident, 4 đúng (precision 0,40, recall 4/6);
+ * ca muối (4 dòng Co.op Select, không có trong danh mục): rel 0,332 → confident (sai: kết quả đúng là "không chắc").
+ */
+export const CONFIDENCE_RULE = Object.freeze({ feature: "rel", threshold: 0.24679639071710696 });
+
+/**
+ * Kết quả rankFromItems / rankFromText ({ query, hits: [{ score }], idfSum }) có "chắc chắn" không.
+ * Không có gợi ý hoặc câu tìm rỗng → confident false (value null). Luật "luôn không chắc" → confident false.
+ * Trả { confident, feature, value, threshold }.
+ */
+export function confidenceOf(result, rule = CONFIDENCE_RULE) {
+  const feature = rule?.feature ?? null;
+  const threshold = rule?.threshold ?? null;
+  const hits = Array.isArray(result?.hits) ? result.hits : [];
+  const query = Array.isArray(result?.query) ? result.query : [];
+  if (!hits.length || !query.length || !Number.isFinite(hits[0]?.score)) return { confident: false, feature, value: null, threshold };
+  if (!CONFIDENCE_FEATURES.includes(feature) || !Number.isFinite(threshold)) return { confident: false, feature, value: null, threshold };
+  const value = confidenceValues({ top1: hits[0].score, top2: hits[1]?.score, idfSum: result.idfSum })[feature];
+  return { confident: Number.isFinite(value) && value >= threshold, feature, value, threshold };
+}
+
 /** Chữ người dùng sửa trong ô → gợi ý: mỗi dòng không trống = 1 dòng { text, conf: null } (như front-search.js). */
 export function rankFromText(t1, rIndex, text, k = 5, opts = rIndex.opts) {
   const lines = (typeof text === "string" ? text : "")
