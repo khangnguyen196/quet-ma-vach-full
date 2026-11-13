@@ -287,6 +287,84 @@ describe("429: ngưỡng hết lượt ngày = 60 giây (giới hạn theo phút
   });
 });
 
+describe("frontButtonState: nút Chụp mặt trước theo trạng thái đăng nhập (authState của main.js)", () => {
+  const S = (patch) => ({ configured: true, loading: false, unavailable: false, session: null, error: "", busy: false, ...patch });
+
+  test("không cấu hình đăng nhập → hidden (ẩn cả nút lẫn ghi chú)", () => {
+    assert.equal(mod.frontButtonState(S({ configured: false })), "hidden");
+    assert.equal(mod.frontButtonState(S({ configured: false, loading: true })), "hidden");
+    assert.equal(mod.frontButtonState(S({ configured: false, session: { access_token: "x" } })), "hidden");
+    assert.equal(mod.frontButtonState(undefined), "hidden");
+    assert.equal(mod.frontButtonState(null), "hidden");
+  });
+
+  test("không tải được thư viện đăng nhập (unavailable) → hidden", () => {
+    assert.equal(mod.frontButtonState(S({ unavailable: true })), "hidden");
+  });
+
+  test("đang kiểm phiên → loading", () => {
+    assert.equal(mod.frontButtonState(S({ loading: true })), "loading");
+  });
+
+  test("chưa có phiên → login", () => {
+    assert.equal(mod.frontButtonState(S({})), "login");
+    assert.equal(mod.frontButtonState(S({ error: "Đăng nhập không thành công." })), "login");
+  });
+
+  test("có phiên → ready", () => {
+    assert.equal(mod.frontButtonState(S({ session: { access_token: "x", user: { email: "a@b.c" } } })), "ready");
+    assert.equal(mod.frontButtonState(S({ session: { access_token: "x" }, busy: true })), "ready");
+  });
+});
+
+describe("frontErrorText: lỗi sendOcr → câu tiếng Việt cho giao diện", () => {
+  const T = (kind, extra = {}) => mod.frontErrorText({ ok: false, kind, message: "câu cũ", retryAfter: null, serverMessage: "", ...extra });
+
+  test("auth → mời đăng nhập lại", () => {
+    assert.equal(T("auth"), "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.");
+  });
+
+  test("daily → giờ phút còn lại (làm tròn lên phút), lúc 7 giờ sáng, vẫn quét mã được; không dùng câu máy chủ", () => {
+    assert.equal(T("daily", { retryAfter: 40000, serverMessage: "<b>câu máy chủ</b>" }),
+      "Bạn đã dùng hết lượt chụp hôm nay. Thử lại sau 11 giờ 7 phút (lúc 7 giờ sáng). Vẫn quét mã vạch được.");
+    assert.equal(T("daily", { retryAfter: 3601 }),
+      "Bạn đã dùng hết lượt chụp hôm nay. Thử lại sau 1 giờ 1 phút (lúc 7 giờ sáng). Vẫn quét mã vạch được.");
+    assert.equal(T("daily", { retryAfter: 3600 }),
+      "Bạn đã dùng hết lượt chụp hôm nay. Thử lại sau 1 giờ 0 phút (lúc 7 giờ sáng). Vẫn quét mã vạch được.");
+    assert.equal(T("daily", { retryAfter: 61 }),
+      "Bạn đã dùng hết lượt chụp hôm nay. Thử lại sau 2 phút (lúc 7 giờ sáng). Vẫn quét mã vạch được.");
+  });
+
+  test("daily không có Retry-After → không có số, vẫn có 7 giờ sáng", () => {
+    const s = T("daily");
+    assert.match(s, /hết lượt chụp hôm nay/);
+    assert.match(s, /7 giờ sáng/);
+    assert.doesNotMatch(s, /null|NaN|undefined/);
+  });
+
+  test("rate → chờ N giây", () => {
+    assert.equal(T("rate", { retryAfter: 42 }), "Gửi nhanh quá, chờ 42 giây rồi thử lại.");
+    const s = T("rate");
+    assert.match(s, /^Gửi nhanh quá, chờ/);
+    assert.doesNotMatch(s, /null|NaN|undefined/);
+  });
+
+  test("busy / network / timeout / tooBig / badType / other / kind lạ → câu ngắn kèm gợi ý quét mã hoặc nhập số", () => {
+    for (const kind of ["busy", "network", "timeout", "tooBig", "badType", "other", "la-lam", undefined]) {
+      const s = T(kind, { serverMessage: "<script>x</script>" });
+      assert.ok(s.length > 10, String(kind));
+      assert.match(s, /quét mã vạch|nhập số/, String(kind));
+      assert.doesNotMatch(s, /script/, String(kind));
+    }
+  });
+
+  test("aborted → '' (không hiện); không phải lỗi → ''", () => {
+    assert.equal(T("aborted"), "");
+    assert.equal(mod.frontErrorText({ ok: true, items: [] }), "");
+    assert.equal(mod.frontErrorText(null), "");
+  });
+});
+
 describe("front-photo.js không gọi mạng lúc nạp", () => {
   test("import module không gọi fetch", async () => {
     const orig = globalThis.fetch;
