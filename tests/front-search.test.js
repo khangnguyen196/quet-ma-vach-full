@@ -140,6 +140,29 @@ describe("địa chỉ T1 / danh mục theo BASE_URL, loadT1", () => {
     assert.equal(mod.catalogUrl(), "/chup-mat-do/danh-muc-vn.json"); // node: không có import.meta.env → "/"
   });
 
+  test("pageUrl: base tương đối của bản build ('./') tính theo TRANG, không theo file JS trong assets/", () => {
+    const page = "https://khangnguyen196.github.io/quet-ma-vach-full/";
+    assert.equal(mod.pageUrl("./chup-mat-do/t1.mjs", page), "https://khangnguyen196.github.io/quet-ma-vach-full/chup-mat-do/t1.mjs");
+    assert.equal(mod.pageUrl("./chup-mat-do/t1.mjs", page + "index.html?x=1#y"),
+      "https://khangnguyen196.github.io/quet-ma-vach-full/chup-mat-do/t1.mjs");
+    assert.equal(mod.pageUrl("/chup-mat-do/t1.mjs", "https://localhost:5173/"), "https://localhost:5173/chup-mat-do/t1.mjs");
+    assert.equal(mod.pageUrl("file:///x/t1.mjs", page), "file:///x/t1.mjs");
+    assert.equal(mod.pageUrl("./a.mjs", ""), "./a.mjs"); // không có trang (node) → giữ nguyên
+  });
+
+  test("loadT1 với base './' như bản build: tính theo document.baseURI (trang), nạp đúng public/chup-mat-do/t1.mjs", async () => {
+    const publicDir = pathToFileURL(fileURLToPath(new URL("../public/", import.meta.url))).href;
+    const had = "document" in globalThis;
+    const old = globalThis.document;
+    globalThis.document = { baseURI: publicDir + "index.html" };
+    try {
+      const m = await mod.loadT1("./chup-mat-do/t1.mjs");
+      assert.equal(m.bm25Search, t1.bm25Search);
+    } finally {
+      if (had) globalThis.document = old; else delete globalThis.document;
+    }
+  });
+
   test("loadT1 import động đúng file public/chup-mat-do/t1.mjs (cùng một bản T1)", async () => {
     const url = pathToFileURL(fileURLToPath(new URL("../public/chup-mat-do/t1.mjs", import.meta.url))).href;
     const m = await mod.loadT1(url);
