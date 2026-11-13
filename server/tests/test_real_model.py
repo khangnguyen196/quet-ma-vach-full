@@ -43,6 +43,21 @@ def test_model_that_doc_duoc_chu(real_client):
     assert j["msOcr"] > 0 and (j["width"], j["height"]) == (900, 300)
 
 
+def test_model_that_doc_duoc_anh_thu_cua_ci(real_client):
+    """Ảnh CI dùng (tests/fixtures/chu.png, tự vẽ bằng tao_chu.py): OCR phải ra các chữ đã vẽ. Workflow server-image
+    gửi đúng ảnh này vào container và kiểm cùng các chữ (CHU_PNG_WORDS)."""
+    from fixtures.tao_chu import CHU_PNG, CHU_PNG_WORDS
+
+    data = CHU_PNG.read_bytes()
+    assert len(data) < 50 * 1024
+    body, ctype = multipart([("image", "chu.png", data)])
+    r = real_client.post("/ocr", content=body, headers={"content-type": ctype})
+    assert r.status_code == 200, r.text
+    texts = " ".join(it["text"] for it in r.json()["items"]).upper()
+    for word in CHU_PNG_WORDS:
+        assert word in texts, (word, texts)
+
+
 def test_model_that_anh_trang_khong_loi(real_client):
     r = _post(real_client, Image.new("RGB", (640, 480), "white"))
     assert r.status_code == 200

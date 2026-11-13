@@ -7,6 +7,7 @@ Cấu hình uvicorn ở đây = đúng các cờ của 3 lệnh chạy (chay-thu
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -85,7 +86,9 @@ def _healthcheck_code() -> str:
 
 def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
     code = _healthcheck_code()
-    assert "127.0.0.1:8765/health" in code and "timeout=3" in code
+    # cổng đọc từ biến PORT (mặc định 8080) như CMD của Dockerfile; không ghi cứng cổng
+    assert "os.environ.get('PORT', '8080')" in code and "/health" in code and "timeout=3" in code
+    assert "8765" not in code
     loaded = make_app()
     not_loaded_engine = FakeEngine()
     not_loaded_engine.loaded = False
@@ -93,7 +96,8 @@ def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
     results = []
     for app in (loaded, not_loaded):
         with real_server(app, **UVICORN_FLAGS) as port:
-            p = subprocess.run([sys.executable, "-c", code.replace("8765", str(port))], capture_output=True, timeout=20)
+            env = {**os.environ, "PORT": str(port)}
+            p = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=20, env=env)
             results.append(p.returncode)
         assert not port_listening(port)
     assert results == [0, 1]  # model đã nạp -> khỏe; chưa nạp (ok=false) -> không khỏe
