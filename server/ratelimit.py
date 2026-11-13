@@ -19,7 +19,8 @@ WINDOW_SECONDS = 60.0
 
 
 def _port_ok(port: str) -> bool:
-    return port.isascii() and port.isdigit() and int(port) <= 65535
+    # kiểm độ dài TRƯỚC int(): Python 3.12 ném ValueError với chuỗi số > 4300 chữ số
+    return port.isascii() and port.isdigit() and len(port) <= 5 and int(port) <= 65535
 
 
 def clean_ip(value: str) -> str | None:
