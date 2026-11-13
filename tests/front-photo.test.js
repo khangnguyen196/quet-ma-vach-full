@@ -120,7 +120,7 @@ describe("sendOcr: máy chủ giả", () => {
     assert.match(r.serverMessage, /quá nhiều ảnh/);
   });
 
-  test("429 + Retry-After 40000 (> 300 giây) → daily, hết lượt hôm nay", async () => {
+  test("429 + Retry-After 40000 (> 60 giây) → daily, hết lượt hôm nay", async () => {
     const r = await send("/r429day");
     assert.equal(r.kind, "daily");
     assert.equal(r.retryAfter, 40000);
@@ -231,6 +231,59 @@ describe("sendOcr: máy chủ giả", () => {
     assert.equal(got.init.headers.Authorization, "Bearer " + TOKEN);
     assert.ok(got.init.body instanceof FormData);
     assert.ok(got.init.body.get("image") instanceof Blob);
+  });
+});
+
+describe("sendOcr: base / ảnh sai → other, KHÔNG gọi mạng (vòng 2, gợi ý code-reviewer)", () => {
+  const noFetch = () => {
+    const f = () => { f.called++; throw new Error("không được gọi"); };
+    f.called = 0;
+    return f;
+  };
+
+  for (const badBase of ["", undefined, null, "   ", "ftp://may-chu.example", "may-chu.example", "javascript:alert(1)", "https://"]) {
+    test(`base ${JSON.stringify(badBase)} → kind other, fetch không được gọi`, async () => {
+      const f = noFetch();
+      const r = await mod.sendOcr({ base: badBase, token: TOKEN, blob: blob(), fetchImpl: f });
+      assert.equal(r.ok, false);
+      assert.equal(r.kind, "other");
+      assert.equal(f.called, 0);
+      assert.doesNotMatch(r.message, /undefined|null/);
+    });
+  }
+
+  for (const [name, bad] of [["chuỗi", "khong-phai-blob"], ["object", { size: 3 }], ["số", 123]]) {
+    test(`ảnh không phải Blob (${name}) → kind other, fetch không được gọi`, async () => {
+      const f = noFetch();
+      const r = await mod.sendOcr({ base: "https://may-chu.example", token: TOKEN, blob: bad, fetchImpl: f });
+      assert.equal(r.ok, false);
+      assert.equal(r.kind, "other");
+      assert.equal(f.called, 0);
+    });
+  }
+
+  test("base http://127.0.0.1:… (máy chủ trên máy) vẫn gửi được", async () => {
+    let url = "";
+    const fake = async (u) => { url = u; return new Response(JSON.stringify({ items: [] }), { status: 200 }); };
+    const r = await mod.sendOcr({ base: "http://127.0.0.1:8765/", token: TOKEN, blob: blob(), fetchImpl: fake });
+    assert.equal(r.ok, true);
+    assert.equal(url, "http://127.0.0.1:8765/ocr");
+  });
+});
+
+describe("429: ngưỡng hết lượt ngày = 60 giây (giới hạn theo phút của máy chủ chờ ≤ 60 giây)", () => {
+  const r429 = (retry) => async () => new Response(JSON.stringify({ error: "x" }), { status: 429, headers: { "Retry-After": String(retry) } });
+  const cases = [[1, "rate"], [60, "rate"], [61, "daily"], [120, "daily"], [301, "daily"], [40000, "daily"]];
+  for (const [retry, kind] of cases) {
+    test(`Retry-After ${retry} → ${kind}`, async () => {
+      const r = await mod.sendOcr({ base: "https://may-chu.example", token: TOKEN, blob: blob(), fetchImpl: r429(retry) });
+      assert.equal(r.kind, kind);
+      assert.equal(r.retryAfter, retry);
+    });
+  }
+
+  test("hằng DAILY_RETRY_MIN_S = 60", () => {
+    assert.equal(mod.DAILY_RETRY_MIN_S, 60);
   });
 });
 

@@ -54,6 +54,18 @@ describe("ocrServerUrl(env)", () => {
     });
   }
 
+  // Các cách lách luật "http:// chỉ cho máy này" (gợi ý code-reviewer vòng 1): tên miền bắt đầu bằng 127.0.0.1 / localhost,
+  // tên đăng nhập "localhost@", IPv6 ánh xạ IPv4, localhost có dấu chấm cuối. Đều phải ra mặc định + cảnh báo.
+  for (const bad of ["http://127.0.0.1.evil.com", "http://localhost@evil.com", "http://[::ffff:127.0.0.1]:8765",
+    "http://localhost.:8765"]) {
+    test(`lách luật http:// (${bad}) → mặc định + cảnh báo`, () => {
+      const r = pick({ VITE_OCR_SERVER_URL: bad });
+      assert.equal(r.url, DEFAULT);
+      assert.match(r.warning, /VITE_OCR_SERVER_URL/);
+      assert.notEqual(r.warning, "");
+    });
+  }
+
   for (const bad of ["ftp://a.example", "javascript:alert(1)", "a.example", "https://", "khong phai url",
     "https://user:pw@a.example", "https://a.example/?q=1", "https://a.example#x"]) {
     test(`sai dạng (${bad}) → mặc định + câu cảnh báo tiếng Việt`, () => {
