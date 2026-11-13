@@ -87,7 +87,7 @@ def _healthcheck_code() -> str:
 def test_healthcheck_cua_dockerfile_chay_duoc_voi_may_chu_that(make_app):
     code = _healthcheck_code()
     # cổng đọc từ biến PORT (mặc định 8080) như CMD của Dockerfile; không ghi cứng cổng
-    assert "os.environ.get('PORT', '8080')" in code and "/health" in code and "timeout=3" in code
+    assert "os.environ.get('PORT', '8080')" in code and "'http://127.0.0.1:%s/health'" in code and "timeout=3" in code
     assert "8765" not in code
     loaded = make_app()
     not_loaded_engine = FakeEngine()

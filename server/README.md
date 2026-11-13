@@ -202,6 +202,8 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   giờ. **Không bao giờ cho qua khi chưa kiểm được.** Tải JWKS lỗi thì 5 giây sau mới thử lại (giữa chừng trả 503 ngay).
 - **429 (ngày)**: quá `DAILY_LIMIT_PER_USER` (mặc định 200) ảnh / ngày UTC cho MỘT người dùng (đếm trong RAM, mất khi
   máy chủ ngủ / khởi động lại; kiểm sau giới hạn phút theo người, lượt bị chặn ở giới hạn phút không trừ lượt ngày).
+  Lượt ngày bị trừ ngay khi qua bước kiểm, kể cả khi yêu cầu sau đó lỗi (503 hàng đợi đầy / chưa nạp model, 408, 413,
+  415, 500), giống 2 giới hạn phút; với 200 lượt / ngày thì chấp nhận được.
 - **Thứ tự**: giới hạn IP -> kiểm token -> giới hạn người dùng (phút, rồi ngày) -> model đã nạp -> hàng đợi -> đọc ảnh. IP trước để token rác
   gửi dồn dập không làm máy chủ gọi Supabase liên tục; token sai không bị tính vào lượt của người dùng.
 - Gọi mạng (JWKS, `/user`) chạy trong threadpool, không chặn vòng sự kiện.

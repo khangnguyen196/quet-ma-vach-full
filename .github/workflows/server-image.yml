@@ -33,6 +33,8 @@ jobs:
     steps:
       # Ghim action bằng tag lớn như deploy.yml (actions/checkout@v7): nhận bản vá trong cùng bản lớn, không tự lên bản lớn mới.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false  # không cần git sau khi lấy mã: không để token trong .git/config
 
       # docker CLI có sẵn trên runner ubuntu (builder mặc định = BuildKit, driver docker): ảnh vào thẳng kho ảnh của máy
       # để docker run thử ngay, không cần thêm action build / buildx --load.
@@ -44,6 +46,11 @@ jobs:
           start=$(date +%s%N)
           docker run -d --name ocr -e AUTH_MODE=off -e PORT=8080 -p 127.0.0.1:8080:8080 "$LOCAL"
           for i in $(seq 1 90); do
+            if [ "$(docker inspect -f '{{.State.Running}}' ocr)" != "true" ]; then
+              echo "::error::container đã dừng trước khi /health trả 200"
+              docker logs ocr || true
+              exit 1
+            fi
             if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health)" = "200" ]; then
               secs=$(awk -v ns="$(( $(date +%s%N) - start ))" 'BEGIN { printf "%.1f", ns / 1e9 }')
               echo "STARTUP_SECONDS=$secs" >> "$GITHUB_ENV"
@@ -82,15 +89,13 @@ jobs:
           stats=$(docker stats --no-stream --format '{{.MemUsage}}' ocr)
           peak=$(docker exec ocr cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo "")
           if [ -n "$peak" ]; then peak_mb=$(awk -v b="$peak" 'BEGIN { printf "%.1f", b / 1048576 }'); else peak_mb="không đọc được"; fi
+          # mỗi bước có file Summary riêng: ghi dạng danh sách (không ghép bảng qua nhiều bước)
           {
-            echo "### Ảnh Docker máy chủ OCR"
-            echo "| Mục | Giá trị |"
-            echo "|---|---|"
-            echo "| Cỡ ảnh (docker image inspect) | $mb MB ($size byte) |"
-            echo "| RAM lúc này (docker stats, sau 2 ảnh OCR) | $stats |"
-            echo "| RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR) | $peak_mb MB |"
-            echo "| Khởi động tới /health 200 | ${STARTUP_SECONDS} giây |"
-            echo "| Commit | ${GITHUB_SHA::7} |"
+            echo "### Ảnh Docker máy chủ OCR (commit ${GITHUB_SHA::7})"
+            echo "- Cỡ ảnh (docker image inspect): $mb MB ($size byte)"
+            echo "- RAM lúc này (docker stats, sau 2 ảnh OCR): $stats"
+            echo "- RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR): $peak_mb MB"
+            echo "- Khởi động tới /health 200: ${STARTUP_SECONDS} giây"
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"
 
@@ -98,16 +103,18 @@ jobs:
         run: |
           docker rm -f ocr >/dev/null
           set +e
-          timeout 120 docker run --name ocr-macdinh -e PORT=8080 "$LOCAL"
+          timeout 120 docker run --name ocr-macdinh -e PORT=8080 "$LOCAL" > macdinh.log 2>&1
           rc=$?
           set -e
           docker rm -f ocr-macdinh >/dev/null 2>&1 || true
-          echo "mã thoát: $rc"
+          echo "mã thoát: $rc"; tail -n 20 macdinh.log
           if [ "$rc" = "0" ] || [ "$rc" = "124" ]; then
             echo "::error::container KHÔNG đặt AUTH_MODE vẫn chạy (mã $rc): mặc định không an toàn"
             exit 1
           fi
-          echo "| Không đặt AUTH_MODE | không khởi động (mã thoát $rc), đúng |" >> "$GITHUB_STEP_SUMMARY"
+          # phải thoát VÌ thiếu biến Supabase (câu lỗi của settings.py chỉ nêu tên biến), không vì lỗi khác
+          grep -q "SUPABASE_URL" macdinh.log || { echo "::error::container thoát (mã $rc) nhưng không phải vì thiếu biến Supabase"; exit 1; }
+          echo "- Không đặt AUTH_MODE: không khởi động vì thiếu biến Supabase (mã thoát $rc), đúng" >> "$GITHUB_STEP_SUMMARY"
 
       # Từ đây CHỈ trên main (các bước trên đã đạt): đăng nhập ghcr.io bằng GITHUB_TOKEN rồi đẩy 2 tag.
       - name: Đăng nhập ghcr.io
@@ -126,13 +133,18 @@ jobs:
           docker tag "$LOCAL" "$IMAGE:latest"
           docker tag "$LOCAL" "$IMAGE:$short"
           docker push "$IMAGE:$short"
-          docker push "$IMAGE:latest"
-          digest=$(docker image inspect "$IMAGE:latest" --format '{{index .RepoDigests 0}}')
-          echo "digest: $digest"
+          docker push "$IMAGE:latest" | tee push.log
+          # digest lấy từ dòng "digest: sha256:…" của docker push (RepoDigests có thể trống với kho ảnh containerd)
+          digest=$(grep -o 'sha256:[0-9a-f]\{64\}' push.log | tail -n 1 || true)
+          echo "digest: ${digest:-không đọc được}"
           {
-            echo "| Đã đẩy | \`$IMAGE:latest\`, \`$IMAGE:$short\` |"
-            echo "| Digest | \`$digest\` |"
+            echo "- Đã đẩy: \`$IMAGE:latest\`, \`$IMAGE:$short\`"
+            echo "- Digest: \`${digest:-không đọc được}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log container khi hỏng
+        if: failure()
+        run: docker logs ocr 2>&1 | tail -n 100 || true
 
       - name: Dọn container
         if: always()
