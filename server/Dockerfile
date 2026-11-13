@@ -53,9 +53,10 @@ RUN python -c "import ocr_engine as e; o = e.OcrEngine(1, True); print('nạp th
 
 EXPOSE 8080
 # Docker tự hỏi /health mỗi 30 giây (Python urllib, hạn 3 giây): không trả lời / không 200 / "ok" khác true -> "unhealthy".
+# Cổng: PORT thiếu HOẶC rỗng -> 8080 (giống ${PORT:-8080} của CMD).
 # Azure Container Apps KHÔNG dùng HEALTHCHECK này (nó có probe riêng); giữ cho docker run / CI.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD ["python", "-c", "import json, os, sys, urllib.request; r = urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8080'), timeout=3); sys.exit(0 if r.status == 200 and json.load(r).get('ok') is True else 1)"]
+  CMD ["python", "-c", "import json, os, sys, urllib.request; r = urllib.request.urlopen('http://127.0.0.1:%s/health' % (os.environ.get('PORT') or '8080'), timeout=3); sys.exit(0 if r.status == 200 and json.load(r).get('ok') is True else 1)"]
 # 0.0.0.0 CHỈ trong container (để ingress / cổng map của Docker tới được); trên máy tính dùng chay-thu.ps1 (127.0.0.1).
 # Cổng đọc từ biến PORT (mặc định 8080) qua sh -c; "exec" để uvicorn là tiến trình chính (nhận tín hiệu tắt).
 # 1 worker (model nạp 1 lần, ~520 MB RAM), tắt access log của uvicorn (có IP).
