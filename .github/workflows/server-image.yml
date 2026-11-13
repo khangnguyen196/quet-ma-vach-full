@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
 
 # Chỉ đọc mã + ghi package (ghcr.io). Không quyền nào khác.
-# Giữ packages: write ở cấp workflow trong 1 job (không tách job build / job đẩy): token chỉ được đưa vào
-# docker/login-action khi ref là main; checkout dùng persist-credentials: false; workflow không chạy pull_request
-# (nên không có lượt từ fork); tách 2 job thì phải chuyển ảnh Docker giữa 2 job, phức tạp hơn lợi ích.
+# Giữ packages: write ở cấp workflow trong 1 job (không tách job build / job đẩy): token chỉ dùng để đăng nhập ghcr.io
+# khi ref là main; checkout có nhận token để lấy mã nhưng không lưu (persist-credentials: false); workflow không chạy
+# pull_request (nên không có lượt từ fork); tách 2 job thì phải chuyển ảnh Docker giữa 2 job, phức tạp hơn lợi ích.
 permissions:
   contents: read
   packages: write
@@ -156,7 +156,7 @@ jobs:
       - name: Log container khi hỏng
         if: failure()
         # container ocr có thể đã bị xóa ở bước "Không đặt AUTH_MODE": khi đó in log của lượt chạy đó
-        run: docker logs ocr 2>&1 | tail -n 100 || cat macdinh.log 2>/dev/null || true
+        run: docker logs ocr 2>&1 | tail -n 100 || { echo "(container ocr không còn; log lượt chạy ocr-macdinh:)"; cat macdinh.log 2>/dev/null; } || true
 
       - name: Dọn container
         if: always()
