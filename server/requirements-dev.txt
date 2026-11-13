@@ -1,9 +1,9 @@
-# Chỉ để test / đo máy chủ (không vào Docker image). Cài sau requirements.txt.
+# Chi de test / do may chu (khong vao Docker image). Cai sau requirements.txt. Chi chu ASCII (khong dau).
 pytest==9.2.0
 httpx==0.28.1
 httpcore==1.0.9
 iniconfig==2.3.1
 pluggy==1.7.0
 Pygments==2.21.0
-# do_rss.py: đọc RAM (RSS) tiến trình máy chủ lúc đo 30 ảnh
+# do_rss.py: doc RAM (RSS) tien trinh may chu luc do 30 anh
 psutil==7.2.2

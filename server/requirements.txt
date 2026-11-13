@@ -1,6 +1,6 @@
-# Máy chủ OCR (server/), KHÔNG thuộc app. Ghim đúng phiên bản đã cài trong venv D:\tmp\may-chu-1\venv (pip freeze,
-# bỏ gói chỉ để test). rapidocr / onnxruntime và các gói chung = đúng bản của venv-rapid đã đo ở ocr-mat (r1-nocls).
-# Python 3.12.
+# May chu OCR (server/), KHONG thuoc app. Ghim dung phien ban da cai trong venv D:\tmp\may-chu-1\venv (pip freeze,
+# bo goi chi de test). rapidocr / onnxruntime va cac goi chung = dung ban cua venv-rapid da do o ocr-mat (r1-nocls).
+# Python 3.12. File nay CHI dung chu ASCII (khong dau): pip tren Windows doc file bang cp1252 se loi khi gap chu co dau.
 rapidocr==3.10.0
 onnxruntime==1.31.1
 fastapi==0.162.5
@@ -8,12 +8,12 @@ starlette==1.10.0
 uvicorn==0.54.0
 python-multipart==0.0.33
 pillow==13.0.0
-# Đăng nhập (AUTH_MODE=supabase, đợt dang-nhap): kiểm chữ ký token ES256 / RS256 bằng khóa công khai JWKS.
+# Dang nhap (AUTH_MODE=supabase, dot dang-nhap): kiem chu ky token ES256 / RS256 bang khoa cong khai JWKS.
 PyJWT==2.15.1
 cryptography==50.0.2
-# HEIC: pi-heif (chỉ đọc, libheif + libde265 LGPLv3, không kèm x265 GPL như pillow-heif). Xem LICENSES.md.
+# HEIC: pi-heif (chi doc, libheif + libde265 LGPLv3, khong kem x265 GPL nhu pillow-heif). Xem LICENSES.md.
 pi_heif==1.4.0
-# gói kéo theo (ghim để cài lại ra đúng kết quả)
+# goi keo theo (ghim de cai lai ra dung ket qua)
 annotated-doc==0.0.6
 annotated-types==0.8.0
 anyio==4.16.0
