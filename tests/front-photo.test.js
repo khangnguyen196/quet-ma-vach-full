@@ -358,6 +358,24 @@ describe("frontErrorText: lỗi sendOcr → câu tiếng Việt cho giao diện"
     }
   });
 
+  test("auth + signedIn true (máy chủ không nhận phiên đang có) → mời chọn ảnh lại, nếu vẫn lỗi thì Đăng xuất rồi đăng nhập lại", () => {
+    assert.equal(mod.frontErrorText({ ok: false, kind: "auth" }, { signedIn: true }),
+      "Máy chủ không nhận phiên đăng nhập này. Hãy chọn ảnh lại để thử; nếu vẫn lỗi, bấm Đăng xuất rồi đăng nhập lại.");
+  });
+
+  test("auth + signedIn false (thư viện đã đăng xuất) / không truyền → câu cũ 'hết hạn'", () => {
+    assert.equal(mod.frontErrorText({ ok: false, kind: "auth" }, { signedIn: false }), "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.");
+    assert.equal(mod.frontErrorText({ ok: false, kind: "auth" }, {}), "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.");
+  });
+
+  test("kind khác auth: signedIn không đổi câu", () => {
+    for (const kind of ["daily", "rate", "busy", "network", "timeout", "tooBig", "badType", "other", "aborted"]) {
+      const r = { ok: false, kind, retryAfter: 42 };
+      assert.equal(mod.frontErrorText(r, { signedIn: true }), mod.frontErrorText(r), kind);
+      assert.equal(mod.frontErrorText(r, { signedIn: false }), mod.frontErrorText(r), kind);
+    }
+  });
+
   test("aborted → '' (không hiện); không phải lỗi → ''", () => {
     assert.equal(T("aborted"), "");
     assert.equal(mod.frontErrorText({ ok: true, items: [] }), "");

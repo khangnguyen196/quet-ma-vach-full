@@ -113,6 +113,29 @@ describe("renderFrontResult: ô chữ + nút Tìm lại + gợi ý + nguồn", (
   });
 });
 
+describe("frontHitsShown: đúng những gợi ý được vẽ (dòng trạng thái đếm bằng hàm này)", () => {
+  const count = (html) => (html.match(/data-front-code=/g) || []).length;
+
+  test("7 gợi ý, 1 mã sai → 5 (lọc mã rồi cắt FRONT_MAX_HITS), bằng số nút vẽ ra", () => {
+    const hits = ["8934572260543", "abc", "8934588022111", "8934614031322", "8934673300759", "8934673818391", "8934803043891"].map((c) => hit(c));
+    const shown = render.frontHitsShown(hits);
+    assert.equal(shown.length, 5);
+    assert.ok(shown.every((h) => /^\d{8,14}$/.test(h.code)));
+    assert.equal(count(render.renderFrontHits(hits)), shown.length);
+  });
+
+  test("2 gợi ý, 1 mã sai → 1", () => {
+    const hits = [hit("8934572260543"), hit("12<b>")];
+    assert.equal(render.frontHitsShown(hits).length, 1);
+    assert.equal(count(render.renderFrontHits(hits)), 1);
+  });
+
+  test("không phải mảng / rỗng → []", () => {
+    assert.deepEqual(render.frontHitsShown(null), []);
+    assert.deepEqual(render.frontHitsShown([]), []);
+  });
+});
+
 describe("renderFrontHits: chỉ danh sách gợi ý (vẽ lại khi bấm Tìm lại)", () => {
   test("cùng phần danh sách như renderFrontResult", () => {
     const hits = [hit("8934572260543")];
