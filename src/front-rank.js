@@ -80,11 +80,13 @@ export function confidenceValues({ top1, top2, idfSum }) {
  *   nào đạt 0,9; rel ≥ 0,2468: 15 / 14 (0,933; 14/21) → luật vòng 3 = rel ≥ 0,24679639071710696.
  * - Lưu ý cỡ mẫu: bộ chữ A và B là CÙNG 20 ảnh (đọc 2 lần), nên 15 lần "chắc" của nhóm chỉnh thực chất chỉ ứng 8 ảnh.
  * - Nhóm giữ riêng (10 ảnh × 2 bộ = 20 dòng): 10 chắc / 4 đúng (precision 0,40, recall 4/6); chắc mà sai:
- *   8934614031322 (đúng ở vị trí 3), 8934804025766, 8936071070340 (đúng không nằm trong 5 gợi ý).
+ *   8934614031322 (đúng ở vị trí 3), 8934804025766 (bộ A vị trí 5, bộ B không có trong 5 gợi ý),
+ *   8936071070340 (không có trong 5 gợi ý).
  * - Ca muối của chủ dự án (Co.op Select, không có trong danh mục, đúng ra phải "không chắc"): rel 0,3325 → "chắc" sai,
  *   app không hiện khối cho đúng ca đã thử. Luật không đạt mục đích "khi điểm cao nhất thấp thì không khẳng định".
- * - Vì vậy bỏ luật rel và dùng nhánh "không tách được" đã chốt trước: luôn không chắc. QUYẾT SAU KHI THẤY SỐ nhóm giữ
- *   riêng (13/11/2026), nên nhóm giữ riêng không còn là bằng chứng độc lập; muốn có luật "chắc" thật thì phải đo trên
+ * - Vì vậy bỏ luật rel và dùng cách làm GIỐNG nhánh "không tách được" (luôn không chắc). Luật chốt trước KHÔNG dẫn
+ *   tới nhánh này (recall 14/21 ≥ 6/21); đây là quyết định mới, sau khi thấy số nhóm giữ riêng. QUYẾT SAU KHI THẤY SỐ
+ *   nhóm giữ riêng (13/11/2026), nên nhóm giữ riêng không còn là bằng chứng độc lập; muốn có luật "chắc" thật thì phải đo trên
  *   ảnh mới (đợt sau). Không chọn ngưỡng mới, không thêm đặc trưng.
  *
  * Nếu sau này bật lại một luật (feature khác null), cần biết:
