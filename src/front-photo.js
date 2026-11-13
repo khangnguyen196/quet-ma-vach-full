@@ -129,16 +129,20 @@ const SCAN_HINT = "hãy quét mã vạch hoặc nhập số dưới mã vạch."
 /**
  * Kết quả lỗi của sendOcr ({ kind, retryAfter }) → câu tiếng Việt cho giao diện (đặt bằng textContent).
  * Không dùng câu của máy chủ (serverMessage). aborted (người dùng chọn ảnh khác) / không phải lỗi → "".
+ * signedIn: (chỉ cho kind auth) sau khi main.js đã thử refreshSession 1 lần, app VẪN còn phiên → máy chủ không nhận
+ * phiên này: mời chọn ảnh lại, nếu vẫn lỗi thì Đăng xuất rồi đăng nhập lại; hết phiên → "hãy đăng nhập lại".
  * Ví dụ: frontErrorText({ ok: false, kind: "rate", retryAfter: 42 }) → "Gửi nhanh quá, chờ 42 giây rồi thử lại."
  */
-export function frontErrorText(result) {
+export function frontErrorText(result, { signedIn = false } = {}) {
   if (!result || result.ok) return "";
   const retry = Number.isFinite(result.retryAfter) && result.retryAfter > 0 ? result.retryAfter : null;
   switch (result.kind) {
     case "aborted":
       return "";
     case "auth":
-      return "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.";
+      return signedIn
+        ? "Máy chủ không nhận phiên đăng nhập này. Hãy chọn ảnh lại để thử; nếu vẫn lỗi, bấm Đăng xuất rồi đăng nhập lại."
+        : "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.";
     case "daily": {
       let when = "lúc 7 giờ sáng";
       if (retry != null) {

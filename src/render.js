@@ -453,13 +453,22 @@ export const FRONT_TEXT_ID = "frontText";
 const isPlainCode = (code) => typeof code === "string" && /^\d{8,14}$/.test(code);
 
 /**
+ * Những gợi ý THẬT SỰ được vẽ: bỏ mã không phải 8–14 chữ số rồi lấy tối đa FRONT_MAX_HITS.
+ * renderFrontHits vẽ đúng danh sách này; main.js đếm bằng hàm này cho dòng trạng thái (số luôn khớp màn hình).
+ * Ví dụ: 7 gợi ý trong đó 1 mã sai → 5; 2 gợi ý trong đó 1 mã sai → 1.
+ */
+export function frontHitsShown(hits) {
+  return (Array.isArray(hits) ? hits : []).filter((h) => isPlainCode(h?.code)).slice(0, FRONT_MAX_HITS);
+}
+
+/**
  * Danh sách gợi ý (vẽ lại riêng khi bấm "Tìm lại"). hits: [{ code, name, brand, image }] (hitProducts của
  * src/front-search.js). Tối đa FRONT_MAX_HITS; mã không phải 8–14 chữ số thì bỏ. Ảnh qua labelImageUrl (lạ → "chưa có
  * ảnh"); ảnh tải lỗi thì main.js đổi sang "chưa có ảnh" bằng addEventListener("error") (không có onerror ở đây).
  * Không có gợi ý → mời quét mã vạch / nhập số (không đoán).
  */
 export function renderFrontHits(hits) {
-  const list = (Array.isArray(hits) ? hits : []).filter((h) => isPlainCode(h?.code)).slice(0, FRONT_MAX_HITS);
+  const list = frontHitsShown(hits);
   if (!list.length) {
     return '<p class="front-none">Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.</p>';
   }

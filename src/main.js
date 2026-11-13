@@ -5,7 +5,7 @@ import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
-  renderFrontResult, renderFrontHits, FRONT_TEXT_ID
+  renderFrontResult, renderFrontHits, frontHitsShown, FRONT_TEXT_ID
 } from "./render.js";
 import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl, suggestFromItems, suggestFromText, hitProducts } from "./front-search.js";
@@ -847,19 +847,32 @@ function updateFrontButton() {
   btnFrontLogin.textContent = st === "loading" ? "Đang kiểm đăng nhập…" : "Đăng nhập để dùng";
   frontHint.hidden = st !== "login";
   if (st === "ready") frontRelogin.hidden = true;
-  if (st === "hidden") { ++frontTurn; frontAbort?.abort(); sayFront(); frontRelogin.hidden = true; frontBox.hidden = true; frontBox.innerHTML = ""; }
+  // Đăng xuất / hết phiên / không có đăng nhập: dọn như lúc ẩn (hủy lượt đang gửi, xóa gợi ý của người trước).
+  // loading → ready không dọn.
+  if (st === "hidden" || st === "login") {
+    ++frontTurn;
+    frontAbort?.abort();
+    sayFront();
+    frontRelogin.hidden = true;
+    frontBox.hidden = true;
+    frontBox.innerHTML = "";
+  }
 }
 
-/** Cuộn tới khối tài khoản, đặt focus vào nút "Đăng nhập bằng Google" (KHÔNG mở chọn ảnh, KHÔNG gửi gì). */
+/**
+ * Cuộn tới khối tài khoản, đặt focus vào nút "Đăng nhập bằng Google"; đang có phiên thì nút "Đăng xuất";
+ * không có nút nào thì chính khối (tabindex="-1"). KHÔNG mở chọn ảnh, KHÔNG gửi gì.
+ */
 function goToLogin() {
   authBox.scrollIntoView({ behavior: "smooth", block: "center" });
-  const btn = authBody.querySelector('button[data-auth="login"]');
+  const btn = authBody.querySelector('button[data-auth="login"]') || authBody.querySelector('button[data-auth="logout"]');
   (btn || authBox).focus?.({ preventScroll: true });
 }
 btnFrontLogin.addEventListener("click", goToLogin);
 btnFrontRelogin.addEventListener("click", goToLogin);
 
-let frontTurn = 0; // số lượt chọn ảnh, như biến current của lookup(): lượt cũ về muộn thì bỏ
+let frontTurn = 0; // số lượt chọn ảnh, như biến current của lookup(): lượt cũ về muộn thì bỏ (đăng xuất cũng tăng)
+let frontPicks = 0; // chỉ đếm số lần chọn ảnh (đăng xuất không tăng): dùng sau khi làm mới phiên lúc gặp 401
 let frontAbort = null; // AbortController của lượt đang gửi (chọn ảnh khác thì hủy)
 let frontSearch = null; // { t1, products, index } khi đã tải xong (dùng cho "Tìm lại")
 let frontSearchPromise = null;
@@ -898,8 +911,10 @@ function bindFrontImages() {
   }, { once: true }));
 }
 
-function hitsText(n) {
-  return n ? `Có ${n} gợi ý bên dưới. Hãy chọn đúng sản phẩm.` : "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+/** Câu trạng thái theo đúng số gợi ý được vẽ (frontHitsShown: lọc mã + cắt 5). */
+function hitsText(hits) {
+  const n = frontHitsShown(hits).length;
+  return n ?`Có ${n} gợi ý bên dưới. Hãy chọn đúng sản phẩm.` : "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
 }
 
 frontFile.addEventListener("change", async (ev) => {
@@ -914,15 +929,12 @@ frontFile.addEventListener("change", async (ev) => {
   const ctrl = new AbortController();
   frontAbort = ctrl;
   const id = ++frontTurn;
+  const pick = ++frontPicks;
   const stale = () => id !== frontTurn;
   frontRelogin.hidden = true;
   frontBox.hidden = true;
   frontBox.innerHTML = "";
   sayFront("Đang chuẩn bị ảnh…");
-
-  // Lần đầu dùng tính năng: bắt đầu tải T1 + danh mục song song với lúc gửi ảnh (không tải lúc mở app).
-  const searchReady = loadFrontSearch();
-  searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
 
   const prep = await prepareImage(file);
   if (stale()) return;
@@ -930,8 +942,13 @@ frontFile.addEventListener("change", async (ev) => {
   if (prep.reencoded === false
     && !confirm("Không thu nhỏ được ảnh này trên máy, ảnh sẽ được gửi nguyên bản và có thể kèm thông tin vị trí chụp. Vẫn gửi?")) {
     sayFront("Chưa gửi ảnh. Có thể chụp lại hoặc chọn ảnh JPEG / PNG khác.");
-    return;
+    return; // bấm "Không gửi": không tải gì, không gửi gì
   }
+
+  // Lần đầu dùng tính năng: tải T1 + danh mục song song với lúc gửi ảnh (không tải lúc mở app, không tải khi
+  // người dùng bấm "Không gửi" ở trên).
+  const searchReady = loadFrontSearch();
+  searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
 
   // Token lấy NGAY lúc gửi (thư viện tự làm mới), chỉ giữ trong lượt này, không ghi ra console.
   let token = "";
@@ -955,8 +972,30 @@ frontFile.addEventListener("change", async (ev) => {
   if (stale()) return;
   if (frontAbort === ctrl) frontAbort = null;
   if (!r.ok) {
-    const text = frontErrorText(r);
-    sayFront(text, true);
+    if (r.kind === "auth" && authClient) {
+      // 401: thử làm mới phiên ĐÚNG 1 lần; KHÔNG tự gửi lại ảnh (không tốn thêm lượt máy chủ). Làm mới lỗi thì thư viện
+      // có thể tự đăng xuất (SIGNED_OUT → updateFrontButton dọn và tăng frontTurn), nên ở đây xét frontPicks:
+      // chỉ bỏ khi người dùng đã chọn ảnh khác. Không ghi token / phiên ra console.
+      sayFront("Đang kiểm lại phiên đăng nhập…");
+      try {
+        await authClient.auth.refreshSession();
+      } catch (e) {
+        console.warn("Chụp mặt trước: không làm mới được phiên đăng nhập", e?.name || "");
+      }
+      if (pick !== frontPicks) return;
+      let signedIn = false;
+      try {
+        const { data } = await authClient.auth.getSession();
+        signedIn = !!data?.session;
+      } catch (e) {
+        console.warn("Chụp mặt trước: không đọc được phiên đăng nhập", e?.name || "");
+      }
+      if (pick !== frontPicks) return;
+      sayFront(frontErrorText(r, { signedIn }), true);
+      frontRelogin.hidden = false;
+      return;
+    }
+    sayFront(frontErrorText(r), true);
     frontRelogin.hidden = r.kind !== "auth";
     return;
   }
@@ -976,7 +1015,7 @@ frontFile.addEventListener("change", async (ev) => {
   frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded });
   frontBox.hidden = false;
   bindFrontImages();
-  sayFront(hitsText(hits.length));
+  sayFront(hitsText(hits));
 });
 
 // Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô) và bấm gợi ý (tra mã như khi quét).
@@ -990,7 +1029,7 @@ frontBox.addEventListener("click", (ev) => {
   const list = frontBox.querySelector(".front-hits");
   if (list) list.innerHTML = renderFrontHits(hits);
   bindFrontImages();
-  sayFront(hitsText(hits.length));
+  sayFront(hitsText(hits));
 });
 
 updateFrontButton();

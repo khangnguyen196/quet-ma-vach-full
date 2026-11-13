@@ -47,7 +47,7 @@
       <!-- Chụp mặt trước (đợt chup-mat): main.js hiện theo trạng thái đăng nhập (frontButtonState). Input KHÔNG có
            capture để điện thoại cho chọn chụp mới hoặc lấy ảnh trong thư viện. -->
       <label id="frontLabel" class="btn front-btn" hidden>Chụp mặt trước<input id="frontFile" type="file" accept="image/*"></label>
-      <button id="btnFrontLogin" class="btn front-btn" type="button" hidden>Đăng nhập để dùng</button>
+      <button id="btnFrontLogin" class="btn front-btn" type="button" aria-describedby="frontHint" hidden>Đăng nhập để dùng</button>
     </div>
     <!-- Đèn pin / phóng to: main.js chỉ hiện khi camera đang bật và máy báo hỗ trợ (track.getCapabilities) -->
     <div id="camTools" class="actions cam-tools" hidden>
@@ -137,7 +137,7 @@
        main.js chỉ hiện khi có biến môi trường. #authBody vẽ lại theo trạng thái (render.js); #authMsg là dòng thông báo
        CỐ ĐỊNH, luôn hiện (không hidden, rỗng khi không lỗi; main.js chỉ đổi chữ, không thay phần tử) để trình đọc màn
        hình đọc được khi chữ đổi. -->
-  <section id="authBox" class="auth-box" aria-label="Tài khoản" hidden>
+  <section id="authBox" class="auth-box" aria-label="Tài khoản" tabindex="-1" hidden>
     <div id="authBody"></div>
     <p id="authMsg" class="auth-msg warn" role="status"></p>
   </section>
