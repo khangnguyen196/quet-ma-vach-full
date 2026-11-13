@@ -461,6 +461,19 @@ export function frontHitsShown(hits) {
   return (Array.isArray(hits) ? hits : []).filter((h) => isPlainCode(h?.code)).slice(0, FRONT_MAX_HITS);
 }
 
+/** Câu trạng thái khi không có gợi ý nào (giống câu trước vòng 3: đã "không tìm thấy" thì không thêm "không chắc chắn"). */
+export const FRONT_NO_HITS_TEXT = "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+
+/**
+ * Câu cho dòng #frontMsg, đếm đúng số gợi ý được vẽ (frontHitsShown). Không chắc thì thêm "(không chắc chắn)".
+ * Ví dụ: frontHitsText([{ code: "8934572260543" }], false) → "Có 1 gợi ý bên dưới (không chắc chắn). Hãy chọn đúng sản phẩm."
+ */
+export function frontHitsText(hits, confident = false) {
+  const n = frontHitsShown(hits).length;
+  if (!n) return FRONT_NO_HITS_TEXT;
+  return `Có ${n} gợi ý bên dưới${confident === true ? "" : " (không chắc chắn)"}. Hãy chọn đúng sản phẩm.`;
+}
+
 /**
  * Danh sách gợi ý (vẽ lại riêng khi bấm "Tìm lại"). hits: [{ code, name, brand, image }] (hitProducts của
  * src/front-search.js). Tối đa FRONT_MAX_HITS; mã không phải 8–14 chữ số thì bỏ. Ảnh qua labelImageUrl (lạ → "chưa có

@@ -144,6 +144,27 @@ describe("frontHitsShown: đúng những gợi ý được vẽ (dòng trạng t
   });
 });
 
+describe("frontHitsText: câu dòng #frontMsg (vòng 4 nang-t1)", () => {
+  test("không có gợi ý (hoặc chỉ mã sai) → câu cũ, không có '(không chắc chắn)'", () => {
+    const want = "Không tìm thấy sản phẩm khớp. Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
+    assert.equal(render.FRONT_NO_HITS_TEXT, want);
+    for (const [hits, c] of [[[], false], [[], true], [null, undefined], [[hit("abc")], false]]) {
+      const s = render.frontHitsText(hits, c);
+      assert.equal(s, want);
+      assert.ok(!s.includes("không chắc chắn"));
+    }
+  });
+
+  test("có gợi ý: đếm đúng số được vẽ; không chắc (false / không truyền) thêm '(không chắc chắn)'", () => {
+    const hits = ["8934572260543", "abc", "8934588022111"].map((c) => hit(c));
+    assert.equal(render.frontHitsText(hits, false), "Có 2 gợi ý bên dưới (không chắc chắn). Hãy chọn đúng sản phẩm.");
+    assert.equal(render.frontHitsText(hits), "Có 2 gợi ý bên dưới (không chắc chắn). Hãy chọn đúng sản phẩm.");
+    assert.equal(render.frontHitsText(hits, true), "Có 2 gợi ý bên dưới. Hãy chọn đúng sản phẩm.");
+    const seven = Array.from({ length: 7 }, (_, i) => hit(String(8934572260543 + i)));
+    assert.equal(render.frontHitsText(seven, false), "Có 5 gợi ý bên dưới (không chắc chắn). Hãy chọn đúng sản phẩm.");
+  });
+});
+
 describe("renderFrontHits: chỉ danh sách gợi ý (vẽ lại khi bấm Tìm lại)", () => {
   test("cùng phần danh sách như renderFrontResult", () => {
     const hits = [hit("8934572260543")];

@@ -252,7 +252,8 @@ test("buildExtended: danh mục cũ trước (nguyên bản ghi, nguyên thứ t
 });
 
 // ---- gợi ý reviewer vòng 2 (vòng 3 P1) ----
-const mkTmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "nang-t1-test-"));
+// Thư mục tạm: NANG_T1_TMP hoặc TEMP (đợt này đặt ở ổ D, không ghi vào ổ C), không có thì os.tmpdir().
+const mkTmp = () => fs.mkdtempSync(path.join(process.env.NANG_T1_TMP || process.env.TEMP || os.tmpdir(), "nang-t1-test-"));
 
 test("writeExtended: gzip tính một lần, kiểm trần TRƯỚC khi ghi (vượt trần -> không ghi file)", () => {
   const dir = mkTmp();

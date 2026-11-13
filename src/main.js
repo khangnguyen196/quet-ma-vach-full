@@ -5,7 +5,7 @@ import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
-  renderFrontResult, renderFrontHits, frontHitsShown, FRONT_TEXT_ID
+  renderFrontResult, renderFrontHits, frontHitsText, FRONT_TEXT_ID
 } from "./render.js";
 import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl, hitProducts } from "./front-search.js";
@@ -921,14 +921,11 @@ function bindFrontImages() {
   }, { once: true }));
 }
 
-/** Câu trạng thái theo đúng số gợi ý được vẽ (frontHitsShown: lọc mã + cắt 5); không chắc thì thêm "(không chắc chắn)". */
-function hitsText(hits, confident) {
-  const n = frontHitsShown(hits).length;
-  if (!n) return "Không tìm thấy sản phẩm khớp (không chắc chắn). Hãy quét mã vạch hoặc nhập số dưới mã vạch.";
-  return `Có ${n} gợi ý bên dưới${confident ? "" : " (không chắc chắn)"}. Hãy chọn đúng sản phẩm.`;
-}
-
-/** Tìm (khung chữ máy chủ hoặc chữ trong ô) → { hits để vẽ, confident } theo src/front-rank.js. */
+/**
+ * Tìm (khung chữ máy chủ hoặc chữ trong ô) → { hits để vẽ, confident } theo src/front-rank.js.
+ * Luật hiện tại (CONFIDENCE_RULE) = luôn không chắc. Nếu bật lại luật: confident tính trên found.hits thô (trước khi
+ * render.js lọc mã 8–14 số) và ngưỡng chỉ đo trên chữ máy chủ, chưa đo cho "Tìm lại" (xem comment trong front-rank.js).
+ */
 function frontFound(s, found) {
   return { found, hits: hitProducts(s.products, found.hits), confident: confidenceOf(found).confident };
 }
@@ -1030,7 +1027,7 @@ frontFile.addEventListener("change", async (ev) => {
   frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded, confident });
   frontBox.hidden = false;
   bindFrontImages();
-  sayFront(hitsText(hits, confident));
+  sayFront(frontHitsText(hits, confident));
 });
 
 // Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối
@@ -1041,8 +1038,10 @@ frontBox.addEventListener("click", (ev) => {
   const act = ev.target.closest("button[data-front-action]");
   if (act) {
     if (act.dataset.frontAction === "scan") {
-      // Bật camera NGAY trong sự kiện bấm (như nút "Bật camera"), rồi cuộn tới khung camera.
-      if (!busy && !scanner.running) startCam();
+      // Bật camera NGAY trong sự kiện bấm (như nút "Bật camera"), rồi cuộn tới khung camera. App đang bận (mở camera /
+      // đọc ảnh mã) thì không bật, chỉ cuộn và nhắc ở #frontMsg (chỉ đổi chữ).
+      if (busy) sayFront("App đang bận, chờ xong rồi bấm Quét mã vạch lại.", true);
+      else if (!scanner.running) startCam();
       reader.scrollIntoView({ behavior: "smooth", block: "center" });
     } else if (act.dataset.frontAction === "code") {
       codeInput.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1056,7 +1055,7 @@ frontBox.addEventListener("click", (ev) => {
   const list = frontBox.querySelector(".front-hits");
   if (list) list.innerHTML = renderFrontHits(hits, { confident });
   bindFrontImages();
-  sayFront(hitsText(hits, confident));
+  sayFront(frontHitsText(hits, confident));
 });
 
 updateFrontButton();
