@@ -9,15 +9,43 @@
 // hits[0].score / idfSum (dùng để chọn ngưỡng "không chắc").
 
 /**
- * Dựng chỉ mục xếp hạng từ danh mục ([{ code, text, brand?, ... }], thứ tự giữ nguyên: i = vị trí trong products).
- * opts (mặc định tắt hết): xem DEFAULT_OPTS.
+ * Tùy chọn (mặc định tắt hết):
+ *  coop: true     – (a1) gộp "Co.op" / "co-op" / "co op" thành "coop" trên chữ gốc, cả chữ OCR lẫn chữ danh mục,
+ *                   TRƯỚC khi tách từ (STOP_WORDS của T1 có "co", nên "Co.op" thành "op" còn "COOP" thành "coop").
+ *  fixWords: true – (a2) từ của câu tìm không có trong chỉ mục: thử thay MỘT chỗ theo FIX_RULES (đúng thứ tự, từ trái
+ *                   sang), nhận biến thể đầu tiên có trong chỉ mục; không có thì giữ nguyên.
  */
 export const DEFAULT_OPTS = Object.freeze({});
 
+/** (a1) "Co.op Select" -> "coop Select"; "COOP" giữ nguyên (tách từ sẽ thường hóa). */
+export function coopNorm(s) {
+  return String(s ?? "").replace(/\bco\s*[.\-]?\s*op\b/gi, "coop");
+}
+
+/** (a2) Bảng sửa một chỗ, theo đúng thứ tự thử: [từ, thành]. */
+export const FIX_RULES = Object.freeze([["l", "i"], ["i", "l"], ["0", "o"], ["o", "0"], ["1", "i"], ["1", "l"], ["5", "s"], ["rn", "m"]]);
+
+/** (a2) Sửa một từ không có trong chỉ mục: luật trước, vị trí trái trước; không biến thể nào có thì giữ nguyên.
+ *  Ví dụ (chỉ mục có "iot"): fixWord(idx, "lot") -> "iot". */
+export function fixWord(index, w) {
+  if (index.idf.has(w)) return w;
+  for (const [from, to] of FIX_RULES) {
+    for (let p = w.indexOf(from); p >= 0; p = w.indexOf(from, p + 1)) {
+      const v = w.slice(0, p) + to + w.slice(p + from.length);
+      if (index.idf.has(v)) return v;
+    }
+  }
+  return w;
+}
+
+/**
+ * Dựng chỉ mục xếp hạng từ danh mục ([{ code, text, brand?, ... }], thứ tự giữ nguyên: i = vị trí trong products).
+ */
 export function buildRankIndex(t1, products, opts = DEFAULT_OPTS) {
   const list = Array.isArray(products) ? products : [];
   const o = { ...opts };
-  const index = t1.buildBm25(list.map((p) => ({ code: p.code, text: p.text })));
+  const docText = (p) => (o.coop ? coopNorm(p.text) : p.text);
+  const index = t1.buildBm25(list.map((p) => ({ code: p.code, text: docText(p) })));
   return { opts: o, index };
 }
 
@@ -30,8 +58,10 @@ function idfSumOf(index, query) {
 
 /** Tìm từ danh sách dòng { text, conf }: câu tìm T1 rồi BM25 (câu rỗng thì không tìm).
  *  opts = tùy chọn phía câu tìm (mặc định = opts lúc dựng chỉ mục); tùy chọn phía danh mục luôn theo chỉ mục. */
-function rankLines(t1, rIndex, lines, k, opts) {
-  const query = t1.t1QueryFromLines(lines);
+function rankLines(t1, rIndex, lines, k, opts = {}) {
+  const qLines = opts.coop ? lines.map((l) => ({ ...l, text: coopNorm(l.text) })) : lines;
+  let query = t1.t1QueryFromLines(qLines);
+  if (opts.fixWords) query = query.map((w) => fixWord(rIndex.index, w));
   const hits = query.length ? t1.bm25Search(rIndex.index, query, k) : [];
   return { lines: lines.map((l) => l.text), query, hits, idfSum: idfSumOf(rIndex.index, query) };
 }

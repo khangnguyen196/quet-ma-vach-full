@@ -56,10 +56,69 @@ describe("front-rank mặc định = front-search (đường B / ô sửa chữ)
     }
   });
 
+  test("opts rỗng / DEFAULT_OPTS / opts không bật gì đều ra cùng kết quả", () => {
+    const a = fixture.anh[1];
+    const want = mod.rankFromItems(t1, rIndex, a.items);
+    for (const o of [{}, mod.DEFAULT_OPTS, { coop: false, fixWords: false }]) {
+      assert.deepEqual(mod.rankFromItems(t1, mod.buildRankIndex(t1, catalog.products, o), a.items), want);
+    }
+  });
+
   test("i = vị trí trong products: hitProducts dùng được", () => {
     const r = mod.rankFromItems(t1, rIndex, fixture.anh[0].items);
     const shown = hitProducts(catalog.products, r.hits);
     assert.equal(shown.length, r.hits.length);
     assert.deepEqual(shown.map((p) => p.code), r.hits.map((h) => h.code));
+  });
+});
+
+// Danh mục nhỏ tự viết cho các cách thử (không phụ thuộc số đo).
+const MINI = [
+  { code: "1", name: "Kem đánh răng", brand: "Co.op Select", text: "Kem đánh răng Co.op Select Co.op Select" },
+  { code: "2", name: "Muối iốt", brand: "Bạc Liêu", text: "Muối iốt Bạc Liêu" },
+  { code: "3", name: "Bánh quy bơ", brand: "Cosy", text: "Bánh quy bơ Cosy" },
+];
+
+describe("(a) chuẩn hóa hãng / cách viết", () => {
+  test("coopNorm: Co.op / co-op / co op / CO. OP / COOP -> coop; không đụng từ khác", () => {
+    assert.equal(mod.coopNorm("Co.op Select"), "coop Select");
+    assert.equal(mod.coopNorm("co-op mart, CO. OP"), "coop mart, coop");
+    assert.equal(mod.coopNorm("co op"), "coop");
+    assert.equal(mod.coopNorm("COOP"), "coop");
+    assert.equal(mod.coopNorm("taco op, cocoa, coopmart"), "taco op, cocoa, coopmart");
+    assert.equal(mod.coopNorm(null), "");
+  });
+
+  test("a1: câu 'COOP' khớp sản phẩm 'Co.op Select' (không có a1 thì không)", () => {
+    const off = mod.buildRankIndex(t1, MINI);
+    assert.deepEqual(mod.rankFromText(t1, off, "COOP").hits, []);
+    const on = mod.buildRankIndex(t1, MINI, { coop: true });
+    const r = mod.rankFromText(t1, on, "COOP");
+    assert.deepEqual(r.query, ["coop"]);
+    assert.deepEqual(r.hits.map((h) => h.code), ["1"]);
+    assert.ok(r.idfSum > 0);
+  });
+
+  test("fixWord: thử luật theo thứ tự, vị trí trái trước; có sẵn / không sửa được thì giữ nguyên", () => {
+    const idx = { idf: new Map([["iot", 1], ["muoi", 1], ["lait", 1], ["maso", 1], ["cosy", 1]]) };
+    assert.equal(mod.fixWord(idx, "lot"), "iot"); // l -> i
+    assert.equal(mod.fixWord(idx, "mu0i"), "muoi"); // 0 -> o
+    assert.equal(mod.fixWord(idx, "1ait"), "lait"); // 1 -> i không có, 1 -> l có
+    assert.equal(mod.fixWord(idx, "rnaso"), "maso"); // rn -> m
+    assert.equal(mod.fixWord(idx, "co5y"), "cosy"); // 5 -> s
+    assert.equal(mod.fixWord(idx, "muoi"), "muoi");
+    assert.equal(mod.fixWord(idx, "xyz"), "xyz");
+    // l -> i thử trước i -> l: "liit" có thể thành "iiit" hoặc "llit", cả hai có trong chỉ mục -> "iiit"
+    const idx2 = { idf: new Map([["llit", 1], ["iiit", 1]]) };
+    assert.equal(mod.fixWord(idx2, "liit"), "iiit");
+  });
+
+  test("a2: sửa từ câu tìm trước khi tìm (chỉ khi bật fixWords)", () => {
+    const a1 = mod.buildRankIndex(t1, MINI, { coop: true });
+    assert.deepEqual(mod.rankFromText(t1, a1, "Mu0i").hits, []);
+    const a2 = mod.buildRankIndex(t1, MINI, { coop: true, fixWords: true });
+    const r = mod.rankFromText(t1, a2, "Mu0i");
+    assert.deepEqual(r.query, ["muoi"]);
+    assert.deepEqual(r.hits.map((h) => h.code), ["2"]);
   });
 });
