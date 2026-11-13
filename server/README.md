@@ -69,7 +69,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
 | `QUEUE_MAX` | 4 | số yêu cầu giữ chỗ thêm (đang tải ảnh lên hoặc đang chờ); đầy -> 503 + `Retry-After`, chưa đọc thân ảnh |
 | `BODY_TIMEOUT_S` | 30 | đọc thân ảnh tối đa bấy nhiêu giây (số thực > 0); quá -> 408, trả chỗ |
-| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình). Trên Azure Container Apps đặt 1 (ingress thêm IP khách vào cuối header; `AZURE.md` mục "TRUST_PROXY") |
+| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình). Trên Azure Container Apps đặt 1 (ingress thêm IP khách vào cuối header; `AZURE.md` mục "TRUST_PROXY"). Phần :cổng (nếu có) được bỏ; phần tử không phải IP hợp lệ -> dùng IP socket |
 | `PROXY_COUNT` | 1 | lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI của `X-Forwarded-For` (phần bên trái khách tự ghi được, không tin) |
 | `AUTH_MODE` | off (ảnh Docker: supabase) | `off` cho qua (chạy thử, test); `supabase` = `/ocr` phải có token đăng nhập Supabase (mục "Đăng nhập"), thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` -> từ chối khởi động (câu lỗi chỉ nêu tên biến, không in giá trị); giá trị lạ -> từ chối khởi động |
 | `SUPABASE_URL` | (trống) | Project URL `https://<ref>.supabase.co` (phải https) |
@@ -203,7 +203,8 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 - **429 (ngày)**: quá `DAILY_LIMIT_PER_USER` (mặc định 200) ảnh / ngày UTC cho MỘT người dùng (đếm trong RAM, mất khi
   máy chủ ngủ / khởi động lại; kiểm sau giới hạn phút theo người, lượt bị chặn ở giới hạn phút không trừ lượt ngày).
   Lượt ngày bị trừ ngay khi qua bước kiểm, kể cả khi yêu cầu sau đó lỗi (503 hàng đợi đầy / chưa nạp model, 408, 413,
-  415, 500), giống 2 giới hạn phút; với 200 lượt / ngày thì chấp nhận được.
+  415, 500), giống 2 giới hạn phút; với 200 lượt / ngày thì chấp nhận được. Ngược lại, người đã hết lượt ngày vẫn bị
+  tính vào giới hạn phút (giới hạn phút kiểm trước; ảnh hưởng nhỏ).
 - **Thứ tự**: giới hạn IP -> kiểm token -> giới hạn người dùng (phút, rồi ngày) -> model đã nạp -> hàng đợi -> đọc ảnh. IP trước để token rác
   gửi dồn dập không làm máy chủ gọi Supabase liên tục; token sai không bị tính vào lượt của người dùng.
 - Gọi mạng (JWKS, `/user`) chạy trong threadpool, không chặn vòng sự kiện.
@@ -234,6 +235,9 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   Thiếu cờ này, uvicorn mặc định tin `127.0.0.1` và tự thay IP bằng `X-Forwarded-For` trước khi app thấy, nên ai gửi từ
   localhost kèm `X-Forwarded-For` khác nhau mỗi lần là lách được giới hạn lượt (đã thử: 3 lần đều 200). Với cờ này,
   `TRUST_PROXY` của app là công tắc DUY NHẤT để dùng `X-Forwarded-For`. Test: `tests/test_uvicorn.py` (chạy uvicorn thật).
+  Khi `TRUST_PROXY=1`: phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`,
+  IPv6 trần giữ nguyên), nên cùng IP khác cổng vẫn đếm chung; phần tử không phải IP hợp lệ -> IP socket
+  (`tests/test_client_ip.py`).
 - **CORS**: chỉ khớp chính xác các nguồn trong `ALLOWED_ORIGINS` (mặc định `https://khangnguyen196.github.io`) (+ localhost
   khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;
@@ -254,7 +258,7 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (367 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (384 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (3 test)
 ```
 
@@ -264,7 +268,8 @@ test `real_model` FAIL.
 - Đợt `may-chu-2`: `tests/test_cors_origins.py` (`ALLOWED_ORIGINS`), `tests/test_daily_limit.py` (giới hạn ngày UTC, đồng
   hồ giả qua 00:00 UTC), `tests/test_log_privacy.py` (log không lộ token / email / Bearer), `tests/test_dockerfile.py`
   (đọc nguồn Dockerfile / `.dockerignore` / requirements chỉ ASCII; máy không có Docker), test `real_model` đọc ảnh CI
-  `tests/fixtures/chu.png`.
+  `tests/fixtures/chu.png`. Vòng 2: `tests/test_workflow.py` (workflow server-image chạy `run` bằng bash có pipefail),
+  `tests/test_client_ip.py` (`X-Forwarded-For` bỏ :cổng), `tests/test_uvicorn.py` thêm HEALTHCHECK với `PORT` rỗng.
 - Ảnh CI `tests/fixtures/chu.png` (3 dòng chữ in, 13 KB, tự vẽ) tạo bằng venv máy chủ:
   `D:\tmp\may-chu-1\venv\Scripts\python server\tests\fixtures\tao_chu.py`. Danh sách chữ phải đọc ra (`CHU_PNG_WORDS`)
   nằm trong `tao_chu.py`, dùng chung cho test và workflow.

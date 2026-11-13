@@ -139,6 +139,8 @@ Container App lẫn môi trường. Ảnh trên ghcr.io vẫn còn (xóa ở Git
 - **Publishable key là mã công khai**: nó nằm sẵn trong app trên trình duyệt ai cũng xem được; chỉ để gọi Supabase thay mặt
   người dùng. Máy chủ KHÔNG dùng (và không bao giờ cần) JWT secret hay service_role key; dán nhầm khóa bí mật
   (`sb_secret_…`, JWT `service_role`) thì máy chủ từ chối khởi động.
+- **CORS không phải lớp bảo vệ**: chỉ trình duyệt mới tôn trọng CORS (công cụ như curl bỏ qua nó); lớp bảo vệ thật là
+  token đăng nhập Supabase. Vì vậy để `https://localhost:5173` trong `ALLOWED_ORIGINS` vẫn an toàn.
 - Giới hạn chống dùng chùa: 20 ảnh / phút / IP, 10 ảnh / phút / người, 200 ảnh / người / ngày UTC, 1 ảnh OCR cùng lúc +
   hàng đợi 4, ảnh tối đa 5 MB. Các giới hạn đếm trong RAM: máy chủ ngủ / khởi động lại thì về 0; chỉ đúng khi tối đa 1
   bản chạy (scale tối đa 1). Đây là lớp chống dùng chùa, không phải sổ cái.
@@ -156,8 +158,9 @@ Container Apps." Nghĩa là Azure **thêm IP khách vào CUỐI** header; phần
 Máy chủ lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI khi `TRUST_PROXY=1` → đặt **`TRUST_PROXY=1`, `PROXY_COUNT=1`** là lấy
 đúng IP Azure ghi. Không bật thì máy chủ thấy mọi người dùng chung IP của proxy → cả app chỉ được 20 ảnh / phút (giới
 hạn theo IP), người này gửi nhiều làm người khác bị 429. (uvicorn chạy `--no-proxy-headers`, nên `TRUST_PROXY` là công
-tắc duy nhất.) Chưa kiểm trên Azure thật: phần tử Azure ghi có kèm ":cổng" hay không (PLAN.md mục 8, việc để sau (j));
-kiểm ở Phần B.
+tắc duy nhất.) Phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`), nên
+dù Azure có ghi kèm cổng thì cùng một người vẫn đếm chung 1 IP; phần tử không phải IP hợp lệ -> dùng IP socket. Phần B
+vẫn nên xem Azure ghi dạng nào (không bắt buộc).
 
 ## Container Apps không dùng HEALTHCHECK của Docker
 
