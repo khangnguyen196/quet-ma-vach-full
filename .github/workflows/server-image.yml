@@ -1,0 +1,139 @@
+# Build ảnh Docker của máy chủ OCR (server/), chạy thử container vừa build, rồi (CHỈ trên main) đẩy lên
+# ghcr.io/khangnguyen196/quet-ma-vach-ocr với tag latest + 7 ký tự đầu của mã commit.
+# Chỉ dùng GITHUB_TOKEN (không khóa Azure, không secret nào khác). Azure Container App do chủ dự án tự tạo
+# trên Azure Portal trỏ vào ảnh này: server/AZURE.md. Không đụng workflow Pages (deploy.yml).
+name: Server image
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-image.yml'
+  workflow_dispatch:
+
+# Chỉ đọc mã + ghi package (ghcr.io). Không quyền nào khác.
+permissions:
+  contents: read
+  packages: write
+
+# Mỗi nhánh 1 lượt một lúc; nhánh thường thì lượt mới hủy lượt cũ, main thì chờ (không hủy giữa lúc đẩy ảnh).
+concurrency:
+  group: server-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  IMAGE: ghcr.io/khangnguyen196/quet-ma-vach-ocr
+  LOCAL: local/ocr:test
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Ghim action bằng tag lớn như deploy.yml (actions/checkout@v7): nhận bản vá trong cùng bản lớn, không tự lên bản lớn mới.
+      - uses: actions/checkout@v7
+
+      # docker CLI có sẵn trên runner ubuntu (builder mặc định = BuildKit, driver docker): ảnh vào thẳng kho ảnh của máy
+      # để docker run thử ngay, không cần thêm action build / buildx --load.
+      - name: Build ảnh
+        run: docker build -t "$LOCAL" server/
+
+      - name: Chạy container (AUTH_MODE=off chỉ để chạy thử) và chờ /health
+        run: |
+          start=$(date +%s%N)
+          docker run -d --name ocr -e AUTH_MODE=off -e PORT=8080 -p 127.0.0.1:8080:8080 "$LOCAL"
+          for i in $(seq 1 90); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health)" = "200" ]; then
+              secs=$(awk -v ns="$(( $(date +%s%N) - start ))" 'BEGIN { printf "%.1f", ns / 1e9 }')
+              echo "STARTUP_SECONDS=$secs" >> "$GITHUB_ENV"
+              echo "/health 200 sau $secs giây"
+              curl -s http://127.0.0.1:8080/health; echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/health không trả 200 sau 90 giây"
+          docker logs ocr || true
+          exit 1
+
+      - name: Gửi ảnh thử chu.png (PNG) và xoay6.heic (HEIC, kiểm libheif trên Linux)
+        run: |
+          code=$(curl -s -o png.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png http://127.0.0.1:8080/ocr)
+          echo "chu.png: HTTP $code"; cat png.json; echo
+          [ "$code" = "200" ] || { echo "::error::chu.png không trả 200"; exit 1; }
+          python3 - <<'PY'
+          import json, sys
+          sys.path.insert(0, "server/tests/fixtures")
+          from tao_chu import CHU_PNG_WORDS  # cùng danh sách chữ với test real_model
+          text = " ".join(it["text"] for it in json.load(open("png.json", encoding="utf-8"))["items"]).upper()
+          missing = [w for w in CHU_PNG_WORDS if w not in text]
+          print("chữ OCR:", text)
+          sys.exit(f"thiếu chữ: {missing}" if missing else 0)
+          PY
+          code=$(curl -s -o heic.json -w '%{http_code}' -F image=@server/tests/fixtures/xoay6.heic http://127.0.0.1:8080/ocr)
+          echo "xoay6.heic: HTTP $code"; cat heic.json; echo
+          [ "$code" = "200" ] || { echo "::error::xoay6.heic không trả 200"; exit 1; }
+
+      - name: Đo cỡ ảnh, RAM
+        run: |
+          size=$(docker image inspect "$LOCAL" --format '{{.Size}}')
+          mb=$(awk -v b="$size" 'BEGIN { printf "%.1f", b / 1048576 }')
+          stats=$(docker stats --no-stream --format '{{.MemUsage}}' ocr)
+          peak=$(docker exec ocr cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo "")
+          if [ -n "$peak" ]; then peak_mb=$(awk -v b="$peak" 'BEGIN { printf "%.1f", b / 1048576 }'); else peak_mb="không đọc được"; fi
+          {
+            echo "### Ảnh Docker máy chủ OCR"
+            echo "| Mục | Giá trị |"
+            echo "|---|---|"
+            echo "| Cỡ ảnh (docker image inspect) | $mb MB ($size byte) |"
+            echo "| RAM lúc này (docker stats, sau 2 ảnh OCR) | $stats |"
+            echo "| RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR) | $peak_mb MB |"
+            echo "| Khởi động tới /health 200 | ${STARTUP_SECONDS} giây |"
+            echo "| Commit | ${GITHUB_SHA::7} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+
+      - name: Không đặt AUTH_MODE thì không khởi động (mặc định an toàn = supabase, thiếu biến Supabase)
+        run: |
+          docker rm -f ocr >/dev/null
+          set +e
+          timeout 120 docker run --name ocr-macdinh -e PORT=8080 "$LOCAL"
+          rc=$?
+          set -e
+          docker rm -f ocr-macdinh >/dev/null 2>&1 || true
+          echo "mã thoát: $rc"
+          if [ "$rc" = "0" ] || [ "$rc" = "124" ]; then
+            echo "::error::container KHÔNG đặt AUTH_MODE vẫn chạy (mã $rc): mặc định không an toàn"
+            exit 1
+          fi
+          echo "| Không đặt AUTH_MODE | không khởi động (mã thoát $rc), đúng |" >> "$GITHUB_STEP_SUMMARY"
+
+      # Từ đây CHỈ trên main (các bước trên đã đạt): đăng nhập ghcr.io bằng GITHUB_TOKEN rồi đẩy 2 tag.
+      - name: Đăng nhập ghcr.io
+        if: github.ref == 'refs/heads/main'
+        # tag lớn như actions/checkout@v7 (docker/login-action bản lớn mới nhất là v4, đọc trang releases 13/11/2026)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Đẩy ảnh (latest + mã commit ngắn)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          short=${GITHUB_SHA::7}
+          docker tag "$LOCAL" "$IMAGE:latest"
+          docker tag "$LOCAL" "$IMAGE:$short"
+          docker push "$IMAGE:$short"
+          docker push "$IMAGE:latest"
+          digest=$(docker image inspect "$IMAGE:latest" --format '{{index .RepoDigests 0}}')
+          echo "digest: $digest"
+          {
+            echo "| Đã đẩy | \`$IMAGE:latest\`, \`$IMAGE:$short\` |"
+            echo "| Digest | \`$digest\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dọn container
+        if: always()
+        run: docker rm -f ocr ocr-macdinh >/dev/null 2>&1 || true
