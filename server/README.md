@@ -69,7 +69,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `MAX_CONCURRENT` | 1 | số ảnh OCR cùng lúc |
 | `QUEUE_MAX` | 4 | số yêu cầu giữ chỗ thêm (đang tải ảnh lên hoặc đang chờ); đầy -> 503 + `Retry-After`, chưa đọc thân ảnh |
 | `BODY_TIMEOUT_S` | 30 | đọc thân ảnh tối đa bấy nhiêu giây (số thực > 0); quá -> 408, trả chỗ |
-| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình). Trên Azure Container Apps đặt 1 (ingress thêm IP khách vào cuối header; `AZURE.md` mục "TRUST_PROXY"). Phần :cổng (nếu có) được bỏ; phần tử không phải IP hợp lệ -> dùng IP socket |
+| `TRUST_PROXY` | 0 | 1 = lấy IP từ `X-Forwarded-For` (chỉ khi đứng sau proxy của mình). Trên Azure Container Apps đặt 1 (ingress thêm IP khách vào cuối header; `AZURE.md` mục "TRUST_PROXY"). Phần :cổng (nếu có) được bỏ; `::ffff:a.b.c.d` đếm như `a.b.c.d`; phần tử không phải IP hợp lệ (kể cả cổng quá 5 chữ số, IPv6 có zone id `%…`) -> dùng IP socket |
 | `PROXY_COUNT` | 1 | lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI của `X-Forwarded-For` (phần bên trái khách tự ghi được, không tin) |
 | `AUTH_MODE` | off (ảnh Docker: supabase) | `off` cho qua (chạy thử, test); `supabase` = `/ocr` phải có token đăng nhập Supabase (mục "Đăng nhập"), thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` -> từ chối khởi động (câu lỗi chỉ nêu tên biến, không in giá trị); giá trị lạ -> từ chối khởi động |
 | `SUPABASE_URL` | (trống) | Project URL `https://<ref>.supabase.co` (phải https) |
@@ -236,8 +236,8 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   localhost kèm `X-Forwarded-For` khác nhau mỗi lần là lách được giới hạn lượt (đã thử: 3 lần đều 200). Với cờ này,
   `TRUST_PROXY` của app là công tắc DUY NHẤT để dùng `X-Forwarded-For`. Test: `tests/test_uvicorn.py` (chạy uvicorn thật).
   Khi `TRUST_PROXY=1`: phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`,
-  IPv6 trần giữ nguyên), nên cùng IP khác cổng vẫn đếm chung; phần tử không phải IP hợp lệ -> IP socket
-  (`tests/test_client_ip.py`).
+  IPv6 trần giữ nguyên), nên cùng IP khác cổng vẫn đếm chung; `::ffff:a.b.c.d` (IPv4 gói trong IPv6) đếm như `a.b.c.d`;
+  phần tử không phải IP hợp lệ (rác, cổng quá 5 chữ số, IPv6 có zone id `%…`) -> IP socket (`tests/test_client_ip.py`).
 - **CORS**: chỉ khớp chính xác các nguồn trong `ALLOWED_ORIGINS` (mặc định `https://khangnguyen196.github.io`) (+ localhost
   khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;
@@ -269,7 +269,8 @@ test `real_model` FAIL.
   hồ giả qua 00:00 UTC), `tests/test_log_privacy.py` (log không lộ token / email / Bearer), `tests/test_dockerfile.py`
   (đọc nguồn Dockerfile / `.dockerignore` / requirements chỉ ASCII; máy không có Docker), test `real_model` đọc ảnh CI
   `tests/fixtures/chu.png`. Vòng 2: `tests/test_workflow.py` (workflow server-image chạy `run` bằng bash có pipefail),
-  `tests/test_client_ip.py` (`X-Forwarded-For` bỏ :cổng), `tests/test_uvicorn.py` thêm HEALTHCHECK với `PORT` rỗng.
+  `tests/test_client_ip.py` (`X-Forwarded-For` bỏ :cổng), `tests/test_uvicorn.py` thêm HEALTHCHECK với `PORT` rỗng. Vòng 3: `tests/test_client_ip.py` thêm cổng quá dài
+  (không lỗi 500), IPv6 có zone id, `::ffff:a.b.c.d`.
 - Ảnh CI `tests/fixtures/chu.png` (3 dòng chữ in, 13 KB, tự vẽ) tạo bằng venv máy chủ:
   `D:\tmp\may-chu-1\venv\Scripts\python server\tests\fixtures\tao_chu.py`. Danh sách chữ phải đọc ra (`CHU_PNG_WORDS`)
   nằm trong `tao_chu.py`, dùng chung cho test và workflow.

@@ -159,7 +159,8 @@ Máy chủ lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI khi `TRUST_PR
 đúng IP Azure ghi. Không bật thì máy chủ thấy mọi người dùng chung IP của proxy → cả app chỉ được 20 ảnh / phút (giới
 hạn theo IP), người này gửi nhiều làm người khác bị 429. (uvicorn chạy `--no-proxy-headers`, nên `TRUST_PROXY` là công
 tắc duy nhất.) Phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`), nên
-dù Azure có ghi kèm cổng thì cùng một người vẫn đếm chung 1 IP; phần tử không phải IP hợp lệ -> dùng IP socket. Phần B
+dù Azure có ghi kèm cổng thì cùng một người vẫn đếm chung 1 IP; `::ffff:a.b.c.d` đếm như `a.b.c.d`; phần tử không phải
+IP hợp lệ (kể cả cổng quá 5 chữ số, IPv6 có zone id `%…`) -> dùng IP socket. Phần B
 vẫn nên xem Azure ghi dạng nào (không bắt buộc).
 
 ## Container Apps không dùng HEALTHCHECK của Docker

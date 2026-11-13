@@ -5,7 +5,8 @@ trước khi đọc thân ảnh).
 IP lấy từ socket. X-Forwarded-For CHỈ dùng khi TRUST_PROXY=1 (máy chủ đứng sau proxy của mình): lấy phần tử thứ
 PROXY_COUNT tính từ PHẢI (proxy cuối cùng của mình ghi IP nó thấy vào cuối danh sách; phần bên trái do khách tự ghi,
 không tin). Header thiếu / ngắn hơn PROXY_COUNT -> dùng IP socket. Phần tử đã chọn: phần :cổng (nếu có) được bỏ
-("1.2.3.4:51234" -> "1.2.3.4", "[v6]:443" -> "v6"); không phải IP hợp lệ (rác, rỗng, "unknown") -> dùng IP socket.
+("1.2.3.4:51234" -> "1.2.3.4", "[v6]:443" -> "v6"); không phải IP hợp lệ (rác, rỗng, "unknown", cổng quá 5 chữ số,
+IPv6 có zone id "%…") -> dùng IP socket. "::ffff:a.b.c.d" (IPv4 gói trong IPv6) đếm như "a.b.c.d".
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ def clean_ip(value: str) -> str | None:
 
     "1.2.3.4:51234" -> "1.2.3.4"; "[2001:db8::1]:443" / "[2001:db8::1]" -> "2001:db8::1";
     IPv6 trần "2001:db8::1" giữ nguyên (không cắt sau dấu ":" cuối); "rac", "unknown", "" -> None.
+    "::ffff:1.2.3.4" / "[::ffff:1.2.3.4]:443" -> "1.2.3.4" (đếm chung với IPv4); có zone id ("fe80::1%eth0") -> None.
     """
     v = value.strip()
     if v.startswith("["):
@@ -43,10 +45,14 @@ def clean_ip(value: str) -> str | None:
             return None
     else:
         host = v
+    if "%" in host:  # IPv6 có zone id: khách qua ingress không có; phần sau "%" dài tùy ý -> không dùng làm khóa
+        return None
     try:
-        return str(ipaddress.ip_address(host))
+        ip = ipaddress.ip_address(host)
     except ValueError:
         return None
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return str(mapped) if mapped else str(ip)
 
 
 def client_ip(request, trust_proxy: bool, proxy_count: int = 1) -> str:
