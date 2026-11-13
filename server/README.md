@@ -435,12 +435,12 @@ lượt đỏ. Vẫn `denied` thì package → Package settings → Manage Actio
 
 ### Trên Azure (đợt `may-chu-2` Phần B, 13/11/2026)
 
-Container App ở Malaysia West (1 vCPU / 2 GiB, scale 0–1, `AUTH_MODE=supabase`, `TRUST_PROXY=1`, `PROXY_COUNT=1`). Kiểm
+Container App ở Malaysia West (1 vCPU / 2 GiB, scale 0–1, `AUTH_MODE=supabase`, `TRUST_PROXY=1`, `PROXY_COUNT=1` (theo cấu hình chủ dự án đặt)). Kiểm
 từ bên ngoài bằng curl, chỉ đọc, ~08:07–08:09 UTC, 12 lần gọi, không token thật:
 
 | # | Gọi | Kết quả |
 |---|---|---|
-| 1 | GET `/health` lần 1 (có thể đang ngủ; không biết lần gọi trước đó lúc nào) | 200, 7,70 giây (connect 2,66 s, TLS 3,35 s) |
+| 1 | GET `/health` lần 1 (có thể đang ngủ; không biết lần gọi trước đó lúc nào) | 200, 7,70 giây (kết nối xong 2,66 s, TLS xong 3,35 s (tính từ lúc gọi)) |
 | 2 | GET `/health` 2 lần sau | 200, 0,273 s và 0,292 s |
 | 3 | thân `/health` | `{"ok":true,"modelLoaded":true,"engine":{"name":"rapidocr","version":"3.10.0","model":"PP-OCRv6 small det+rec, no cls"},"version":"0.1.0"}` |
 | 4 | POST `/ocr` không token (`chu.png`) | 401, `WWW-Authenticate: Bearer`, câu "thiếu token đăng nhập" |
@@ -452,7 +452,11 @@ từ bên ngoài bằng curl, chỉ đọc, ~08:07–08:09 UTC, 12 lần gọi, 
 | 10 | GET `/` | 404 `{"error":"Không có đường dẫn này."}` |
 | 11 | GET `http://…/health` | 301 -> `https://…/health` |
 
-Lần đầu khi ngủ, lần 2 (sau >= 8 phút không gọi): (chờ số đo ngủ lần 2)
+Đã đo cả 2 lần gọi lúc máy chủ (có thể) đang ngủ. Lần ngủ thứ 2 (curl 08:16:37–08:16:51 UTC, sau 8 phút 07 giây không có
+yêu cầu nào tới máy chủ, lâu hơn cooldown 300 giây): GET `/health` lần đầu 200 sau 6,43 giây (kết nối xong
+0,10 s, TLS xong 0,24 s, chờ phản hồi đầu 6,43 s, tính từ lúc gọi); 2 lần sau 0,286 s và 0,436 s. Nhận xét: máy chủ thức
+dậy mất khoảng 6,3 giây (kéo container lên + nạp model); lần đo đầu lúc 08:07 (7,70 s, kết nối chậm 2,66 s) nhiều khả
+năng cũng là lần ngủ.
 
 Từ bên ngoài không đọc được Azure ghi `X-Forwarded-For` dạng nào (một dòng hay nhiều dòng header); việc để sau (d) ở
 `PLAN.md`.

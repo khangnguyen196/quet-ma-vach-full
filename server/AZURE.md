@@ -14,8 +14,8 @@ Gói: Azure for Students (không thẻ). Chỉ dùng phần miễn phí / credit
 - 1 vCPU / 2 GiB, ingress bên ngoài cổng 8080, scale tối thiểu 0, tối đa 1 (cooldown 300 giây), 6 biến môi trường như
   bảng ở mục 2.
 
-Ngoài mục "Máy chủ của dự án" ở trên, file này không có địa chỉ app; không có URL hay khóa Supabase thật (chủ dự án yêu
-cầu ghi địa chỉ máy chủ). Thay `<...>` bằng giá trị của bạn khi bấm.
+Ngoài mục "Máy chủ của dự án" ở trên (chủ dự án yêu cầu ghi địa chỉ máy chủ), file này không có địa chỉ app; không có
+URL hay khóa Supabase thật. Thay `<...>` bằng giá trị của bạn khi bấm.
 
 ## 1. GitHub: cho package thành Public
 
@@ -104,11 +104,11 @@ Lúc tạo, Portal để mặc định 0 – 10 bản chạy. Máy chủ chỉ �
 Container App → **Overview** → **Application Url** (dạng `https://<app>.<vùng>.azurecontainerapps.io`). Mở
 `https://<app>…/health`:
 
-- Lần đầu (máy chủ đang ngủ) có thể chờ khoảng 20–60 giây (kéo ảnh + nạp model). Phải thấy
-  `{"ok":true,"modelLoaded":true,…}`. Số đo thật (13/11/2026): lần đầu 7,70 giây (không chắc lúc đó máy chủ đã ngủ
-  hẳn), các lần sau 0,27–0,29 giây; xem bảng đo ở `server/README.md`.
+- Lần đầu (máy chủ đang ngủ) phải chờ máy chủ thức dậy (kéo container lên + nạp model): dự kiến 20–60 giây, thực đo
+  (13/11/2026, 2 lần ngủ) khoảng 6–8 giây (7,70 s và 6,43 s); sau đó các lần gọi khoảng 0,3 giây (0,27–0,44 s). Phải
+  thấy `{"ok":true,"modelLoaded":true,…}`. Bảng đo ở `server/README.md`.
 - Mở `https://<app>…/ocr` trên trình duyệt (GET) thấy `{"error":"Phương thức không được hỗ trợ."}` là bình thường.
-- Gửi ảnh không đăng nhập phải bị **401** (kiểm ở Phần B của đợt `may-chu-2`).
+- Gửi ảnh không đăng nhập phải bị **401** (đã kiểm 13/11/2026: 401).
 
 Thử từ khu "Thử máy chủ OCR (chỉ khi chạy dev)": thêm vào `.env` ở gốc repo dòng
 `VITE_OCR_SERVER_URL=https://<app>…` (không "/" cuối), chạy `npm run dev`, mở `https://localhost:5173`, đăng nhập.
@@ -117,7 +117,8 @@ Thử từ khu "Thử máy chủ OCR (chỉ khi chạy dev)": thêm vào `.env` 
 
 Mỗi lần `main` có đổi trong `server/`, workflow "Server image" đẩy ảnh mới với tag `latest` (và tag mã commit).
 Commit chỉ đổi tài liệu trong `server/` (vd file này) cũng làm workflow đẩy ảnh mới; khi mã máy chủ không đổi thì không
-cần tạo revision mới. Container App KHÔNG tự kéo lại `latest`. Để chạy ảnh mới:
+cần tạo revision mới. Container App thường không tự kéo lại `latest`; Microsoft khuyên dùng tag cố định, xem việc để sau
+(h) của đợt `may-chu-2` ở `PLAN.md`. Để chạy ảnh mới:
 
 1. Container App → **Application** → **Revisions and replicas** (hoặc **Containers**) → **Create new revision**
    (hoặc **Edit and deploy**).
@@ -142,8 +143,8 @@ Container App lẫn môi trường. Ảnh trên ghcr.io vẫn còn (xóa ở Git
 | Revision "Failed" / "Provisioning failed", log có `unauthorized`, `denied`, `manifest unknown` khi kéo ảnh | package trên ghcr.io còn Private, hoặc gõ sai tên ảnh / tag, hoặc workflow trên `main` chưa chạy xanh lần nào | làm mục 1; kiểm **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:latest`, registry `ghcr.io` |
 | Revision không chạy được, /health không trả lời, bản chạy khởi động lại liên tục | máy chủ không khởi động vì thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` (câu lỗi chỉ nêu tên biến), dán nhầm khóa bí mật, hoặc `ALLOWED_ORIGINS` sai dạng (có `*`, có đường dẫn) | sửa biến ở **Containers** → **Edit and deploy** → tab Container → Environment variables → tạo revision mới. Xem lỗi: menu **Monitoring** → **Log stream** (xem trực tiếp lúc revision đang khởi động; không lưu lại vì đã chọn "Don't save logs") |
 | Trang github.io / localhost báo "lỗi mạng", tab Network thấy lỗi CORS | nguồn của trang không có trong `ALLOWED_ORIGINS` (phải đúng `https://khangnguyen196.github.io`, không "/" cuối, không đường dẫn `/quet-ma-vach-full`) | sửa `ALLOWED_ORIGINS`, tạo revision mới |
-| Lần gọi đầu rất chậm (20–60 giây) rồi các lần sau nhanh | máy chủ đang ngủ (scale về 0) nên phải bật + nạp model; ngủ lại sau khoảng 5 phút không có yêu cầu | bình thường với scale tối thiểu 0 (để không tốn tiền); app / khu thử nên chờ lâu hơn lần đầu. Số đo thật 13/11/2026: lần đầu 7,70 giây (không chắc lúc đó đã ngủ hẳn), lần sau 0,27–0,29 giây (bảng đo ở `server/README.md`) |
-| Workflow "Server image" đỏ ở bước "Đẩy ảnh", `error from registry: denied` | lần đầu tạo package bằng `GITHUB_TOKEN`, hoặc repo chưa có quyền ghi package | chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run lượt đỏ; vẫn `denied` thì package → Package settings → Manage Actions access → thêm repo `quet-ma-vach-full` quyền Write |
+| Lần gọi đầu rất chậm rồi các lần sau nhanh | máy chủ đang ngủ (scale về 0) nên phải bật + nạp model; ngủ lại sau khoảng 5 phút không có yêu cầu | bình thường với scale tối thiểu 0 (để không tốn tiền); app / khu thử nên chờ lâu hơn lần đầu. Dự kiến 20–60 giây; thực đo 13/11/2026 (2 lần ngủ) lần thức dậy khoảng 6–8 giây (7,70 s và 6,43 s), sau đó khoảng 0,3 giây (bảng đo ở `server/README.md`) |
+| Workflow "Server image" đỏ ở bước "Đẩy ảnh", `error from registry: denied` | (đoán, chưa xác định chắc) lần đầu tạo package bằng `GITHUB_TOKEN`, hoặc repo chưa có quyền ghi package | chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run lượt đỏ; vẫn `denied` thì package → Package settings → Manage Actions access → thêm repo `quet-ma-vach-full` quyền Write |
 | **Review + create** báo `RequestDisallowedByAzure` | vùng (Region) bị Azure for Students chặn (vd Southeast Asia) | chọn 1 trong 5 vùng được phép: `indonesiacentral`, `malaysiawest`, `indiasouthcentral`, `centralindia`, `uaenorth` (mục 2) |
 | 429 "đã gửi đủ 200 ảnh hôm nay" | `DAILY_LIMIT_PER_USER` (đếm theo ngày UTC, đổi ngày lúc 7 giờ sáng giờ Việt Nam) | chờ sang ngày, hoặc đặt biến lớn hơn |
 | Mọi người cùng bị 429 "tối đa 20 ảnh mỗi phút" | quên `TRUST_PROXY=1`: máy chủ thấy mọi người là cùng 1 IP (IP của proxy Azure) | đặt `TRUST_PROXY=1`, `PROXY_COUNT=1` |
@@ -179,7 +180,7 @@ hạn theo IP), người này gửi nhiều làm người khác bị 429. (uvico
 tắc duy nhất.) Phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`), nên
 dù Azure có ghi kèm cổng thì cùng một người vẫn đếm chung 1 IP; `::ffff:a.b.c.d` đếm như `a.b.c.d`; phần tử không phải
 IP hợp lệ (kể cả cổng quá 5 chữ số, IPv6 có zone id `%…`) -> dùng IP socket. Phần B
-vẫn nên xem Azure ghi dạng nào (không bắt buộc).
+không đọc được Azure ghi dạng nào từ bên ngoài (việc để sau (d) ở PLAN.md).
 
 ## Container Apps không dùng HEALTHCHECK của Docker
 
