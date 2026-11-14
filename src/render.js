@@ -478,9 +478,11 @@ export function frontHitsText(hits, confident = false) {
  * Danh sách gợi ý (vẽ lại riêng khi bấm "Tìm lại"). hits: [{ code, name, brand, image }] (hitProducts của
  * src/front-search.js). Tối đa FRONT_MAX_HITS; mã không phải 8–14 chữ số thì bỏ. Ảnh qua labelImageUrl (lạ → "chưa có
  * ảnh"); ảnh tải lỗi thì main.js đổi sang "chưa có ảnh" bằng addEventListener("error") (không có onerror ở đây).
- * confident (confidenceOf của src/front-rank.js): false / không truyền (thận trọng), hoặc không có gợi ý → khối
- * "Không chắc chắn…" + 3 nút (Quét mã vạch, Nhập số mã, Góp sản phẩm), có gợi ý thì vẫn hiện bên dưới để người dùng
- * tự chọn (không tự chọn thay). confident true và có gợi ý → chỉ danh sách (như trước vòng 3).
+ * confident (confidenceOf của src/front-rank.js): false / không truyền (thận trọng), hoặc không có gợi ý → có khối
+ * "Không chắc chắn…" + 3 nút (Quét mã vạch, Nhập số mã, Góp sản phẩm). Thứ tự (đợt chup-mat-gon): có gợi ý thì câu
+ * "Kết quả gợi ý…" + danh sách đứng TRƯỚC, khối đứng SAU (gợi ý 1 lên cao, người dùng tự chọn, không tự chọn thay);
+ * 0 gợi ý thì chỉ có khối (đứng đầu). confident true và có gợi ý → chỉ danh sách (như trước vòng 3 nang-t1).
+ * Thứ tự gợi ý giữ đúng thứ tự hits đầu vào (không xếp lại).
  */
 export function renderFrontHits(hits, { confident = false } = {}) {
   const list = frontHitsShown(hits);
@@ -496,23 +498,29 @@ export function renderFrontHits(hits, { confident = false } = {}) {
     return `<li><button type="button" class="front-hit" data-front-code="${h.code}">${pic}
 <span class="front-info"><span class="front-name">${name}</span><span class="front-brand">${brand}</span><span class="front-code">Mã ${h.code}</span></span></button></li>`;
   }).join("");
-  return `${unsure}<p class="front-lead">Kết quả gợi ý, hãy chọn đúng sản phẩm</p><ul class="front-list">${items}</ul>`;
+  return `<p class="front-lead">Kết quả gợi ý, hãy chọn đúng sản phẩm</p><ul class="front-list">${items}</ul>${unsure}`;
 }
 
 /** Câu của khối "không chắc chắn" (vòng 3 nang-t1). */
 export const FRONT_UNSURE_TEXT = "Không chắc chắn, có thể sản phẩm chưa có trong danh mục";
 
 /**
- * Khối "Không chắc chắn…": câu + "Quét mã vạch" (data-front-action="scan": main.js bật camera như nút "Bật camera"),
- * "Nhập số mã" (data-front-action="code": cuộn tới ô nhập số) và link góp sản phẩm lên Open Food Facts (như nút góp ở
- * màn "Chưa có mã"). Nằm trong .front-hits để "Tìm lại" vẽ lại đúng.
+ * Khối "Không chắc chắn…": câu + 3 nút một hàng (đợt chup-mat-gon): "Quét mã vạch" (data-front-action="scan": main.js
+ * bật camera như nút "Bật camera"), "Nhập số mã" (data-front-action="code": cuộn tới ô nhập số) và link góp sản phẩm lên
+ * Open Food Facts (như nút góp ở màn "Chưa có mã"): chữ hiển thị ngắn "Góp sản phẩm", aria-label đầy đủ có chứa chữ
+ * hiển thị (WCAG 2.5.3, người dùng giọng nói gọi đúng chữ thấy trên nút). Nằm trong .front-hits để "Tìm lại" vẽ lại đúng.
  */
 function renderFrontUnsure() {
   return `<div class="front-unsure" role="note"><p class="front-unsure-text">${esc(FRONT_UNSURE_TEXT)}</p>
 <div class="front-unsure-actions"><button type="button" class="btn" data-front-action="scan">${esc("Quét mã vạch")}</button>
 <button type="button" class="btn" data-front-action="code">${esc("Nhập số mã")}</button>
-<a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener">${esc("Góp sản phẩm lên Open Food Facts")}</a></div></div>`;
+<a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener" aria-label="${esc(FRONT_ADD_LABEL)}">${esc(FRONT_ADD_TEXT)}</a></div></div>`;
 }
+
+/** Chữ hiển thị của link góp trong khối "Không chắc chắn…" (ngắn để 3 nút vừa một hàng ở màn 320 px). */
+export const FRONT_ADD_TEXT = "Góp sản phẩm";
+/** Tên đọc (aria-label) của link góp: bắt đầu bằng đúng chữ hiển thị. */
+export const FRONT_ADD_LABEL = "Góp sản phẩm lên Open Food Facts";
 
 /**
  * Kết quả "Chụp mặt trước": ô sửa chữ đọc được (mỗi dòng 1 hàng chữ) + nút "Tìm lại" + danh sách gợi ý + dòng nguồn.

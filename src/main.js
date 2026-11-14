@@ -1028,6 +1028,10 @@ frontFile.addEventListener("change", async (ev) => {
   frontBox.hidden = false;
   bindFrontImages();
   sayFront(frontHitsText(hits, confident));
+  // Đợt chup-mat-gon: màn 360×740, nút "Chụp mặt trước" đang trong màn hình thì kết quả nằm dưới mép màn hình
+  // (đo: gợi ý 1 ở ~1.240 px). Cuộn ÍT NHẤT để gợi ý 1 vừa hiện trọn (block "nearest"), chỉ sau lần chọn ảnh (không
+  // phải "Tìm lại"), chỉ khi có gợi ý; không đổi focus, không thu ô chữ.
+  frontBox.querySelector("button[data-front-code]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
 
 // Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối

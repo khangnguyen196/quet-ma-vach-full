@@ -473,18 +473,28 @@ table.cmp-table .empty { font-size: 13px; }
 .front-retry .btn { flex: 0 0 auto; min-height: 44px; }
 .front-raw { font-size: 13px; color: var(--warn); }
 .front-lead { font-weight: 700; }
-/* Khối "Không chắc chắn…" (vòng 3 nang-t1): màu theo biến :root (có bản tối); 3 nút xuống dòng gọn ở màn 360 px */
-.front-unsure { margin-bottom: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
+/* Khối "Không chắc chắn…" (vòng 3 nang-t1): màu theo biến :root (có bản tối). Đợt chup-mat-gon: khối đứng SAU danh
+   sách gợi ý (0 gợi ý thì đứng đầu); 3 nút một hàng: lưới 3 cột bằng nhau, chữ xuống tối đa 2 dòng, không cuộn ngang
+   ở màn 320 px (minmax(0, 1fr) cho phép cột co hẹp hơn chữ dài nhất). */
+.front-unsure { margin-top: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
+.front-unsure:first-child { margin-top: 0; }
 .front-unsure-text { font-weight: 700; color: var(--warn); }
-.front-unsure-actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
-.front-unsure-actions .btn { flex: 1 1 9em; min-height: 44px; padding: 6px 12px; color: var(--ink); text-decoration: none; }
-.front-unsure-actions a.btn { flex-basis: 100%; }
+.front-unsure-actions { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.front-unsure-actions .btn {
+  min-width: 0; min-height: 44px; padding: 4px 6px;
+  font-size: 15px; line-height: 1.25; color: var(--ink); text-decoration: none; overflow-wrap: anywhere;
+}
+/* Màn hẹp (320 px): chữ 14 px, đệm ngang 3 px để "Quét mã vạch" / "Nhập số mã" không quá 2 dòng (không rút chữ) */
+@media (max-width: 359px) {
+  .front-unsure-actions .btn { font-size: 14px; padding: 4px 3px; }
+}
 .front-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
 .front-hit {
   width: 100%; min-height: 76px; padding: 6px 10px 6px 6px;
   display: flex; gap: 10px; align-items: center; text-align: left;
   border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink);
   font: inherit; cursor: pointer;
+  scroll-margin: 12px; /* main.js cuộn tới gợi ý 1 (block "nearest"): chừa 12 px dưới mép màn hình */
 }
 .front-hit:hover { border-color: var(--rule-strong); }
 .front-hit .front-img, .front-hit .noimg { flex: 0 0 auto; width: 64px; height: 64px; }
