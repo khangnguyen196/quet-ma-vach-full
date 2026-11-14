@@ -100,9 +100,17 @@ def test_command_lines_bo_comment_heredoc_noi_dong():
               "# cả dòng comment | ống\n"
               "python3 - <<'PY'\nx = 1 | 2\nPY\n"
               "c \\\n  | d || true\n"
-              "echo \"### tiêu đề\"\n")
+              "echo \"### tiêu đề\"\n"
+              # "<<<" (here-string) và "<<" số học không mở heredoc: các dòng sau vẫn là lệnh (vòng 3)
+              "cmd <<<\"$x\"\n"
+              "e | f\n"
+              "tr a b <<< abc\n"
+              "i | j\n"
+              "echo $((1<<2))\n"
+              "g | h || true\n")
     got = [" ".join(line.split()) for line in _command_lines(script)]
-    assert got == ["a | b", "python3 - <<'PY'", "c | d || true", 'echo "### tiêu đề"']
+    assert got == ["a | b", "python3 - <<'PY'", "c | d || true", 'echo "### tiêu đề"',
+                   'cmd <<<"$x"', "e | f", "tr a b <<< abc", "i | j", "echo $((1<<2))", "g | h || true"]
 
 
 # --- /health "commit" (đợt cung-co vòng 2) -------------------------------------------------------------------------
