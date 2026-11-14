@@ -7,7 +7,9 @@ import {
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
   renderFrontResult, renderFrontHits, frontHitsText, FRONT_TEXT_ID
 } from "./render.js";
-import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText, after401View } from "./front-photo.js";
+import {
+  ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock
+} from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl, hitProducts } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText, confidenceOf } from "./front-rank.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
@@ -870,7 +872,9 @@ function updateFrontButton() {
   const st = frontButtonState(authState);
   frontInfo.hidden = st === "hidden";
   frontLabel.hidden = st !== "ready";
-  frontFile.disabled = st !== "ready";
+  // Đang đăng xuất (authState.busy, vd thư viện phải làm mới phiên qua mạng trước khi xóa): khóa ô chọn ảnh (đợt cung-co).
+  // setAuth gọi lại hàm này mỗi khi busy đổi; sự kiện chọn ảnh vẫn kiểm lại (frontPickBlock) vì bảng chọn ảnh có thể đã mở.
+  frontFile.disabled = st !== "ready" || authState.busy;
   btnFrontLogin.hidden = st !== "login" && st !== "loading";
   btnFrontLogin.disabled = st === "loading";
   btnFrontLogin.textContent = st === "loading" ? "Đang kiểm đăng nhập…" : "Đăng nhập để dùng";
@@ -954,8 +958,16 @@ frontFile.addEventListener("change", async (ev) => {
   const file = ev.target.files?.[0];
   ev.target.value = ""; // chọn lại đúng ảnh đó lần sau vẫn có sự kiện change
   if (!file) return;
-  if (frontButtonState(authState) !== "ready" || !authClient) { goToLogin(); return; }
-  if (busy) { sayFront("Đợi mở camera hoặc đọc ảnh mã xong rồi hãy chụp mặt trước.", true); return; }
+  // Chặn trước khi làm gì (đợt cung-co): đang đăng xuất thì chỉ nhắc chờ: không gửi, không làm mới phiên, không tải
+  // T1 / danh mục (manualSignOuts đã tăng nên nhánh 401 bên dưới không còn nhận ra lần đăng xuất này).
+  const block = frontPickBlock({
+    buttonState: authClient ? frontButtonState(authState) : "login",
+    appBusy: busy,
+    authBusy: authState.busy
+  });
+  if (block === "login") { goToLogin(); return; }
+  if (block === "authBusy") { sayFront("Đang đăng xuất, chờ xong rồi chọn ảnh lại.", true); return; }
+  if (block === "appBusy") { sayFront("Đợi mở camera hoặc đọc ảnh mã xong rồi hãy chụp mặt trước.", true); return; }
   if (scanner.running) { await stopCam(); setMsg(); } // như "Chụp ảnh mã": tắt camera trước
 
   frontAbort?.abort(); // lượt cũ đang gửi: hủy
@@ -965,7 +977,6 @@ frontFile.addEventListener("change", async (ev) => {
   const pick = ++frontPicks;
   const outs = manualSignOuts; // nhớ NGAY lúc chọn ảnh: bấm Đăng xuất lúc ảnh đang gửi thì nhánh 401 thấy số đã đổi
   const stale = () => id !== frontTurn;
-  frontRelogin.hidden = true;
   frontBox.hidden = true;
   frontBox.innerHTML = "";
   sayFront("Đang chuẩn bị ảnh…");
@@ -1038,8 +1049,9 @@ frontFile.addEventListener("change", async (ev) => {
       frontRelogin.hidden = !v.showRelogin;
       return;
     }
-    sayFront(frontErrorText(r), true);
-    frontRelogin.hidden = r.kind !== "auth";
+    const err = frontErrorView(r);
+    sayFront(err.text, true);
+    frontRelogin.hidden = !err.showRelogin;
     return;
   }
 
@@ -1060,9 +1072,12 @@ frontFile.addEventListener("change", async (ev) => {
   sayFront(frontHitsText(hits, confident));
   // Đợt chup-mat-gon: màn 360×740, nút "Chụp mặt trước" đang trong màn hình thì kết quả nằm dưới mép màn hình
   // (đo: gợi ý 1 ở ~1.240 px). Cuộn ÍT NHẤT để gợi ý 1 vừa hiện trọn (block "nearest"), chỉ sau lần chọn ảnh (không
-  // phải "Tìm lại"), chỉ khi có gợi ý; không đổi focus, không thu ô chữ.
-  const firstHit = frontBox.querySelector("button[data-front-code]");
-  if (firstHit) scrollToEl(firstHit, "nearest");
+  // phải "Tìm lại"); không đổi focus, không thu ô chữ. Đợt cung-co: 0 gợi ý thì cuộn tới khối "Không chắc chắn" (đo:
+  // khối + 3 nút ở ~930–1.060 px, ngoài màn 360×740).
+  const shown = [...frontBox.querySelectorAll("button[data-front-code]")];
+  const to = afterResultScroll({ hits: shown, fromRetry: false });
+  const target = to === "hit" ? shown[0] : to === "unsure" ? frontBox.querySelector(".front-unsure") : null;
+  if (target) scrollToEl(target, "nearest");
 });
 
 // Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối

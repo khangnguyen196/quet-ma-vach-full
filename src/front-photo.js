@@ -186,6 +186,42 @@ export function after401View({ samePick = false, manualSignOut = false, signedIn
   return { skip: false, text: frontErrorText({ ok: false, kind: "auth" }, { signedIn: still }), showRelogin: still };
 }
 
+/**
+ * Lỗi của sendOcr ở nhánh thường (không phải 401 + làm mới phiên) → { text, showRelogin } (đợt cung-co).
+ * text = frontErrorText(result); showRelogin (nút "Tới phần đăng nhập") chỉ khi lỗi kind "auth".
+ * Ví dụ: frontErrorView({ ok: false, kind: "rate", retryAfter: 5 }) → { text: "Gửi nhanh quá, chờ 5 giây rồi thử lại.", showRelogin: false }
+ */
+export function frontErrorView(result) {
+  return { text: frontErrorText(result), showRelogin: !!result && result.ok === false && result.kind === "auth" };
+}
+
+/**
+ * Sau khi vẽ kết quả "Chụp mặt trước", cuộn tới đâu (đợt cung-co)?
+ * hits: các gợi ý ĐÃ vẽ ra (mảng); fromRetry: true khi là "Tìm lại" (chữ người dùng sửa).
+ * Trả "hit" (cuộn tới gợi ý 1) | "unsure" (0 gợi ý: cuộn tới khối "Không chắc chắn") | null (không cuộn:
+ * "Tìm lại", hoặc hits không phải mảng).
+ * Ví dụ: afterResultScroll({ hits: [], fromRetry: false }) → "unsure"
+ */
+export function afterResultScroll({ hits, fromRetry = false } = {}) {
+  if (fromRetry || !Array.isArray(hits)) return null;
+  return hits.length > 0 ? "hit" : "unsure";
+}
+
+/**
+ * Sự kiện chọn ảnh "Chụp mặt trước" có bị chặn không (đợt cung-co)?
+ * buttonState: frontButtonState(authState) (main.js truyền "login" khi chưa có authClient); appBusy: app đang mở camera /
+ * đọc ảnh mã; authBusy: authState.busy (đang đăng xuất / đang chuyển sang trang đăng nhập).
+ * Trả "login" (không phải "ready": tới phần đăng nhập) | "authBusy" (đang đăng xuất: chỉ nhắc chờ, không gửi, không làm
+ * mới phiên) | "appBusy" (nhắc chờ app) | null (gửi được). Bận kiểu lạ (1, "x") vẫn tính là bận: chặn cho chắc.
+ * Ví dụ: frontPickBlock({ buttonState: "ready", appBusy: false, authBusy: true }) → "authBusy"
+ */
+export function frontPickBlock({ buttonState, appBusy = false, authBusy = false } = {}) {
+  if (buttonState !== "ready") return "login";
+  if (authBusy) return "authBusy";
+  if (appBusy) return "appBusy";
+  return null;
+}
+
 /** Số giây trong header Retry-After (chỉ dạng số nguyên); không có / sai → null. */
 function parseRetryAfter(value) {
   const s = String(value ?? "").trim();

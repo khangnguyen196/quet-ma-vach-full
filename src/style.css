@@ -478,6 +478,8 @@ table.cmp-table .empty { font-size: 13px; }
    ở màn 320 px (minmax(0, 1fr) cho phép cột co hẹp hơn chữ dài nhất). */
 .front-unsure { margin-top: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
 .front-unsure:first-child { margin-top: 0; }
+/* 0 gợi ý: main.js cuộn tới khối (block "nearest"), chừa 12 px dưới mép màn hình như gợi ý 1 (đợt cung-co) */
+.front-unsure { scroll-margin: 12px; }
 .front-unsure-text { font-weight: 700; color: var(--warn); }
 .front-unsure-actions { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .front-unsure-actions .btn {
