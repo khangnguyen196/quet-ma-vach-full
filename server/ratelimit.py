@@ -7,6 +7,8 @@ PROXY_COUNT tính từ PHẢI (proxy cuối cùng của mình ghi IP nó thấy 
 không tin). Header thiếu / ngắn hơn PROXY_COUNT -> dùng IP socket. Phần tử đã chọn: phần :cổng (nếu có) được bỏ
 ("1.2.3.4:51234" -> "1.2.3.4", "[v6]:443" -> "v6"); không phải IP hợp lệ (rác, rỗng, "unknown", cổng quá 5 chữ số,
 IPv6 có zone id "%…") -> dùng IP socket. "::ffff:a.b.c.d" (IPv4 gói trong IPv6) đếm như "a.b.c.d".
+Nhiều dòng header X-Forwarded-For: nối lại theo thứ tự nhận rồi tách như 1 dòng. Đếm lượt: IPv6 gộp theo mạng /64
+(rate_key).
 """
 from __future__ import annotations
 
@@ -52,18 +54,35 @@ def clean_ip(value: str) -> str | None:
     except ValueError:
         return None
     mapped = getattr(ip, "ipv4_mapped", None)
-    return str(mapped) if mapped else str(ip)
+    return str(mapped) if mapped is not None else str(ip)
 
 
 def client_ip(request, trust_proxy: bool, proxy_count: int = 1) -> str:
     sock = request.client.host if request.client else "unknown"
     if not trust_proxy:
         return sock
-    raw = request.headers.get("x-forwarded-for", "")
+    # Nhiều dòng header X-Forwarded-For (proxy thêm dòng mới thay vì nối vào dòng cũ): nối theo thứ tự nhận bằng ","
+    # rồi tách như 1 dòng (dòng sau = phần ghi sau, nằm ở cuối danh sách).
+    raw = ",".join(request.headers.getlist("x-forwarded-for"))
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     if len(parts) >= proxy_count:
         return clean_ip(parts[-proxy_count]) or sock
     return sock
+
+
+def rate_key(ip: str) -> str:
+    """Khóa đếm lượt theo IP: IPv6 -> mạng /64 chứa nó ("2001:db8:1:2::/64"), vì một máy thường có cả mạng /64 và đổi
+    64 bit cuối tùy ý (đếm từng địa chỉ thì lách được giới hạn). IPv4 (kể cả "::ffff:a.b.c.d" -> "a.b.c.d") giữ 1 địa
+    chỉ; chuỗi không phải IP ("unknown"…) giữ nguyên. Chỉ dùng ở chỗ đếm lượt; client_ip vẫn trả đúng 1 địa chỉ."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 4:
+        return str(addr)
+    if addr.ipv4_mapped is not None:
+        return str(addr.ipv4_mapped)
+    return str(ipaddress.ip_network(f"{addr}/64", strict=False))
 
 
 class SlidingWindowLimiter:

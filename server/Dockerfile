@@ -51,6 +51,11 @@ USER ocr
 # model hoặc thiếu thư viện hệ thống thì build hỏng ngay, lúc chạy không tải gì.
 RUN python -c "import ocr_engine as e; o = e.OcrEngine(1, True); print('nạp thử OK', round(o.load_seconds, 2), 'giây')"
 
+# Mã commit của ảnh (7 ký tự, workflow truyền --build-arg GIT_SHA=${GITHUB_SHA::7}); /health trả ở trường "commit"
+# (sai dạng / không truyền -> "unknown"). Đặt SAU mọi RUN / COPY nặng: mỗi commit một giá trị, không làm mất cache các lớp trên.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 EXPOSE 8080
 # Docker tự hỏi /health mỗi 30 giây (Python urllib, hạn 3 giây): không trả lời / không 200 / "ok" khác true -> "unhealthy".
 # Cổng: PORT thiếu HOẶC rỗng -> 8080 (giống ${PORT:-8080} của CMD).

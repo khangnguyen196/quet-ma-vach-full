@@ -48,8 +48,9 @@ jobs:
 
       # docker CLI có sẵn trên runner ubuntu (builder mặc định = BuildKit, driver docker): ảnh vào thẳng kho ảnh của máy
       # để docker run thử ngay, không cần thêm action build / buildx --load.
+      # GIT_SHA = 7 ký tự đầu của mã commit (trùng tag đẩy lên ghcr.io): /health của ảnh trả ở trường "commit".
       - name: Build ảnh
-        run: docker build -t "$LOCAL" server/
+        run: docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t "$LOCAL" server/
 
       - name: Chạy container (AUTH_MODE=off chỉ để chạy thử) và chờ /health
         run: |
@@ -73,6 +74,17 @@ jobs:
           echo "::error::/health không trả 200 sau 90 giây"
           docker logs ocr || true
           exit 1
+
+      # Ảnh vừa build phải báo đúng mã commit (chủ dự án mở <địa chỉ Azure>/health để biết Container App chạy ảnh nào).
+      # curl hay python hỏng thì bước đỏ (pipefail), không "|| true".
+      - name: /health trả đúng commit
+        run: |
+          got=$(curl -sf http://127.0.0.1:8080/health | python3 -c 'import json, sys; print(json.load(sys.stdin).get("commit", ""))')
+          echo "/health commit: $got (cần: ${GITHUB_SHA::7})"
+          if [ "$got" != "${GITHUB_SHA::7}" ]; then
+            echo "::error::/health trả commit \"$got\", cần \"${GITHUB_SHA::7}\""
+            exit 1
+          fi
 
       - name: Gửi ảnh thử chu.png (PNG) và xoay6.heic (HEIC, kiểm libheif trên Linux)
         run: |

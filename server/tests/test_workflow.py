@@ -114,7 +114,7 @@ def _step(pred) -> tuple:
 
 def test_build_truyen_git_sha_7_ky_tu():
     _, build = _step(lambda s: "docker build" in s.get("run", ""))
-    assert re.search(r'--build-arg\s+"?GIT_SHA=\$\{GITHUB_SHA::7\}"?', build["run"]), build["run"]
+    assert re.search(r'--build-arg\s+"?GIT_SHA="?\$\{GITHUB_SHA::7\}"?\s', build["run"]), build["run"]
 
 
 def test_buoc_so_commit_cua_health_truoc_khi_day_anh():

@@ -431,8 +431,8 @@ def test_health_khong_lo_bien_moi_truong(make_app, monkeypatch):
     monkeypatch.setenv("BIEN_BI_MAT_THU", "khong-duoc-lo")
     with TestClient(make_app()) as c:
         j = c.get("/health").json()
-    assert set(j) == {"ok", "modelLoaded", "engine", "version"}
-    assert j["ok"] is True and j["modelLoaded"] is True
+    assert set(j) == {"ok", "modelLoaded", "engine", "version", "commit"}  # commit: đợt cung-co vòng 2
+    assert j["ok"] is True and j["modelLoaded"] is True and j["commit"] == "unknown"
     assert "khong-duoc-lo" not in str(j)
 
 

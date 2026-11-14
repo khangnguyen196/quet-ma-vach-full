@@ -23,7 +23,7 @@ import auth
 import imaging
 import upload
 from ocr_engine import ENGINE_INFO
-from ratelimit import ConcurrencyGate, DailyLimiter, QueueFull, SlidingWindowLimiter, client_ip
+from ratelimit import ConcurrencyGate, DailyLimiter, QueueFull, SlidingWindowLimiter, client_ip, rate_key
 from settings import Settings, load_settings
 
 SERVER_VERSION = "0.1.0"
@@ -119,14 +119,17 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
     async def health(request: Request):
         eng = request.app.state.engine
         loaded = bool(eng is not None and getattr(eng, "loaded", False))
-        return {"ok": loaded, "modelLoaded": loaded, "engine": dict(ENGINE_INFO), "version": SERVER_VERSION}
+        # commit: 7 ký tự mã commit của ảnh Docker (biến GIT_SHA), sai dạng / không có -> "unknown"
+        return {"ok": loaded, "modelLoaded": loaded, "engine": dict(ENGINE_INFO), "version": SERVER_VERSION,
+                "commit": request.app.state.settings.commit}
 
     @app.post("/ocr")
     async def ocr(request: Request):
         st: Settings = request.app.state.settings
         # Thứ tự: giới hạn IP -> kiểm token -> giới hạn theo người dùng (phút, rồi ngày UTC) -> model -> hàng đợi -> đọc ảnh.
         # IP trước để ai gửi dồn dập token rác không làm máy chủ gọi Supabase liên tục.
-        ok, retry = request.app.state.limiter.check(client_ip(request, st.trust_proxy, st.proxy_count))
+        # IPv6 đếm theo mạng /64 (rate_key), IPv4 theo từng địa chỉ
+        ok, retry = request.app.state.limiter.check(rate_key(client_ip(request, st.trust_proxy, st.proxy_count)))
         if not ok:
             return error(429, f"Gửi quá nhiều ảnh (tối đa {st.rate_limit_per_min} ảnh mỗi phút). Thử lại sau {retry} giây.",
                          {"Retry-After": str(retry)})

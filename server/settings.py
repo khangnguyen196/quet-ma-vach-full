@@ -153,6 +153,16 @@ def supabase_config_problem(url: str, key: str) -> str | None:
     return None
 
 
+_COMMIT_RE = re.compile(r"[0-9a-f]{7}")
+
+
+def commit_from_env(raw) -> str:
+    """GIT_SHA (Dockerfile ARG, workflow truyền 7 ký tự đầu của mã commit) -> chuỗi /health trả về.
+    Đúng 7 ký tự 0-9 a-f thì giữ nguyên; thiếu / sai dạng (chữ hoa, dài / ngắn hơn, khoảng trắng…) -> "unknown":
+    không bao giờ trả nguyên chuỗi lạ từ biến môi trường."""
+    return raw if isinstance(raw, str) and _COMMIT_RE.fullmatch(raw) else "unknown"
+
+
 @dataclass(frozen=True)
 class Settings:
     ocr_threads: int = 8            # intra_op_num_threads của onnxruntime (inter_op luôn 1)
@@ -179,6 +189,7 @@ class Settings:
     daily_limit_per_user: int = 200
     cors_allow_localhost: bool = False
     allowed_origins: tuple = field(default=(DEFAULT_ORIGIN,))
+    commit: str = "unknown"         # 7 ký tự mã commit của ảnh Docker (GIT_SHA), /health trả về
 
     @property
     def max_body(self) -> int:
@@ -219,4 +230,5 @@ def load_settings(env=None) -> Settings:
         daily_limit_per_user=_int(env, "DAILY_LIMIT_PER_USER", 200, 0),
         cors_allow_localhost=_flag(env, "CORS_ALLOW_LOCALHOST"),
         allowed_origins=parse_allowed_origins(env.get("ALLOWED_ORIGINS")),
+        commit=commit_from_env(env.get("GIT_SHA")),
     )
