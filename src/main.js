@@ -816,7 +816,7 @@ let manualSignOuts = 0;
 authBox.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-auth]");
   if (!btn || !authClient || authState.busy) return;
-  if (btn.dataset.auth !== "login") manualSignOuts++;
+  if (btn.dataset.auth === "logout") manualSignOuts++;
   setAuth({ busy: true, error: "" });
   try {
     if (btn.dataset.auth === "login") {
@@ -883,7 +883,6 @@ function updateFrontButton() {
     ++frontTurn;
     frontAbort?.abort();
     sayFront();
-    frontRelogin.hidden = true;
     frontBox.hidden = true;
     frontBox.innerHTML = "";
   }
