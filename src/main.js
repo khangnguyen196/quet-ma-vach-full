@@ -7,7 +7,7 @@ import {
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
   renderFrontResult, renderFrontHits, frontHitsText, FRONT_TEXT_ID
 } from "./render.js";
-import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText } from "./front-photo.js";
+import { ocrServerUrl, prepareImage, sendOcr, frontButtonState, frontErrorText, after401View } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl, hitProducts } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText, confidenceOf } from "./front-rank.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
@@ -799,9 +799,14 @@ async function initAuth() {
   }
 }
 
+// Số lần người dùng TỰ bấm "Đăng xuất" (đợt chup-mat-gon): "Chụp mặt trước" nhớ số này trước khi làm mới phiên sau
+// 401; số đổi thì lượt đó bị bỏ (không hiện câu "hết hạn" lệch). Thư viện tự đăng xuất thì số không đổi.
+let manualSignOuts = 0;
+
 authBox.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-auth]");
   if (!btn || !authClient || authState.busy) return;
+  if (btn.dataset.auth !== "login") manualSignOuts++;
   setAuth({ busy: true, error: "" });
   try {
     if (btn.dataset.auth === "login") {
@@ -828,7 +833,8 @@ window.addEventListener("pageshow", (e) => {
 
 // ---- Chụp mặt trước (đợt chup-mat): ảnh mặt trước → máy chủ OCR (cần đăng nhập) → T1 → tối đa 5 gợi ý ----
 // Không đọc ảnh trên máy (chỉ thu nhỏ rồi gửi), không lấy dị ứng từ ảnh: bấm gợi ý thì tra mã như khi quét.
-// T1 (public/chup-mat-do/t1.mjs) và danh mục (danh-muc-vn.json) chỉ tải khi người dùng chọn ảnh lần đầu.
+// T1 (public/chup-mat-do/t1.mjs) và danh mục (danh-muc-vn.json) chỉ tải ở lần chọn ảnh đầu tiên được gửi đi: sau khi
+// thu nhỏ ảnh (prepareImage) và sau câu hỏi gửi nguyên bản; bấm "Không gửi" thì không tải (xem loadFrontSearch).
 const frontLabel = $("#frontLabel"), frontFile = $("#frontFile"), btnFrontLogin = $("#btnFrontLogin");
 const frontInfo = $("#frontInfo"), frontHint = $("#frontHint"), frontMsg = $("#frontMsg");
 const frontRelogin = $("#frontRelogin"), btnFrontRelogin = $("#btnFrontRelogin"), frontBox = $("#frontBox");
@@ -839,10 +845,14 @@ const ocrPick = ocrServerUrl({
 });
 if (ocrPick.warning) console.warn(ocrPick.warning);
 
-/** Dòng trạng thái của "Chụp mặt trước": chỉ đổi chữ (textContent), chữ máy chủ không bao giờ thành HTML. */
+/**
+ * Dòng trạng thái của "Chụp mặt trước": chỉ đổi chữ (textContent), chữ máy chủ không bao giờ thành HTML.
+ * Câu bị xóa / thay thì nút "Tới phần đăng nhập" ẩn theo (nút chỉ đi kèm câu lỗi 401; chỗ hiện nút gọi SAU sayFront).
+ */
 function sayFront(text = "", warn = false) {
   frontMsg.textContent = text;
   frontMsg.classList.toggle("warn", warn);
+  frontRelogin.hidden = true;
 }
 
 /** Hiện nút theo frontButtonState(authState): hidden / loading / login / ready. */
@@ -855,7 +865,8 @@ function updateFrontButton() {
   btnFrontLogin.disabled = st === "loading";
   btnFrontLogin.textContent = st === "loading" ? "Đang kiểm đăng nhập…" : "Đăng nhập để dùng";
   frontHint.hidden = st !== "login";
-  if (st === "ready") frontRelogin.hidden = true;
+  // Không ẩn "Tới phần đăng nhập" khi st === "ready" (đợt chup-mat-gon): TOKEN_REFRESHED gọi lại hàm này trong lúc câu
+  // lỗi 401 còn hiện. Nút ẩn khi chọn ảnh mới, khi câu bị xóa / thay (sayFront) hoặc khi thành login / hidden (dưới).
   // Đăng xuất / hết phiên / không có đăng nhập: dọn như lúc ẩn (hủy lượt đang gửi, xóa gợi ý của người trước).
   // loading → ready không dọn.
   if (st === "hidden" || st === "login") {
@@ -987,15 +998,20 @@ frontFile.addEventListener("change", async (ev) => {
   if (!r.ok) {
     if (r.kind === "auth" && authClient) {
       // 401: thử làm mới phiên ĐÚNG 1 lần; KHÔNG tự gửi lại ảnh (không tốn thêm lượt máy chủ). Làm mới lỗi thì thư viện
-      // có thể tự đăng xuất (SIGNED_OUT → updateFrontButton dọn và tăng frontTurn), nên ở đây xét frontPicks:
-      // chỉ bỏ khi người dùng đã chọn ảnh khác. Không ghi token / phiên ra console.
+      // có thể tự đăng xuất (SIGNED_OUT → updateFrontButton dọn và tăng frontTurn), nên ở đây xét frontPicks (chọn ảnh
+      // khác) và manualSignOuts (người dùng TỰ bấm Đăng xuất trong lúc chờ): một trong hai đổi thì bỏ lượt, không câu,
+      // không nút (after401View). Hết phiên chỉ còn nút "Đăng nhập để dùng". Không ghi token / phiên ra console.
+      const outs = manualSignOuts;
+      const view = (signedIn) => after401View({ samePick: pick === frontPicks, manualSignOut: manualSignOuts !== outs, signedIn });
       sayFront("Đang kiểm lại phiên đăng nhập…");
       try {
         await authClient.auth.refreshSession();
       } catch (e) {
         console.warn("Chụp mặt trước: không làm mới được phiên đăng nhập", e?.name || "");
       }
-      if (pick !== frontPicks) return;
+      // bỏ lượt mà vẫn là lượt chọn ảnh mới nhất (vd bấm Đăng xuất nhưng đăng xuất lỗi): xóa câu "Đang kiểm lại…"
+      const drop = () => { if (pick === frontPicks) sayFront(); };
+      if (view(false).skip) { drop(); return; }
       let signedIn = false;
       try {
         const { data } = await authClient.auth.getSession();
@@ -1003,9 +1019,10 @@ frontFile.addEventListener("change", async (ev) => {
       } catch (e) {
         console.warn("Chụp mặt trước: không đọc được phiên đăng nhập", e?.name || "");
       }
-      if (pick !== frontPicks) return;
-      sayFront(frontErrorText(r, { signedIn }), true);
-      frontRelogin.hidden = false;
+      const v = view(signedIn);
+      if (v.skip) { drop(); return; }
+      sayFront(v.text, true);
+      frontRelogin.hidden = !v.showRelogin;
       return;
     }
     sayFront(frontErrorText(r), true);

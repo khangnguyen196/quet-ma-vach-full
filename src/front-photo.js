@@ -170,6 +170,22 @@ export function frontErrorText(result, { signedIn = false } = {}) {
   }
 }
 
+/**
+ * Sau khi máy chủ trả 401 và main.js đã làm mới phiên 1 lần (đợt chup-mat-gon): vẽ gì?
+ * samePick: người dùng CHƯA chọn ảnh khác trong lúc chờ (chỉ true thật mới tính);
+ * manualSignOut: người dùng đã TỰ bấm Đăng xuất trong lúc chờ (khác với thư viện tự đăng xuất khi làm mới lỗi);
+ * signedIn: sau khi làm mới, app còn phiên không.
+ * Trả { skip, text, showRelogin }: skip → không vẽ câu, không hiện nút; text lấy từ frontErrorText;
+ * showRelogin (nút "Tới phần đăng nhập") chỉ khi còn phiên: hết phiên thì đã có sẵn nút "Đăng nhập để dùng".
+ * Ví dụ: after401View({ samePick: true, manualSignOut: false, signedIn: false })
+ *   → { skip: false, text: "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.", showRelogin: false }
+ */
+export function after401View({ samePick = false, manualSignOut = false, signedIn = false } = {}) {
+  if (samePick !== true || manualSignOut === true) return { skip: true, text: "", showRelogin: false };
+  const still = signedIn === true;
+  return { skip: false, text: frontErrorText({ ok: false, kind: "auth" }, { signedIn: still }), showRelogin: still };
+}
+
 /** Số giây trong header Retry-After (chỉ dạng số nguyên); không có / sai → null. */
 function parseRetryAfter(value) {
   const s = String(value ?? "").trim();
