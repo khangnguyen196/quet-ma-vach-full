@@ -960,11 +960,9 @@ frontFile.addEventListener("change", async (ev) => {
   if (!file) return;
   // Chặn trước khi làm gì (đợt cung-co): đang đăng xuất thì chỉ nhắc chờ: không gửi, không làm mới phiên, không tải
   // T1 / danh mục (manualSignOuts đã tăng nên nhánh 401 bên dưới không còn nhận ra lần đăng xuất này).
-  const block = frontPickBlock({
-    buttonState: authClient ? frontButtonState(authState) : "login",
-    appBusy: busy,
-    authBusy: authState.busy
-  });
+  // `!authClient` kiểm riêng, thẳng ở đây: bản build không có biến Supabase thì bundler bỏ hẳn phần dưới (nhỏ hơn ~14 KB).
+  if (!authClient) { goToLogin(); return; }
+  const block = frontPickBlock({ buttonState: frontButtonState(authState), appBusy: busy, authBusy: authState.busy });
   if (block === "login") { goToLogin(); return; }
   if (block === "authBusy") { sayFront("Đang đăng xuất, chờ xong rồi chọn ảnh lại.", true); return; }
   if (block === "appBusy") { sayFront("Đợi mở camera hoặc đọc ảnh mã xong rồi hãy chụp mặt trước.", true); return; }
