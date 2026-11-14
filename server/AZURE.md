@@ -66,7 +66,8 @@ Vào `https://portal.azure.com` → ô tìm kiếm trên cùng gõ **Container A
 - **Image source**: **Docker Hub or other registries**.
 - **Image type**: **Public**.
 - **Registry login server**: `ghcr.io`
-- **Image and tag**: `khangnguyen196/quet-ma-vach-ocr:latest`
+- **Image and tag**: `khangnguyen196/quet-ma-vach-ocr:<7 ký tự mã commit>` (tag ghim, cách tìm ở mục 4a; `latest` cũng chạy
+  nhưng không biết chắc đang chạy bản nào)
 - **CPU and Memory**: **1 CPU core, 2 Gi memory**.
 - **Environment variables** (bấm **Add** từng dòng; **Source** = Manual entry):
 
@@ -115,16 +116,48 @@ Thử từ khu "Thử máy chủ OCR (chỉ khi chạy dev)": thêm vào `.env` 
 
 ## 4. Cập nhật khi có ảnh mới
 
-Mỗi lần `main` có đổi trong `server/`, workflow "Server image" đẩy ảnh mới với tag `latest` (và tag mã commit).
-Commit chỉ đổi tài liệu trong `server/` (vd file này) cũng làm workflow đẩy ảnh mới; khi mã máy chủ không đổi thì không
-cần tạo revision mới. Container App thường không tự kéo lại `latest`; Microsoft khuyên dùng tag cố định, xem việc để sau
-(h) của đợt `may-chu-2` ở `PLAN.md`. Để chạy ảnh mới:
+Mỗi lần `main` có đổi trong `server/`, workflow "Server image" đẩy ảnh mới với 2 tag: `latest` và **7 ký tự đầu của mã
+commit** (vd `a295a86`). Commit chỉ đổi tài liệu trong `server/` (vd file này) cũng làm workflow đẩy ảnh mới; khi mã máy
+chủ không đổi thì không cần trỏ sang ảnh đó.
 
-1. Container App → **Application** → **Revisions and replicas** (hoặc **Containers**) → **Create new revision**
-   (hoặc **Edit and deploy**).
-2. Không cần đổi gì (ảnh vẫn `…:latest`) → **Create**. Revision mới kéo ảnh `latest` hiện tại.
-3. Muốn chạy đúng 1 bản cụ thể: sửa **Image and tag** thành `khangnguyen196/quet-ma-vach-ocr:<7 ký tự commit>` (xem tag ở
-   trang package hoặc summary của workflow).
+Đẩy ảnh mới lên ghcr.io KHÔNG tự tạo revision mới: theo tài liệu Microsoft, revision mới chỉ được tạo khi phần
+`template` của Container App đổi (ảnh, biến môi trường, scale…), mà đẩy ảnh mới cùng tag `latest` thì `template` không
+đổi. Tài liệu cũng khuyên **tránh tag cố định như `latest`** (dễ dính cache, khó biết đang chạy bản nào) và dùng tag riêng
+cho mỗi lần đưa lên, vd mã commit Git. Tài liệu KHÔNG nói rõ khi máy chủ thức dậy từ 0 bản thì có kéo lại `latest` mới
+nhất không (chưa kiểm được), nên luôn **ghim tag mã commit** như mục 4a. Nguồn (đọc 14/11/2026):
+https://learn.microsoft.com/en-us/azure/container-apps/containers (bảng Configuration, dòng `image`) và
+https://learn.microsoft.com/en-us/azure/container-apps/revisions (mục "Change types").
+
+### 4a. Trỏ Container App sang ảnh mới (ghim tag mã commit, không dùng latest)
+
+**Tìm tag**: ảnh mới chỉ có sau khi lượt workflow **Server image** trên `main` chạy xanh. Lấy tag 1 trong 2 cách:
+- GitHub → tab **Actions** → workflow **Server image** → bấm lượt chạy xanh mới nhất của `main` → trang tóm tắt (Summary)
+  có dòng `### Ảnh Docker máy chủ OCR (commit <7 ký tự>)` và dòng "Đã đẩy: `…:latest`, `…:<7 ký tự>`". 7 ký tự đó là tag.
+- Hoặc trang package: `https://github.com/users/khangnguyen196/packages/container/package/quet-ma-vach-ocr` → danh sách
+  tag (tag mới nhất đứng đầu, cạnh `latest`).
+
+**Trỏ sang tag** (6 biến môi trường giữ nguyên, KHÔNG xóa / sửa biến nào):
+1. Portal → Container App **quet-ma-vach-ocr** → menu trái **Application** → **Containers** (hoặc **Revisions and
+   replicas**).
+2. Bấm **Edit and deploy** (trên cùng).
+3. Tab **Container image**: tích vào dòng container `ocr` → bấm **Edit** (hoặc bấm thẳng tên container) → khung bên phải
+   mở ra.
+4. **Image source** vẫn là **Docker Hub or other registries**, **Image type** Public, **Registry login server** `ghcr.io`.
+   Sửa **Image and tag** thành `khangnguyen196/quet-ma-vach-ocr:<7 ký tự>` (vd `khangnguyen196/quet-ma-vach-ocr:a295a86`).
+   Kiểm phần **Environment variables** vẫn đủ 6 dòng (`AUTH_MODE`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
+   `ALLOWED_ORIGINS`, `TRUST_PROXY`, `PROXY_COUNT`); CPU / Memory vẫn 1 CPU core, 2 Gi.
+5. Bấm **Save** (đóng khung container) → bấm **Create** ở cuối trang (tạo revision mới). Tab Scale không đổi (Min 0, Max 1).
+6. Chờ: **Application** → **Revisions and replicas** → revision mới (tên có đuôi mới, cột Created mới nhất) có
+   **Running status** = **Running** (hoặc "Scale to 0" nếu không có ai gọi) và **Provision status** = **Provisioned**;
+   revision cũ tự thành Inactive (chế độ Single). Thường 1–3 phút.
+7. Mở `https://<địa chỉ app>/health` (lần đầu chờ máy chủ thức dậy). Phải thấy `"ok":true` và **`"commit":"<7 ký tự>"`
+   đúng tag vừa đặt**. Thấy `"commit":"unknown"` hoặc không có trường `commit` là đang chạy ảnh cũ (trước đợt
+   `cung-co`) hoặc ảnh không build bằng workflow: kiểm lại bước 4.
+
+**Quay lại ảnh cũ nếu lỗi** (revision mới "Failed" / "Provisioning failed", `/health` không trả lời, app báo lỗi): làm lại
+các bước 1–5 với **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:a295a86` (ảnh đang chạy ổn trước đợt `cung-co`;
+ảnh này chưa có trường `commit` trong `/health`). Hoặc: **Revisions and replicas** → tích revision cũ → **Activate**
+(nếu đang ở chế độ Single thì cách sửa ảnh như trên chắc hơn). Xem lỗi khởi động: **Monitoring** → **Log stream**.
 
 ## 5. Tạm tắt
 
@@ -140,7 +173,7 @@ Container App lẫn môi trường. Ảnh trên ghcr.io vẫn còn (xóa ở Git
 
 | Thấy gì | Vì sao | Sửa |
 |---|---|---|
-| Revision "Failed" / "Provisioning failed", log có `unauthorized`, `denied`, `manifest unknown` khi kéo ảnh | package trên ghcr.io còn Private, hoặc gõ sai tên ảnh / tag, hoặc workflow trên `main` chưa chạy xanh lần nào | làm mục 1; kiểm **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:latest`, registry `ghcr.io` |
+| Revision "Failed" / "Provisioning failed", log có `unauthorized`, `denied`, `manifest unknown` khi kéo ảnh | package trên ghcr.io còn Private, hoặc gõ sai tên ảnh / tag, hoặc workflow trên `main` chưa chạy xanh lần nào | làm mục 1; kiểm **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:<7 ký tự>` (tag có thật trên trang package, mục 4a), registry `ghcr.io` |
 | Revision không chạy được, /health không trả lời, bản chạy khởi động lại liên tục | máy chủ không khởi động vì thiếu / sai `SUPABASE_URL` hoặc `SUPABASE_PUBLISHABLE_KEY` (câu lỗi chỉ nêu tên biến), dán nhầm khóa bí mật, hoặc `ALLOWED_ORIGINS` sai dạng (có `*`, có đường dẫn) | sửa biến ở **Containers** → **Edit and deploy** → tab Container → Environment variables → tạo revision mới. Xem lỗi: menu **Monitoring** → **Log stream** (xem trực tiếp lúc revision đang khởi động; không lưu lại vì đã chọn "Don't save logs") |
 | Trang github.io / localhost báo "lỗi mạng", tab Network thấy lỗi CORS | nguồn của trang không có trong `ALLOWED_ORIGINS` (phải đúng `https://khangnguyen196.github.io`, không "/" cuối, không đường dẫn `/quet-ma-vach-full`) | sửa `ALLOWED_ORIGINS`, tạo revision mới |
 | Lần gọi đầu rất chậm rồi các lần sau nhanh | máy chủ đang ngủ (scale về 0) nên phải bật + nạp model; ngủ lại sau khoảng 5 phút không có yêu cầu | bình thường với scale tối thiểu 0 (để không tốn tiền); app / khu thử nên chờ lâu hơn lần đầu. Dự kiến 20–60 giây; thực đo 13/11/2026 (2 lần ngủ) lần thức dậy khoảng 6–8 giây (7,70 s và 6,43 s), sau đó khoảng 0,3 giây (bảng đo ở `server/README.md`) |
@@ -179,8 +212,10 @@ Máy chủ lấy phần tử thứ `PROXY_COUNT` tính từ PHẢI khi `TRUST_PR
 hạn theo IP), người này gửi nhiều làm người khác bị 429. (uvicorn chạy `--no-proxy-headers`, nên `TRUST_PROXY` là công
 tắc duy nhất.) Phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`), nên
 dù Azure có ghi kèm cổng thì cùng một người vẫn đếm chung 1 IP; `::ffff:a.b.c.d` đếm như `a.b.c.d`; phần tử không phải
-IP hợp lệ (kể cả cổng quá 5 chữ số, IPv6 có zone id `%…`) -> dùng IP socket. Phần B
-không đọc được Azure ghi dạng nào từ bên ngoài (việc để sau (d) ở PLAN.md).
+IP hợp lệ (kể cả cổng quá 5 chữ số, IPv6 có zone id `%…`) -> dùng IP socket. Nhiều dòng header `X-Forwarded-For` được nối
+lại theo thứ tự nhận (dòng sau ở cuối) rồi mới lấy phần tử thứ `PROXY_COUNT` từ phải. Đếm lượt theo IP: IPv6 gộp theo mạng
+`/64` (một máy đổi 64 bit cuối tùy ý vẫn tính là 1). Phần B
+không đọc được Azure ghi dạng nào từ bên ngoài (1 dòng hay nhiều dòng, có kèm cổng không): chưa kiểm được.
 
 ## Container Apps không dùng HEALTHCHECK của Docker
 

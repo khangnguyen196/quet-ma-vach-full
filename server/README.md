@@ -89,9 +89,13 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 ### `GET /health`
 
 ```json
-{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0" }
+{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0", "commit": "a295a86" }
 ```
 
+`commit` (đợt `cung-co`): 7 ký tự đầu của mã commit Git mà ảnh Docker được build từ đó (biến `GIT_SHA`, Dockerfile
+`ARG GIT_SHA`, workflow truyền `--build-arg GIT_SHA=${GITHUB_SHA::7}` và kiểm `/health` trả đúng). Biến thiếu / sai dạng
+(không đúng 7 ký tự `0-9a-f`) -> `"unknown"` (chạy thử trên máy luôn là `"unknown"`). Mở `<địa chỉ Azure>/health` để biết
+Container App đang chạy ảnh nào (`server/AZURE.md` mục 4a). `version` giữ `"0.1.0"`.
 Không chạy OCR, không trả biến môi trường. Vẫn trả lời khi đang OCR (OCR chạy trong threadpool).
 
 ### `POST /ocr`
@@ -241,6 +245,19 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   Khi `TRUST_PROXY=1`: phần :cổng (nếu có) được bỏ (`1.2.3.4:51234` -> `1.2.3.4`, `[2001:db8::1]:443` -> `2001:db8::1`,
   IPv6 trần giữ nguyên), nên cùng IP khác cổng vẫn đếm chung; `::ffff:a.b.c.d` (IPv4 gói trong IPv6) đếm như `a.b.c.d`;
   phần tử không phải IP hợp lệ (rác, cổng quá 5 chữ số, IPv6 có zone id `%…`) -> IP socket (`tests/test_client_ip.py`).
+  Nhiều dòng header `X-Forwarded-For` (đợt `cung-co`): nối lại theo thứ tự nhận bằng "," rồi tách như 1 dòng (dòng sau ở
+  cuối, khớp quy ước proxy ghi thêm vào cuối), nên `PROXY_COUNT=1` lấy phần tử cuối của dòng cuối. Ingress Azure ghi 1 dòng
+  hay nhiều dòng: chưa kiểm được.
+- **Đếm lượt theo IP, IPv6 gộp `/64`** (đợt `cung-co`, `ratelimit.rate_key`): IPv6 (từ socket hay từ `X-Forwarded-For`) đếm
+  theo mạng `/64` chứa nó (`2001:db8:1:2::a` và `2001:db8:1:2:ffff::b` là 1), vì một máy thường có cả mạng `/64` và tự đổi
+  64 bit cuối (địa chỉ tạm thời); đếm từng địa chỉ thì lách được giới hạn. IPv4 (kể cả `::ffff:a.b.c.d`) vẫn đếm từng địa
+  chỉ. Mặt trái: những máy chung một mạng `/64` (cùng nhà / cùng mạng di động cấp chung) chia nhau 20 ảnh / phút.
+- **Hạn giờ kết nối chậm** (đợt `cung-co`, uvicorn 0.54.0, `python -m uvicorn --help`): uvicorn chỉ có
+  `--timeout-keep-alive` (mặc định 5 giây: đóng kết nối keep-alive rỗi GIỮA các yêu cầu), `--timeout-graceful-shutdown`,
+  `--timeout-worker-healthcheck` (mặc định 5) và `--ws-ping-timeout` (WebSocket); KHÔNG có tùy chọn hạn giờ cho lúc khách
+  gửi phần header chậm. Phần thân ảnh đã có `BODY_TIMEOUT_S=30` (408, không đổi). Kết nối gửi header thật chậm chỉ bị
+  chặn bởi `--limit-concurrency 16` (giữ tối đa 16 chỗ) và ingress (Envoy) của Azure đứng trước máy chủ; ingress có hạn
+  giờ đọc header hay không: chưa kiểm. Không thêm proxy riêng (việc để sau).
 - **CORS**: chỉ khớp chính xác các nguồn trong `ALLOWED_ORIGINS` (mặc định `https://khangnguyen196.github.io`) (+ localhost
   khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;
@@ -261,7 +278,7 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
 
 ```powershell
 cd server
-D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (391 test)
+D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q --basetemp D:\tmp\may-chu-1\pytest-tmp              # engine giả + uvicorn thật (439 test)
 D:\tmp\may-chu-1\venv\Scripts\python -m pytest -q -m real_model --basetemp D:\tmp\may-chu-1\pytest-tmp # model thật (3 test)
 ```
 
@@ -274,6 +291,12 @@ test `real_model` FAIL.
   `tests/fixtures/chu.png`. Vòng 2: `tests/test_workflow.py` (workflow server-image chạy `run` bằng bash có pipefail),
   `tests/test_client_ip.py` (`X-Forwarded-For` bỏ :cổng), `tests/test_uvicorn.py` thêm HEALTHCHECK với `PORT` rỗng. Vòng 3: `tests/test_client_ip.py` thêm cổng quá dài
   (không lỗi 500), IPv6 có zone id, `::ffff:a.b.c.d`.
+- Đợt `cung-co` vòng 2: `tests/test_rate_key.py` (IPv6 gộp `/64` khi đếm lượt, qua socket và `X-Forwarded-For`),
+  `tests/test_health_commit.py` (`/health` `commit` từ `GIT_SHA`), `tests/test_client_ip.py` thêm nhiều dòng
+  `X-Forwarded-For`, ca giữ luật (cổng chữ số Ả Rập, `[]`, `[[…]]`, `[::1]:`), 2 cổng dài khác nhau / `::ffff:` qua app
+  (cùng 1 khóa -> 429); `tests/test_dockerfile.py` (`ARG GIT_SHA` sau mọi RUN / COPY); `tests/test_workflow.py`
+  (`--build-arg GIT_SHA`, bước so `commit` của `/health`, luật "ống `|` được phép hỏng phải có `|| true`": mỗi ống của
+  workflow phải được phân loại trong `PIPES` của test, ống mới chưa phân loại thì test đỏ).
 - Ảnh CI `tests/fixtures/chu.png` (3 dòng chữ in, 13 KB, tự vẽ) tạo bằng venv máy chủ:
   `D:\tmp\may-chu-1\venv\Scripts\python server\tests\fixtures\tao_chu.py`. Danh sách chữ phải đọc ra (`CHU_PNG_WORDS`)
   nằm trong `tao_chu.py`, dùng chung cho test và workflow.
