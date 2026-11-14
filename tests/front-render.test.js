@@ -180,13 +180,34 @@ describe("khối 'Không chắc chắn…' (vòng 3 nang-t1: confidenceOf của 
   const UNSURE = /Không chắc chắn, có thể sản phẩm chưa có trong danh mục/;
   const hits5 = ["8934572260543", "8934588022111", "8934614031322", "8934673300759", "8934803043891"].map((c) => hit(c));
 
-  test("confident false (hoặc không truyền) + có gợi ý → khối + vẫn 5 gợi ý + câu 'Kết quả gợi ý…'; khối đứng trước danh sách", () => {
+  // Đợt chup-mat-gon: ĐỔI KỲ VỌNG (không nới): khối trước đây đứng trước danh sách, nay danh sách đứng TRƯỚC khối
+  // (gợi ý 1 lên cao); 0 gợi ý thì khối vẫn đứng đầu .front-hits (test "không có gợi ý" ở trên giữ nguyên).
+  test("confident false (hoặc không truyền) + có gợi ý → khối + vẫn 5 gợi ý + câu 'Kết quả gợi ý…'; danh sách đứng trước khối", () => {
     for (const html of [render.renderFrontHits(hits5, { confident: false }), render.renderFrontHits(hits5), R({ lines: ["a"], hits: hits5 })]) {
       assert.match(text(html), UNSURE);
       assert.match(text(html), /Kết quả gợi ý, hãy chọn đúng sản phẩm/);
       assert.equal((html.match(/data-front-code=/g) || []).length, 5);
-      assert.ok(html.indexOf("front-unsure") < html.indexOf("front-list"));
+      assert.ok(html.indexOf("front-list") < html.indexOf("front-unsure"), "danh sách phải đứng trước khối");
+      assert.ok(html.indexOf("front-lead") < html.indexOf("front-list"));
     }
+    // .front-hits bắt đầu bằng câu "Kết quả gợi ý…" (không phải khối)
+    assert.match(R({ lines: ["a"], hits: hits5 }), /<div class="front-hits"><p class="front-lead">/);
+  });
+
+  test("thứ tự data-front-code trong HTML trùng thứ tự hits đầu vào (không xếp lại thứ hạng)", () => {
+    const order = ["8934803043891", "8934572260543", "8934673300759", "8934588022111", "8934614031322"];
+    for (const confident of [undefined, false, true]) {
+      for (const html of [render.renderFrontHits(order.map((c) => hit(c)), { confident }), R({ lines: ["a"], hits: order.map((c) => hit(c)), confident })]) {
+        assert.deepEqual([...html.matchAll(/data-front-code="([^"]*)"/g)].map((m) => m[1]), order);
+      }
+    }
+    // confident true + có gợi ý: vẫn không có khối, sau danh sách cũng không
+    const sure = render.renderFrontHits(order.map((c) => hit(c)), { confident: true });
+    assert.doesNotMatch(sure, /front-unsure|data-front-action/);
+    assert.ok(sure.endsWith("</ul>"));
+    // mã sai bị bỏ nhưng phần còn lại giữ thứ tự
+    const mixed = ["8934614031322", "abc", "8934572260543"].map((c) => hit(c));
+    assert.deepEqual([...render.renderFrontHits(mixed).matchAll(/data-front-code="([^"]*)"/g)].map((m) => m[1]), ["8934614031322", "8934572260543"]);
   });
 
   test("confident true + có gợi ý → không có khối (như trước), không có nút data-front-action", () => {
@@ -208,7 +229,14 @@ describe("khối 'Không chắc chắn…' (vòng 3 nang-t1: confidenceOf của 
     for (const b of [scan[0], code[0]]) assert.match(b, /type="button"/);
     const a = html.match(/<a ([^>]*)>([^<]*)<\/a>/);
     assert.ok(a);
-    assert.equal(a[2], "Góp sản phẩm lên Open Food Facts");
+    // Đợt chup-mat-gon: ĐỔI KỲ VỌNG chữ hiển thị "Góp sản phẩm lên Open Food Facts" → "Góp sản phẩm" (3 nút một hàng);
+    // tên đọc đầy đủ chuyển sang aria-label và phải chứa chữ hiển thị (WCAG 2.5.3).
+    assert.equal(a[2], "Góp sản phẩm");
+    const aria = a[1].match(/aria-label="([^"]*)"/);
+    assert.ok(aria, "link góp phải có aria-label");
+    assert.equal(aria[1], "Góp sản phẩm lên Open Food Facts");
+    assert.ok(aria[1].includes(a[2]), "aria-label phải chứa chữ hiển thị");
+    assert.ok(aria[1].startsWith(a[2]), "aria-label nên bắt đầu bằng chữ hiển thị");
     const href = render.OFF_ADD_URL.replace(/&/g, "&amp;");
     assert.ok(a[1].includes(`href="${href}"`), a[1]);
     assert.match(a[1], /class="btn"/);
