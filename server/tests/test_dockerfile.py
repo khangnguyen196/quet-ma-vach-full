@@ -61,6 +61,21 @@ def test_nguoi_dung_khong_phai_root_va_kiem_sha256_luc_build():
         assert old not in src
 
 
+def test_git_sha_arg_env_dat_sau_cac_buoc_nang():
+    """ARG GIT_SHA + ENV GIT_SHA=$GIT_SHA (cho /health "commit", đợt cung-co vòng 2) đứng SAU pip install, COPY mã và các
+    bước RUN nặng: đổi mã commit không làm mất cache các lớp đó."""
+    lines = _dockerfile().splitlines()
+    arg = [i for i, ln in enumerate(lines) if re.fullmatch(r"ARG GIT_SHA=unknown", ln.strip())]
+    env = [i for i, ln in enumerate(lines) if re.fullmatch(r"ENV GIT_SHA=\$GIT_SHA", ln.strip())]
+    assert len(arg) == 1 and len(env) == 1, "cần đúng 1 dòng ARG GIT_SHA=unknown và 1 dòng ENV GIT_SHA=$GIT_SHA"
+    assert arg[0] < env[0]
+    heavy = [i for i, ln in enumerate(lines) if ln.startswith(("RUN ", "COPY "))]
+    assert any("pip install" in lines[i] for i in heavy)
+    assert arg[0] > max(heavy), "ARG GIT_SHA phải đứng sau mọi RUN / COPY (pip install, mã, kiểm model)"
+    # không dùng GIT_SHA ở lệnh nào khác (chỉ ENV cho máy chủ đọc)
+    assert sum("GIT_SHA" in ln for ln in lines if not ln.lstrip().startswith("#")) == 2
+
+
 def test_dockerignore_khong_lot_tests_env():
     lines = [ln.strip() for ln in (SERVER / ".dockerignore").read_text(encoding="utf-8").splitlines()]
     for must in ("tests/", ".env", ".env.*", "__pycache__/", ".venv/", "venv/"):
