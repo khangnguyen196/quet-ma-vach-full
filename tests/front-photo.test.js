@@ -383,6 +383,48 @@ describe("frontErrorText: lỗi sendOcr → câu tiếng Việt cho giao diện"
   });
 });
 
+// Đợt chup-mat-gon (gợi ý 2 + 3 của reviewer vòng 3 đợt chup-mat): sau 401 + 1 lần làm mới phiên, main.js hỏi
+// after401View xem có vẽ câu / hiện nút "Tới phần đăng nhập" không.
+describe("after401View: quyết định sau 401 + làm mới phiên", () => {
+  const STILL = "Máy chủ không nhận phiên đăng nhập này. Hãy chọn ảnh lại để thử; nếu vẫn lỗi, bấm Đăng xuất rồi đăng nhập lại.";
+  const EXPIRED = "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại.";
+  const SKIP = { skip: true, text: "", showRelogin: false };
+
+  test("là hàm", () => {
+    assert.equal(typeof mod.after401View, "function");
+  });
+
+  test("cùng lượt chọn ảnh, không tự đăng xuất, vẫn còn phiên → câu 'Máy chủ không nhận phiên…' + nút Tới phần đăng nhập", () => {
+    assert.deepEqual(mod.after401View({ samePick: true, manualSignOut: false, signedIn: true }), { skip: false, text: STILL, showRelogin: true });
+  });
+
+  test("hết phiên (thư viện tự đăng xuất khi làm mới) → câu 'hết hạn', KHÔNG hiện nút Tới phần đăng nhập (chỉ còn 'Đăng nhập để dùng')", () => {
+    assert.deepEqual(mod.after401View({ samePick: true, manualSignOut: false, signedIn: false }), { skip: false, text: EXPIRED, showRelogin: false });
+  });
+
+  test("người dùng đã chọn ảnh khác → bỏ lượt (không câu, không nút), dù còn phiên hay không", () => {
+    for (const signedIn of [true, false]) {
+      assert.deepEqual(mod.after401View({ samePick: false, manualSignOut: false, signedIn }), SKIP);
+    }
+  });
+
+  test("người dùng tự bấm Đăng xuất trong lúc làm mới → bỏ lượt (không câu 'hết hạn' lệch, không nút)", () => {
+    for (const signedIn of [true, false]) {
+      for (const samePick of [true, false]) {
+        assert.deepEqual(mod.after401View({ samePick, manualSignOut: true, signedIn }), SKIP);
+      }
+    }
+  });
+
+  test("text lấy từ frontErrorText (không câu riêng); chỉ true thật mới tính", () => {
+    const r = mod.after401View({ samePick: true, manualSignOut: false, signedIn: true });
+    assert.equal(r.text, mod.frontErrorText({ ok: false, kind: "auth" }, { signedIn: true }));
+    assert.deepEqual(mod.after401View({ samePick: "true", manualSignOut: false, signedIn: true }), SKIP);
+    assert.deepEqual(mod.after401View({ samePick: true, manualSignOut: false, signedIn: 1 }), { skip: false, text: EXPIRED, showRelogin: false });
+    assert.deepEqual(mod.after401View(), SKIP);
+  });
+});
+
 describe("front-photo.js không gọi mạng lúc nạp", () => {
   test("import module không gọi fetch", async () => {
     const orig = globalThis.fetch;
