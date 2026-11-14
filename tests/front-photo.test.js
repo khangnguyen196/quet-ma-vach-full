@@ -425,6 +425,95 @@ describe("after401View: quyết định sau 401 + làm mới phiên", () => {
   });
 });
 
+// Đợt cung-co (việc để sau (a) của chup-mat-gon): sau khi vẽ kết quả của LẦN CHỌN ẢNH, main.js cuộn tới đâu?
+// "hit" → gợi ý 1; "unsure" → khối "Không chắc chắn"; null → không cuộn ("Tìm lại", đầu vào lạ).
+describe("afterResultScroll: cuộn sau khi vẽ kết quả Chụp mặt trước", () => {
+  test("là hàm", () => {
+    assert.equal(typeof mod.afterResultScroll, "function");
+  });
+
+  test("lần chọn ảnh, có ≥ 1 gợi ý → 'hit' (như cũ: cuộn tới gợi ý 1)", () => {
+    assert.equal(mod.afterResultScroll({ hits: [{ code: "1" }], fromRetry: false }), "hit");
+    assert.equal(mod.afterResultScroll({ hits: [1, 2, 3, 4, 5] }), "hit");
+  });
+
+  test("lần chọn ảnh, 0 gợi ý → 'unsure' (cuộn tới khối Không chắc chắn)", () => {
+    assert.equal(mod.afterResultScroll({ hits: [], fromRetry: false }), "unsure");
+    assert.equal(mod.afterResultScroll({ hits: [] }), "unsure");
+  });
+
+  test("'Tìm lại' → null (không cuộn), dù có hay không có gợi ý", () => {
+    assert.equal(mod.afterResultScroll({ hits: [], fromRetry: true }), null);
+    assert.equal(mod.afterResultScroll({ hits: [1], fromRetry: true }), null);
+  });
+
+  test("đầu vào lạ (hits không phải mảng, không có đối số) → null", () => {
+    for (const hits of [undefined, null, 0, 3, "abc", { length: 2 }]) {
+      assert.equal(mod.afterResultScroll({ hits }), null, `hits = ${JSON.stringify(hits)}`);
+    }
+    assert.equal(mod.afterResultScroll(), null);
+  });
+});
+
+// Đợt cung-co (việc để sau (c) của chup-mat-gon): sự kiện chọn ảnh có bị chặn không, vì sao?
+describe("frontPickBlock: chặn chọn ảnh Chụp mặt trước", () => {
+  test("là hàm", () => {
+    assert.equal(typeof mod.frontPickBlock, "function");
+  });
+
+  test("có phiên, không bận → null (gửi bình thường)", () => {
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", appBusy: false, authBusy: false }), null);
+  });
+
+  test("không phải 'ready' (hidden / loading / login / lạ) → 'login' (như cũ: tới phần đăng nhập), đứng trước mọi lý do khác", () => {
+    for (const buttonState of ["hidden", "loading", "login", "", undefined, "READY"]) {
+      assert.equal(mod.frontPickBlock({ buttonState, appBusy: true, authBusy: true }), "login", `buttonState = ${buttonState}`);
+      assert.equal(mod.frontPickBlock({ buttonState, appBusy: false, authBusy: false }), "login");
+    }
+    assert.equal(mod.frontPickBlock(), "login");
+  });
+
+  test("có phiên nhưng đang đăng xuất (authState.busy) → 'authBusy', đứng trước app bận", () => {
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", appBusy: false, authBusy: true }), "authBusy");
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", appBusy: true, authBusy: true }), "authBusy");
+  });
+
+  test("có phiên, app bận (mở camera / đọc ảnh mã) → 'appBusy' (như cũ)", () => {
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", appBusy: true, authBusy: false }), "appBusy");
+  });
+
+  test("bận kiểu lạ (1, 'x') vẫn tính là bận: chặn cho chắc", () => {
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", authBusy: 1 }), "authBusy");
+    assert.equal(mod.frontPickBlock({ buttonState: "ready", appBusy: "x" }), "appBusy");
+  });
+});
+
+// Đợt cung-co: lỗi sendOcr (không phải nhánh 401 + làm mới phiên) → câu + có hiện nút "Tới phần đăng nhập" không.
+describe("frontErrorView: câu lỗi + nút Tới phần đăng nhập", () => {
+  test("là hàm", () => {
+    assert.equal(typeof mod.frontErrorView, "function");
+  });
+
+  test("kind auth → câu của frontErrorText + hiện nút", () => {
+    const r = { ok: false, kind: "auth" };
+    assert.deepEqual(mod.frontErrorView(r), { text: mod.frontErrorText(r), showRelogin: true });
+  });
+
+  test("kind khác (rate, daily, network, other…) → câu của frontErrorText, KHÔNG hiện nút", () => {
+    for (const kind of ["daily", "rate", "busy", "tooBig", "badType", "timeout", "network", "other"]) {
+      const r = { ok: false, kind, retryAfter: 30 };
+      assert.deepEqual(mod.frontErrorView(r), { text: mod.frontErrorText(r), showRelogin: false }, kind);
+    }
+  });
+
+  test("không phải lỗi / aborted / rỗng → không câu, không nút", () => {
+    assert.deepEqual(mod.frontErrorView({ ok: false, kind: "aborted" }), { text: "", showRelogin: false });
+    assert.deepEqual(mod.frontErrorView({ ok: true, items: [] }), { text: "", showRelogin: false });
+    assert.deepEqual(mod.frontErrorView(null), { text: "", showRelogin: false });
+    assert.deepEqual(mod.frontErrorView(), { text: "", showRelogin: false });
+  });
+});
+
 describe("front-photo.js không gọi mạng lúc nạp", () => {
   test("import module không gọi fetch", async () => {
     const orig = globalThis.fetch;
