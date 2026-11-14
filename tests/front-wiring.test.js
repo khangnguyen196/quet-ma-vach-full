@@ -11,6 +11,7 @@ const SRC = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
 
 /** Bỏ comment (khối /* *\/ và dòng //) nhưng giữ nguyên độ dài + xuống dòng, để vị trí / số dòng không đổi. */
 function stripComments(src) {
+  // Hàm KHÔNG hiểu regex: main.js mà có regex chứa dấu nháy (vd /["']/) thì test có thể báo vỡ nhầm.
   let out = "";
   let i = 0;
   let quote = null; // ' " ` đang mở
@@ -75,6 +76,18 @@ function functionBody(name) {
   return blockAt(CODE, m.index + m[0].length);
 }
 
+/** Thân sự kiện chọn ảnh "Chụp mặt trước" = handler "change" chứa lệnh gọi sendOcr(…). */
+function pickHandlerBody() {
+  const send = /\bsendOcr\s*\(/.exec(CODE);
+  assert.ok(send, "main.js phải gọi sendOcr(…)");
+  const handlers = [...CODE.matchAll(/addEventListener\(\s*["']change["']\s*,/g)].filter((m) => m.index < send.index);
+  assert.ok(handlers.length, "không tìm thấy addEventListener(\"change\", …) trước sendOcr(");
+  const h = handlers.at(-1);
+  const [start, end] = blockAt(CODE, h.index + h[0].length);
+  assert.ok(send.index > start && send.index < end, "sendOcr( phải nằm trong handler change của ô chọn ảnh");
+  return CODE.slice(start, end);
+}
+
 describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   test("(1) mọi lệnh cuộn đi qua scrollToEl: không có scrollIntoView( nào ngoài thân hàm scrollToEl", () => {
     const [start, end] = functionBody("scrollToEl");
@@ -86,15 +99,7 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   test("(2) sự kiện chọn ảnh kiểm 'đang đăng xuất' (frontPickBlock với authBusy = ….busy) TRƯỚC khi gửi / làm mới phiên / tải T1", () => {
-    // Sự kiện chọn ảnh = handler "change" chứa lệnh gọi sendOcr(…)
-    const send = /\bsendOcr\s*\(/.exec(CODE);
-    assert.ok(send, "main.js phải gọi sendOcr(…)");
-    const handlers = [...CODE.matchAll(/addEventListener\(\s*["']change["']\s*,/g)].filter((m) => m.index < send.index);
-    assert.ok(handlers.length, "không tìm thấy addEventListener(\"change\", …) trước sendOcr(");
-    const h = handlers.at(-1);
-    const [start, end] = blockAt(CODE, h.index + h[0].length);
-    assert.ok(send.index > start && send.index < end, "sendOcr( phải nằm trong handler change của ô chọn ảnh");
-    const body = CODE.slice(start, end);
+    const body = pickHandlerBody();
 
     const call = /\bfrontPickBlock\s*\(\s*\{([\s\S]*?)\}\s*\)/.exec(body);
     assert.ok(call, "handler chọn ảnh phải gọi frontPickBlock({ … })");
@@ -122,5 +127,17 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     }
     assert.doesNotMatch(body, new RegExp(`\\b${name}\\.hidden\\s*=(?!=)`), `updateFrontButton gán ${name}.hidden ngoài nhánh hidden / login`);
     assert.doesNotMatch(body, /\bsayFront\s*\(/, "updateFrontButton gọi sayFront( (ẩn nút) ngoài nhánh hidden / login");
+  });
+
+  test("(4) sự kiện chọn ảnh nhớ manualSignOuts TRƯỚC khi chờ tắt camera (await stopCam(…))", () => {
+    // Đợt cung-co vòng 2: bấm Đăng xuất đúng lúc camera đang tắt thì số nhớ đã gồm lần đăng xuất đó -> 401 vẫn làm mới
+    // phiên. Số phải được nhớ trước mọi await của lượt chọn ảnh.
+    const body = pickHandlerBody();
+    const save = /(?<![=!<>])=\s*manualSignOuts\b/.exec(body);
+    assert.ok(save, "handler chọn ảnh phải nhớ số manualSignOuts (… = manualSignOuts)");
+    const stop = /\bawait\s+stopCam\s*\(/.exec(body);
+    assert.ok(stop, "handler chọn ảnh phải có await stopCam(…)");
+    assert.ok(save.index < stop.index,
+      `nhớ manualSignOuts (dòng ${lineOf(body, save.index)} của handler) phải đứng trước await stopCam( (dòng ${lineOf(body, stop.index)})`);
   });
 });
