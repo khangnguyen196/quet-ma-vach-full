@@ -809,8 +809,8 @@ async function initAuth() {
   }
 }
 
-// Số lần người dùng TỰ bấm "Đăng xuất" (đợt chup-mat-gon): "Chụp mặt trước" nhớ số này trước khi làm mới phiên sau
-// 401; số đổi thì lượt đó bị bỏ (không hiện câu "hết hạn" lệch). Thư viện tự đăng xuất thì số không đổi.
+// Số lần người dùng TỰ bấm "Đăng xuất" (đợt chup-mat-gon): "Chụp mặt trước" nhớ số này từ lúc chọn ảnh; gặp 401 mà
+// số đã đổi thì lượt đó bị bỏ (không câu lệch, không làm mới phiên). Thư viện tự đăng xuất thì số không đổi.
 let manualSignOuts = 0;
 
 authBox.addEventListener("click", async (ev) => {
@@ -964,6 +964,7 @@ frontFile.addEventListener("change", async (ev) => {
   frontAbort = ctrl;
   const id = ++frontTurn;
   const pick = ++frontPicks;
+  const outs = manualSignOuts; // nhớ NGAY lúc chọn ảnh: bấm Đăng xuất lúc ảnh đang gửi thì nhánh 401 thấy số đã đổi
   const stale = () => id !== frontTurn;
   frontRelogin.hidden = true;
   frontBox.hidden = true;
@@ -1009,18 +1010,21 @@ frontFile.addEventListener("change", async (ev) => {
     if (r.kind === "auth" && authClient) {
       // 401: thử làm mới phiên ĐÚNG 1 lần; KHÔNG tự gửi lại ảnh (không tốn thêm lượt máy chủ). Làm mới lỗi thì thư viện
       // có thể tự đăng xuất (SIGNED_OUT → updateFrontButton dọn và tăng frontTurn), nên ở đây xét frontPicks (chọn ảnh
-      // khác) và manualSignOuts (người dùng TỰ bấm Đăng xuất trong lúc chờ): một trong hai đổi thì bỏ lượt, không câu,
-      // không nút (after401View). Hết phiên chỉ còn nút "Đăng nhập để dùng". Không ghi token / phiên ra console.
-      const outs = manualSignOuts;
+      // khác) và manualSignOuts so với số nhớ từ lúc chọn ảnh (outs: người dùng TỰ bấm Đăng xuất từ lúc chọn ảnh, kể cả
+      // khi đăng xuất xong chậm hơn lúc 401 về): một trong hai đổi thì bỏ lượt, không câu, không nút (after401View).
+      // Hết phiên chỉ còn nút "Đăng nhập để dùng". Không ghi token / phiên ra console.
       const view = (signedIn) => after401View({ samePick: pick === frontPicks, manualSignOut: manualSignOuts !== outs, signedIn });
+      // bỏ lượt mà vẫn là lượt chọn ảnh mới nhất (vd bấm Đăng xuất nhưng đăng xuất lỗi): xóa câu đang hiện
+      const drop = () => { if (pick === frontPicks) sayFront(); };
+      // Đã bấm Đăng xuất từ lúc chọn ảnh: bỏ lượt NGAY, không làm mới phiên (đo bằng Playwright: refreshSession trong
+      // lúc thư viện đang đăng xuất làm phiên sống lại sau SIGNED_OUT).
+      if (view(false).skip) { drop(); return; }
       sayFront("Đang kiểm lại phiên đăng nhập…");
       try {
         await authClient.auth.refreshSession();
       } catch (e) {
         console.warn("Chụp mặt trước: không làm mới được phiên đăng nhập", e?.name || "");
       }
-      // bỏ lượt mà vẫn là lượt chọn ảnh mới nhất (vd bấm Đăng xuất nhưng đăng xuất lỗi): xóa câu "Đang kiểm lại…"
-      const drop = () => { if (pick === frontPicks) sayFront(); };
       if (view(false).skip) { drop(); return; }
       let signedIn = false;
       try {
