@@ -304,6 +304,16 @@ function cleanCode(raw) {
   return code.length < 8 || code.length > 14 ? null : code;
 }
 
+/**
+ * Cuộn tới el (đợt chup-mat-gon vòng 2): cuộn mượt, trừ khi máy bật "giảm chuyển động" (prefers-reduced-motion) thì
+ * nhảy thẳng. scrollIntoView do code gọi không tự theo cài đặt đó. Không có matchMedia thì cuộn mượt như cũ.
+ * Ví dụ: scrollToEl(result, "nearest").
+ */
+function scrollToEl(el, block) {
+  const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block });
+}
+
 let current = 0;
 async function lookup(raw) {
   const code = cleanCode(raw);
@@ -313,7 +323,7 @@ async function lookup(raw) {
   setMsg(`Đang tra cứu mã ${code}…`);
   shownProduct = null; // kết quả cũ bị xóa ngay dưới đây: đổi hồ sơ lúc này không vẽ gì
   result.innerHTML = "";
-  result.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  scrollToEl(result, "nearest");
 
   // (a) Gọi API: lỗi ở đây là lỗi mạng / hết giờ / máy chủ (e.kind do getProduct gắn).
   let data;
@@ -884,7 +894,7 @@ function updateFrontButton() {
  * không có nút nào thì chính khối (tabindex="-1"). KHÔNG mở chọn ảnh, KHÔNG gửi gì.
  */
 function goToLogin() {
-  authBox.scrollIntoView({ behavior: "smooth", block: "center" });
+  scrollToEl(authBox, "center");
   const btn = authBody.querySelector('button[data-auth="login"]') || authBody.querySelector('button[data-auth="logout"]');
   (btn || authBox).focus?.({ preventScroll: true });
 }
@@ -1048,7 +1058,8 @@ frontFile.addEventListener("change", async (ev) => {
   // Đợt chup-mat-gon: màn 360×740, nút "Chụp mặt trước" đang trong màn hình thì kết quả nằm dưới mép màn hình
   // (đo: gợi ý 1 ở ~1.240 px). Cuộn ÍT NHẤT để gợi ý 1 vừa hiện trọn (block "nearest"), chỉ sau lần chọn ảnh (không
   // phải "Tìm lại"), chỉ khi có gợi ý; không đổi focus, không thu ô chữ.
-  frontBox.querySelector("button[data-front-code]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const firstHit = frontBox.querySelector("button[data-front-code]");
+  if (firstHit) scrollToEl(firstHit, "nearest");
 });
 
 // Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối
@@ -1063,9 +1074,9 @@ frontBox.addEventListener("click", (ev) => {
       // đọc ảnh mã) thì không bật, chỉ cuộn và nhắc ở #frontMsg (chỉ đổi chữ).
       if (busy) sayFront("App đang bận, chờ xong rồi bấm Quét mã vạch lại.", true);
       else if (!scanner.running) startCam();
-      reader.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrollToEl(reader, "center");
     } else if (act.dataset.frontAction === "code") {
-      codeInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      scrollToEl(codeInput, "center");
       codeInput.focus({ preventScroll: true });
     }
     return;
