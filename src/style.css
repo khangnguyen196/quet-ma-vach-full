@@ -476,10 +476,9 @@ table.cmp-table .empty { font-size: 13px; }
 /* Khối "Không chắc chắn…" (vòng 3 nang-t1): màu theo biến :root (có bản tối). Đợt chup-mat-gon: khối đứng SAU danh
    sách gợi ý (0 gợi ý thì đứng đầu); 3 nút một hàng: lưới 3 cột bằng nhau, chữ xuống tối đa 2 dòng, không cuộn ngang
    ở màn 320 px (minmax(0, 1fr) cho phép cột co hẹp hơn chữ dài nhất). */
-.front-unsure { margin-top: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
+/* scroll-margin: 0 gợi ý thì main.js cuộn tới khối (block "nearest"), chừa 12 px dưới mép màn hình như gợi ý 1 (đợt cung-co) */
+.front-unsure { margin-top: 10px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); scroll-margin: 12px; }
 .front-unsure:first-child { margin-top: 0; }
-/* 0 gợi ý: main.js cuộn tới khối (block "nearest"), chừa 12 px dưới mép màn hình như gợi ý 1 (đợt cung-co) */
-.front-unsure { scroll-margin: 12px; }
 .front-unsure-text { font-weight: 700; color: var(--warn); }
 .front-unsure-actions { margin-top: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .front-unsure-actions .btn {

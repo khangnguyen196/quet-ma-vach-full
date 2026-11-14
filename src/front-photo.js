@@ -209,8 +209,8 @@ export function afterResultScroll({ hits, fromRetry = false } = {}) {
 
 /**
  * Sự kiện chọn ảnh "Chụp mặt trước" có bị chặn không (đợt cung-co)?
- * buttonState: frontButtonState(authState) (main.js truyền "login" khi chưa có authClient); appBusy: app đang mở camera /
- * đọc ảnh mã; authBusy: authState.busy (đang đăng xuất / đang chuyển sang trang đăng nhập).
+ * buttonState: frontButtonState(authState) (main.js kiểm `!authClient` riêng trước khi gọi hàm này);
+ * appBusy: app đang mở camera / đọc ảnh mã; authBusy: authState.busy (đang đăng xuất / đang chuyển sang trang đăng nhập).
  * Trả "login" (không phải "ready": tới phần đăng nhập) | "authBusy" (đang đăng xuất: chỉ nhắc chờ, không gửi, không làm
  * mới phiên) | "appBusy" (nhắc chờ app) | null (gửi được). Bận kiểu lạ (1, "x") vẫn tính là bận: chặn cho chắc.
  * Ví dụ: frontPickBlock({ buttonState: "ready", appBusy: false, authBusy: true }) → "authBusy"

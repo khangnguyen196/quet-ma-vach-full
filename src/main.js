@@ -966,6 +966,7 @@ frontFile.addEventListener("change", async (ev) => {
   if (block === "login") { goToLogin(); return; }
   if (block === "authBusy") { sayFront("Đang đăng xuất, chờ xong rồi chọn ảnh lại.", true); return; }
   if (block === "appBusy") { sayFront("Đợi mở camera hoặc đọc ảnh mã xong rồi hãy chụp mặt trước.", true); return; }
+  const outs = manualSignOuts; // nhớ NGAY lúc chọn ảnh: bấm Đăng xuất lúc ảnh đang gửi thì nhánh 401 thấy số đã đổi
   if (scanner.running) { await stopCam(); setMsg(); } // như "Chụp ảnh mã": tắt camera trước
 
   frontAbort?.abort(); // lượt cũ đang gửi: hủy
@@ -973,7 +974,6 @@ frontFile.addEventListener("change", async (ev) => {
   frontAbort = ctrl;
   const id = ++frontTurn;
   const pick = ++frontPicks;
-  const outs = manualSignOuts; // nhớ NGAY lúc chọn ảnh: bấm Đăng xuất lúc ảnh đang gửi thì nhánh 401 thấy số đã đổi
   const stale = () => id !== frontTurn;
   frontBox.hidden = true;
   frontBox.innerHTML = "";
