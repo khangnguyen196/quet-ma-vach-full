@@ -60,9 +60,9 @@ def test_sai_dang_dung_ip_socket(xff):
 ])
 def test_ca_giu_luat_khong_phai_ip(value):
     assert clean_ip(value) is None
-    # qua header: dùng IP socket (chuỗi rỗng = không có phần tử nào)
-    raw = value.encode("utf-8").decode("latin-1")  # header HTTP là latin-1: byte UTF-8 tới app y như vậy
-    assert client_ip(_req(raw), trust_proxy=True, proxy_count=1) == SOCK
+    # qua header: dùng IP socket (chuỗi rỗng = không có phần tử nào). _req mã hóa value sang byte UTF-8, starlette
+    # Headers đọc byte đó theo latin-1, giống request thật (chữ số Ả Rập tới app thành vài ký tự latin-1 lạ)
+    assert client_ip(_req(value), trust_proxy=True, proxy_count=1) == SOCK
 
 
 @pytest.mark.parametrize("lines, count, expected", [

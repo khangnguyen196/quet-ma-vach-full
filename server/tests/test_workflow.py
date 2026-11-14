@@ -57,7 +57,8 @@ def _command_lines(script: str) -> list:
             buf += line[:-1] + " "
             continue
         line, buf = (buf + line).strip(), ""
-        m = re.search(r"<<-?\s*['\"]?(\w+)['\"]?", line)
+        # "<<" đứng riêng (không phải "<<<" here-string), tên bắt đầu bằng chữ / "_" (không phải "<<2" số học)
+        m = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_]\w*)['\"]?", line)
         if m:
             heredoc = m.group(1)
         if line:
