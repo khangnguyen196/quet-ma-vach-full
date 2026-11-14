@@ -157,8 +157,11 @@ mục tiêu là sửa ô **Image and tag** rồi tạo revision mới.
    `cung-co`) hoặc ảnh không build bằng workflow: kiểm lại bước 4.
 
 **Quay lại ảnh cũ nếu lỗi** (revision mới "Failed" / "Provisioning failed", `/health` không trả lời, app báo lỗi): làm lại
-các bước 1–5 với **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:a295a86` (ảnh a295a86: mã máy chủ giống bản đang chạy trước đợt `cung-co`;
-ảnh này chưa có trường `commit` trong `/health`). Hoặc: **Revisions and replicas** → tích revision cũ → **Activate**
+các bước 1–5 với **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:a295a86` (ảnh a295a86: mã máy chủ giống bản
+đang chạy trước đợt `cung-co`; ảnh này chưa có trường `commit` trong `/health`). Bằng chứng (kiểm 14/11/2026):
+`git log --oneline a295a86..e4f9116 -- server/app.py server/settings.py server/ocr_engine.py server/imaging.py
+server/upload.py server/ratelimit.py server/auth.py server/requirements.txt server/Dockerfile server/LICENSES.md` rỗng;
+sau a295a86 thư mục server/ chỉ có 2 commit docs (ceea781, 9c61990). Hoặc: **Revisions and replicas** → tích revision cũ → **Activate**
 (nếu đang ở chế độ Single thì cách sửa ảnh như trên chắc hơn). Xem lỗi khởi động: **Monitoring** → **Log stream**.
 
 ## 5. Tạm tắt
