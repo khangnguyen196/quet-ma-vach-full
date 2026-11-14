@@ -246,18 +246,28 @@ khởi động, yêu cầu cần JWKS sẽ nhận 503 tới khi tải được. 
   IPv6 trần giữ nguyên), nên cùng IP khác cổng vẫn đếm chung; `::ffff:a.b.c.d` (IPv4 gói trong IPv6) đếm như `a.b.c.d`;
   phần tử không phải IP hợp lệ (rác, cổng quá 5 chữ số, IPv6 có zone id `%…`) -> IP socket (`tests/test_client_ip.py`).
   Nhiều dòng header `X-Forwarded-For` (đợt `cung-co`): nối lại theo thứ tự nhận bằng "," rồi tách như 1 dòng (dòng sau ở
-  cuối, khớp quy ước proxy ghi thêm vào cuối), nên `PROXY_COUNT=1` lấy phần tử cuối của dòng cuối. Ingress Azure ghi 1 dòng
-  hay nhiều dòng: chưa kiểm được.
+  cuối, khớp quy ước proxy ghi thêm vào cuối), nên `PROXY_COUNT=1` lấy phần tử cuối của dòng cuối. An toàn nếu proxy ghi
+  thêm vào cuối hoặc gộp các dòng thành 1 (Envoy / nginx thường làm vậy); nếu proxy ghi IP thật vào dòng ĐẦU và giữ dòng
+  khách tự gửi phía sau thì khách tự chọn được IP đếm lượt: khi kiểm Azure cần nhìn điều này. Tài liệu ingress của
+  Microsoft ghi `X-Forwarded-For` khách gửi sẵn thì được "appended to" (ghi thêm vào), không nói 1 dòng hay nhiều dòng
+  (link ở mục "Hạn giờ kết nối chậm"). Ingress Azure ghi 1 dòng hay nhiều dòng: chưa kiểm được.
 - **Đếm lượt theo IP, IPv6 gộp `/64`** (đợt `cung-co`, `ratelimit.rate_key`): IPv6 (từ socket hay từ `X-Forwarded-For`) đếm
   theo mạng `/64` chứa nó (`2001:db8:1:2::a` và `2001:db8:1:2:ffff::b` là 1), vì một máy thường có cả mạng `/64` và tự đổi
   64 bit cuối (địa chỉ tạm thời); đếm từng địa chỉ thì lách được giới hạn. IPv4 (kể cả `::ffff:a.b.c.d`) vẫn đếm từng địa
   chỉ. Mặt trái: những máy chung một mạng `/64` (cùng nhà / cùng mạng di động cấp chung) chia nhau 20 ảnh / phút.
+  Chưa kiểm Azure Container Apps có nhận khách IPv6 không; nếu ingress chỉ nhận IPv4 thì `rate_key` chưa có tác dụng ở
+  bản thật (vô hại). Đã tra (14/11/2026, chỉ DNS, không gửi HTTP): tên máy chủ Azure là CNAME tới
+  `management.malaysiawest.adcproxy.io`, có bản ghi A (IPv4), KHÔNG có bản ghi AAAA (`Resolve-DnsName -Type AAAA` chỉ
+  trả SOA), nên hiện khách tới qua IPv4; tài liệu ingress của Microsoft không nói về IPv6.
 - **Hạn giờ kết nối chậm** (đợt `cung-co`, uvicorn 0.54.0, `python -m uvicorn --help`): uvicorn chỉ có
   `--timeout-keep-alive` (mặc định 5 giây: đóng kết nối keep-alive rỗi GIỮA các yêu cầu), `--timeout-graceful-shutdown`,
   `--timeout-worker-healthcheck` (mặc định 5) và `--ws-ping-timeout` (WebSocket); KHÔNG có tùy chọn hạn giờ cho lúc khách
-  gửi phần header chậm. Phần thân ảnh đã có `BODY_TIMEOUT_S=30` (408, không đổi). Kết nối gửi header thật chậm chỉ bị
-  chặn bởi `--limit-concurrency 16` (giữ tối đa 16 chỗ) và ingress (Envoy) của Azure đứng trước máy chủ; ingress có hạn
-  giờ đọc header hay không: chưa kiểm. Không thêm proxy riêng (việc để sau).
+  gửi phần header chậm. Phần thân ảnh đã có `BODY_TIMEOUT_S=30` (408, không đổi). `--limit-concurrency 16` chỉ giới hạn
+  SỐ kết nối (nên RAM có trần), KHÔNG chống được kiểu gửi header thật chậm (slowloris): chỉ cần 16 kết nối gửi chậm là
+  người khác nhận 503. Lớp đỡ thật (nếu có) là ingress (Envoy) của Azure đứng trước máy chủ: ingress có hạn giờ đọc
+  header hay không: chưa kiểm (tài liệu Microsoft chỉ ghi "Request time out is 240 seconds" cho cả yêu cầu,
+  https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview, đọc 14/11/2026). Không thêm proxy riêng (việc
+  để sau).
 - **CORS**: chỉ khớp chính xác các nguồn trong `ALLOWED_ORIGINS` (mặc định `https://khangnguyen196.github.io`) (+ localhost
   khi `CORS_ALLOW_LOCALHOST=1`); origin lạ / `null`
   không có `Access-Control-Allow-Origin`; không credentials; GET, POST, OPTIONS; header Content-Type, Authorization;

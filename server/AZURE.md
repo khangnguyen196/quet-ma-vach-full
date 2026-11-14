@@ -136,7 +136,8 @@ https://learn.microsoft.com/en-us/azure/container-apps/revisions (mục "Change 
 - Hoặc trang package: `https://github.com/users/khangnguyen196/packages/container/package/quet-ma-vach-ocr` → danh sách
   tag (tag mới nhất đứng đầu, cạnh `latest`).
 
-**Trỏ sang tag** (6 biến môi trường giữ nguyên, KHÔNG xóa / sửa biến nào):
+**Trỏ sang tag** (6 biến môi trường giữ nguyên, KHÔNG xóa / sửa biến nào). Tên nút có thể khác theo bản Azure Portal;
+mục tiêu là sửa ô **Image and tag** rồi tạo revision mới.
 1. Portal → Container App **quet-ma-vach-ocr** → menu trái **Application** → **Containers** (hoặc **Revisions and
    replicas**).
 2. Bấm **Edit and deploy** (trên cùng).
@@ -145,7 +146,8 @@ https://learn.microsoft.com/en-us/azure/container-apps/revisions (mục "Change 
 4. **Image source** vẫn là **Docker Hub or other registries**, **Image type** Public, **Registry login server** `ghcr.io`.
    Sửa **Image and tag** thành `khangnguyen196/quet-ma-vach-ocr:<7 ký tự>` (vd `khangnguyen196/quet-ma-vach-ocr:a295a86`).
    Kiểm phần **Environment variables** vẫn đủ 6 dòng (`AUTH_MODE`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
-   `ALLOWED_ORIGINS`, `TRUST_PROXY`, `PROXY_COUNT`); CPU / Memory vẫn 1 CPU core, 2 Gi.
+   `ALLOWED_ORIGINS`, `TRUST_PROXY`, `PROXY_COUNT`); CPU / Memory vẫn 1 CPU core, 2 Gi. **Không thêm biến `GIT_SHA`**
+   (nếu có, `/health` trả giá trị biến đó chứ không phải mã thật của ảnh).
 5. Bấm **Save** (đóng khung container) → bấm **Create** ở cuối trang (tạo revision mới). Tab Scale không đổi (Min 0, Max 1).
 6. Chờ: **Application** → **Revisions and replicas** → revision mới (tên có đuôi mới, cột Created mới nhất) có
    **Running status** = **Running** (hoặc "Scale to 0" nếu không có ai gọi) và **Provision status** = **Provisioned**;
@@ -155,7 +157,7 @@ https://learn.microsoft.com/en-us/azure/container-apps/revisions (mục "Change 
    `cung-co`) hoặc ảnh không build bằng workflow: kiểm lại bước 4.
 
 **Quay lại ảnh cũ nếu lỗi** (revision mới "Failed" / "Provisioning failed", `/health` không trả lời, app báo lỗi): làm lại
-các bước 1–5 với **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:a295a86` (ảnh đang chạy ổn trước đợt `cung-co`;
+các bước 1–5 với **Image and tag** = `khangnguyen196/quet-ma-vach-ocr:a295a86` (ảnh a295a86: mã máy chủ giống bản đang chạy trước đợt `cung-co`;
 ảnh này chưa có trường `commit` trong `/health`). Hoặc: **Revisions and replicas** → tích revision cũ → **Activate**
 (nếu đang ở chế độ Single thì cách sửa ảnh như trên chắc hơn). Xem lỗi khởi động: **Monitoring** → **Log stream**.
 
