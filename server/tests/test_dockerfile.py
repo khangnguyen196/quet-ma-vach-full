@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
 import json
 import re
 
@@ -147,6 +148,79 @@ def test_chi_muc_dung_luc_build_va_catalog_path_mac_dinh():
     lines = src.splitlines()
     user = next(i for i, ln in enumerate(lines) if ln.strip() == "USER ocr")
     assert any("load_dir('/app/catalog-index')" in ln for ln in lines[user:]), "người dùng ocr phải nạp thử chỉ mục"
+
+
+_SHA_RE = re.compile(r"[0-9a-f]{64}")
+
+
+def _catalog_copy(src: str) -> tuple:
+    """(nguồn trong repo "catalog/x.jsonl.gz", đích trong ảnh) của dòng COPY danh mục."""
+    flat = re.sub(r"\\\n", " ", src)
+    m = re.search(r"^COPY (catalog/[a-c]\.jsonl\.gz) (\S+)$", flat, re.M)
+    assert m, "thiếu dòng COPY catalog/<mức>.jsonl.gz <đích>"
+    return m.group(1), m.group(2)
+
+
+def _dockerfile_sha(src: str, dest: str) -> list:
+    """sha256 ghi trong Dockerfile cho file danh mục trong ảnh: dạng echo "<sha>  <đích>" | sha256sum -c -."""
+    flat = re.sub(r"\\\n", " ", src)
+    pat = re.compile(r'echo\s+"([0-9a-f]{64})  ' + re.escape(dest) + r'"\s*\|\s*sha256sum\s+-c\s+-')
+    return [m.group(1) for m in pat.finditer(flat)]
+
+
+def _licenses_sha(rel: str) -> list:
+    """sha256 trên dòng bảng của LICENSES.md nhắc file danh mục (vd `catalog/c.jsonl.gz`)."""
+    rows = [ln for ln in (SERVER / "LICENSES.md").read_text(encoding="utf-8").splitlines()
+            if ln.startswith("|") and f"`{rel}`" in ln]
+    return [s for ln in rows for s in _SHA_RE.findall(ln)]
+
+
+def test_sha256_danh_muc_trung_3_noi():
+    """Kho-lon vòng 4 (NÊN SỬA 1 vòng 3): sha256 THẬT của file danh mục trong repo = số trong LICENSES.md = số Dockerfile
+    kiểm bằng `sha256sum -c` (build hỏng nếu file khác). Đổi danh mục thì phải sửa cả 2 chỗ ghi."""
+    src = _dockerfile()
+    rel, dest = _catalog_copy(src)
+    real = hashlib.sha256((SERVER / rel).read_bytes()).hexdigest()
+    lic = _licenses_sha(rel)
+    dock = _dockerfile_sha(src, dest)
+    assert len(lic) == 1, f"LICENSES.md phải ghi đúng 1 sha256 cho {rel}: {lic}"
+    assert len(dock) == 1, f"Dockerfile phải có đúng 1 lệnh echo \"<sha>  {dest}\" | sha256sum -c -: {dock}"
+    assert lic[0] == real, f"LICENSES.md {lic[0]} khác sha256 thật {real}"
+    assert dock[0] == real, f"Dockerfile {dock[0]} khác sha256 thật {real}"
+
+
+def test_sha256sum_truoc_build_chi_muc_va_thu_tu_lop():
+    """sha256sum -c đứng TRƯỚC catalog_search.py build (cùng RUN, nối &&). Gợi ý 2 vòng 3: lớp danh mục (COPY
+    catalog_search.py + .gz, RUN kiểm + dựng) đứng SAU pip install và TRƯỚC COPY các file máy chủ còn lại (sửa app.py không
+    làm dựng lại chỉ mục ~20 giây); vẫn trước ARG GIT_SHA."""
+    src = _dockerfile()
+    _, dest = _catalog_copy(src)
+    flat = re.sub(r"\\\n", " ", src).splitlines()
+    run = next(ln for ln in flat if ln.startswith("RUN ") and "catalog_search.py build" in ln)
+    i_sum, i_build = run.find("sha256sum -c -"), run.find("catalog_search.py build")
+    assert 0 <= i_sum < i_build, "sha256sum -c phải đứng trước catalog_search.py build"
+    assert "&&" in run[i_sum:i_build], "build chỉ chạy khi sha256sum -c đạt (nối bằng &&)"
+    idx = lambda pred: next(i for i, ln in enumerate(flat) if pred(ln))  # noqa: E731
+    pip = idx(lambda ln: ln.startswith("RUN ") and "pip install" in ln)
+    cs = idx(lambda ln: ln.startswith("COPY ") and ln.split()[1:-1] == ["catalog_search.py"])
+    gz = idx(lambda ln: ln.startswith("COPY ") and "catalog/" in ln)
+    build = flat.index(run)
+    app = idx(lambda ln: ln.startswith("COPY ") and "app.py" in ln.split())
+    arg = idx(lambda ln: ln.startswith("ARG GIT_SHA"))
+    assert pip < cs < gz < build < app < arg, (pip, cs, gz, build, app, arg)
+    assert "catalog_search.py" not in flat[app].split(), "catalog_search.py chỉ COPY một lần (lớp danh mục)"
+
+
+def test_sha256_lech_thi_bat_duoc():
+    """Chuỗi mẫu sai: đổi 1 ký tự sha ở Dockerfile → _dockerfile_sha ra số khác số thật (test chính bắt được)."""
+    src = _dockerfile()
+    rel, dest = _catalog_copy(src)
+    real = hashlib.sha256((SERVER / rel).read_bytes()).hexdigest()
+    bad = src.replace(real, ("0" if real[0] != "0" else "1") + real[1:])
+    assert _dockerfile_sha(bad, dest) and _dockerfile_sha(bad, dest)[0] != real
+    # thiếu "-c" / sai đích thì không nhận
+    assert _dockerfile_sha(src.replace("sha256sum -c -", "sha256sum -"), dest) == []
+    assert _dockerfile_sha(src, "/tmp/khac.jsonl.gz") == []
 
 
 def test_dockerignore_khong_loai_danh_muc():

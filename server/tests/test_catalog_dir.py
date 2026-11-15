@@ -156,6 +156,24 @@ def test_lenh_build_va_verify(tmp_path):
     gc.collect()
 
 
+def _files_bytes(d: Path) -> dict:
+    return {p.relative_to(d).as_posix(): p.read_bytes() for p in sorted(d.rglob("*")) if p.is_file()}
+
+
+def test_dung_2_lan_trung_tung_byte(tmp_path):
+    """Kho-lon vòng 4 (gợi ý 6 vòng 3): dựng chỉ mục 2 lần từ cùng nguồn → cùng danh sách file, trùng từng byte mọi file
+    (ảnh Docker dựng lại ra cùng chỉ mục; meta không chứa giờ / đường dẫn máy)."""
+    one, two = tmp_path / "lan1", tmp_path / "lan2"
+    m1 = cs.build_index_dir(MINI, one)
+    m2 = cs.build_index_dir(MINI, two)
+    assert m1 == m2
+    f1, f2 = _files_bytes(one), _files_bytes(two)
+    assert sorted(f1) == sorted(f2) and len(f1) >= len(cs.INDEX_ARRAYS) + 2
+    diff = [name for name in f1 if f1[name] != f2[name]]
+    assert diff == [], f"khác byte: {diff}"
+    gc.collect()
+
+
 def test_mang_sai_thi_lech(tmp_path):
     """Đổi 1 mảng trong thư mục (lens sai) -> kết quả khác file vàng: chứng minh test so thật, không so chính nó."""
     out = tmp_path / "sai"

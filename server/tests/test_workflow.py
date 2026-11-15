@@ -40,6 +40,8 @@ PIPES = {
     "got=$(curl": False,        # so commit / catalog của /health: hỏng thì bước phải đỏ
     "n_want=$(gzip": False,     # số dòng danh mục trong repo (kho-lon vòng 3): hỏng thì bước phải đỏ
     "digest=$(grep": True,      # không tìm thấy digest thì vẫn xanh (ảnh đã đẩy xong)
+    "sync && echo 3": False,    # xóa bộ đệm trang trước lượt chu.png (kho-lon vòng 4): hỏng thì số "nguội" sai, bước đỏ
+    "line=$(docker logs": True,  # dòng log "tìm" của lượt đầu (chỉ tham khảo): không đọc được thì vẫn xanh
 }
 _PIPE = re.compile(r"(?<!\|)\|(?!\|)")
 
@@ -166,6 +168,47 @@ def test_anh_nang_40mp_sinh_trong_container_rieng_truoc_do_ram():
     assert "secrets" not in run and "if" not in step
     ram = next(k for k, s in enumerate(_steps()) if "memory.peak" in s.get("run", ""))
     assert i < ram, "ảnh nặng phải gửi trước bước đọc memory.peak"
+
+
+# --- kho-lon vòng 4 (NÊN SỬA 3 / 4, gợi ý 4 của reviewer vòng 3) ----------------------------------------------------
+def test_container_gioi_han_nhu_azure_2g_1cpu():
+    """Container ocr chạy với giới hạn giống Container App (1 vCPU / 2 GiB, không swap thêm): tràn RAM thì CI đỏ."""
+    _, step = _step(lambda s: "docker run -d" in s.get("run", "") and "STARTUP_SECONDS" in s.get("run", ""))
+    line = next(ln for ln in _command_lines(step["run"]) if ln.startswith("docker run -d"))
+    for flag in ("--memory=2g", "--memory-swap=2g", "--cpus=1"):
+        assert re.search(rf"(?<!\S){re.escape(flag)}(?!\S)", line), f"thiếu {flag}: {line}"
+    assert "--oom-kill-disable" not in line
+
+
+def test_xoa_bo_dem_truoc_chu_png_sau_kiem_catalog():
+    """Lượt chu.png đo "bộ đệm nguội": sync + drop_caches SAU /health 200 + kiểm catalog, TRƯỚC lượt chu.png."""
+    steps = _steps()
+    drop = [k for k, s in enumerate(steps) if "/proc/sys/vm/drop_caches" in s.get("run", "")]
+    assert len(drop) == 1, drop
+    lines = _command_lines(steps[drop[0]]["run"])
+    assert "sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null" in lines, lines
+    assert "if" not in steps[drop[0]]
+    catalog = next(k for k, s in enumerate(steps) if "n_want" in s.get("run", ""))
+    chu = next(k for k, s in enumerate(steps) if "chu.png" in s.get("run", "") and "/ocr" in s.get("run", ""))
+    assert catalog < drop[0] < chu
+
+
+def test_chu_png_in_dong_tim_vao_summary():
+    _, step = _step(lambda s: "chu.png" in s.get("run", "") and "/ocr" in s.get("run", ""))
+    run = step["run"]
+    i_png, i_log, i_heic = run.find("chu.png"), run.find("docker logs ocr"), run.find("xoay6.heic")
+    assert 0 <= i_png < i_log < i_heic, "đọc log ngay sau lượt chu.png, trước lượt HEIC"
+    assert re.search(r'grep\s+(-E\s+)?"POST /ocr [^"]*tìm', run), "lọc dòng log /ocr có chữ \"tìm\""
+    for must in ("lượt đầu, bộ đệm nguội, Linux, chỉ tham khảo", "GITHUB_STEP_SUMMARY"):
+        assert must in run, must
+
+
+def test_summary_ghi_chu_memory_peak_va_anh_40mp():
+    _, step = _step(lambda s: "memory.peak" in s.get("run", ""))
+    run = step["run"]
+    assert "--memory=2g" in run or "2 GiB" in run, "Summary ghi giới hạn container"
+    assert "bộ đệm file" in run and "không so thẳng" in run, "memory.peak tính cả bộ đệm file / trang mmap"
+    assert "dải màu" in run, "ảnh 40 MP là ảnh dải màu: phần OCR có thể nhẹ hơn ca thật"
 
 
 def test_summary_co_catalog_n_va_day_chi_tren_main():

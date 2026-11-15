@@ -40,7 +40,8 @@ def test_doc_dong_log_that_cua_app(monkeypatch, caplog):
 
 
 def test_pick_level_goi_dung_ham_node():
-    """Cách "chon" gọi pickLevel của kho-lon-do.mjs qua node: kiểm cách truyền tham số (số giả)."""
+    """Cách "chon" gọi pickLevel của kho-lon-do.mjs qua node: kiểm cách truyền tham số (số giả).
+    Cần `node` (Node 21+) trên PATH; không có node thì test này lỗi FileNotFoundError (không skip ngầm)."""
     levels = [{"name": L, "method": "G1", "h4": True, "h2": L != "c", "h3": True} for L in "abc"]
     # argv[1] = mức (JSON), argv[2] = đường dẫn module: argv[1] KHÔNG được là kho-lon-do.mjs (khối main của nó sẽ chạy)
     js = ("import { pathToFileURL } from 'node:url';"
