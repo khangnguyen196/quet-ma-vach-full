@@ -140,4 +140,35 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.ok(save.index < stop.index,
       `nhớ manualSignOuts (dòng ${lineOf(body, save.index)} của handler) phải đứng trước await stopCam( (dòng ${lineOf(body, stop.index)})`);
   });
+
+  // Đợt tu-dong vòng 4: nối "tự mở sản phẩm".
+  test("(5) mọi lệnh gọi mergeFront(…) dùng lớp chặn mặc định: không truyền lockTop / offMax / offGap / offTopRule", () => {
+    const calls = [...CODE.matchAll(/\bmergeFront\s*\(/g)];
+    assert.ok(calls.length >= 1, "main.js phải gọi mergeFront(…)");
+    for (const m of calls) {
+      const open = m.index + m[0].length - 1;
+      let depth = 0, end = open;
+      for (let i = open; i < CODE.length; i++) {
+        if (CODE[i] === "(") depth++;
+        else if (CODE[i] === ")" && --depth === 0) { end = i; break; }
+      }
+      const args = CODE.slice(open, end + 1);
+      assert.doesNotMatch(args, /\b(lockTop|offMax|offGap|offTopRule)\b/, `dòng ${lineOf(CODE, m.index)}: ${args}`);
+    }
+  });
+
+  test("(6) MỘT bộ tìm Open Food Facts cho cả phiên: createOffSearch( gọi đúng 1 lần, không nằm trong handler chọn ảnh", () => {
+    const calls = [...CODE.matchAll(/\bcreateOffSearch\s*\(/g)];
+    assert.equal(calls.length, 1, `createOffSearch( xuất hiện ${calls.length} lần`);
+    assert.doesNotMatch(pickHandlerBody(), /\bcreateOffSearch\s*\(/);
+  });
+
+  test("(7) lookup: tự mở từ ảnh (chưa xác nhận) KHÔNG lưu lịch sử: addHistory( nằm sau một điều kiện có 'photo'", () => {
+    const [start, end] = functionBody("lookup");
+    const body = CODE.slice(start, end);
+    const add = /\baddHistory\s*\(/.exec(body);
+    assert.ok(add, "lookup phải còn lưu lịch sử (tra bình thường)");
+    const before = body.slice(Math.max(0, add.index - 200), add.index);
+    assert.match(before, /\bif\s*\([^)]*\bphoto\b[^)]*\)/, "addHistory( phải được chặn bằng điều kiện tự mở từ ảnh");
+  });
 });
