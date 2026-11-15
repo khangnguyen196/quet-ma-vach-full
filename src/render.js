@@ -308,11 +308,13 @@ function smallImage(image) {
  * Đầu 1 cột so sánh. side: { code, status: "ok" | "notfound" | "error", product (đã normalize, khi "ok"),
  * kind + error (khi "error") }. Khung dị ứng có class (KHÔNG có id allergyAlert: id đó chỉ dành cho màn tra cứu).
  */
-function renderCompareColumn(side, letter, profile) {
+function renderCompareColumn(side, letter, profile, unconfirmedCode = null) {
   const head = `<p class="cmp-letter">Sản phẩm ${letter}</p>`;
   if (side.status === "ok") {
     const p = side.product;
-    const alert = renderAllergyAlert(matchAllergies(p, profile), profile.length);
+    // Vòng 5 tu-dong (gợi ý 6 vòng 4): sản phẩm tự mở từ ảnh còn chưa xác nhận → cùng dòng nhắc như màn tra cứu.
+    const unconfirmed = typeof unconfirmedCode === "string" && unconfirmedCode !== "" && p.code === unconfirmedCode;
+    const alert = renderAllergyAlert(matchAllergies(p, profile), profile.length, { unconfirmed });
     return `${head}
   <div class="cmp-head">${smallImage(p.image)}
     <div class="text"><p class="cmp-name">${esc(p.name)}</p><p class="code">Mã ${esc(p.code)}</p></div>
@@ -329,9 +331,10 @@ function renderCompareColumn(side, letter, profile) {
 /**
  * Kết quả so sánh 2 sản phẩm: 2 cột đầu (ảnh, tên, mã, khung dị ứng) + bảng 6 dòng trên 100 g / 100 ml.
  * sides: [bên A, bên B] (xem renderCompareColumn); profile: hồ sơ dị ứng (mảng khóa nhóm).
+ * opts.unconfirmedCode: mã sản phẩm tự mở từ ảnh còn chưa xác nhận (cột có mã này thêm dòng "chưa xác nhận").
  * Chỉ hiện số, không tô màu hay in đậm bên nào lớn / nhỏ hơn; ô thiếu ghi "chưa có dữ liệu".
  */
-export function renderCompare(sides, profile = []) {
+export function renderCompare(sides, profile = [], { unconfirmedCode = null } = {}) {
   const [a, b] = sides;
   const prod = (s) => (s && s.status === "ok" ? s.product : null);
   const cell = (v, unit) => (v == null ? '<span class="empty">chưa có dữ liệu</span>' : `${fmt(v)} ${esc(unit)}`);
@@ -340,8 +343,8 @@ export function renderCompare(sides, profile = []) {
   ).join("");
   return `
 <div class="cmp-cols">
-  <section class="cmp-col" aria-label="Sản phẩm A">${renderCompareColumn(a, "A", profile)}</section>
-  <section class="cmp-col" aria-label="Sản phẩm B">${renderCompareColumn(b, "B", profile)}</section>
+  <section class="cmp-col" aria-label="Sản phẩm A">${renderCompareColumn(a, "A", profile, unconfirmedCode)}</section>
+  <section class="cmp-col" aria-label="Sản phẩm B">${renderCompareColumn(b, "B", profile, unconfirmedCode)}</section>
 </div>
 <table class="cmp-table">
   <caption>Giá trị dinh dưỡng trên 100 g / 100 ml</caption>

@@ -39,6 +39,19 @@ export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
  */
 export const DEFAULT_GUARD = Object.freeze({ lockTop: 3, offMax: 1, offGap: 1, offTopRule: null });
 export const RRF_K = 60;
+
+/** Lỗi "giá trị chặn sai" (vòng 5, gợi ý 3 vòng 4): main.js chỉ quay về kết quả T1 với đúng loại lỗi này, lỗi khác
+ *  (lỗi lập trình thật) ném tiếp. */
+export class GuardValueError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "GuardValueError";
+  }
+}
+/** e có phải lỗi giá trị chặn sai của mergeFront không. Ví dụ: try { mergeFront(…) } catch (e) { if (!isGuardError(e)) throw e; } */
+export function isGuardError(e) {
+  return e instanceof GuardValueError;
+}
 /** Số kết quả đầu của mỗi nguồn đưa vào RRF (f2). */
 export const RRF_DEPTH = 5;
 
@@ -157,7 +170,7 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
   // null / NaN làm lớp chặn tự TẮT (lockTop | 0 = 0, offMax null = không giới hạn). Chọn báo lỗi thay vì lặng lẽ dùng
   // mặc định: truyền sai là lỗi lập trình, test phải thấy ngay; app gọi không truyền (undefined = DEFAULT_GUARD).
   for (const [name, v] of [["lockTop", lockTop], ["offMax", offMax], ["offGap", offGap]]) {
-    if (!Number.isInteger(v) || v < 0) throw new Error(`front-merge: ${name} phải là số nguyên ≥ 0 (nhận ${typeof v === "string" ? JSON.stringify(v) : String(v)})`);
+    if (!Number.isInteger(v) || v < 0) throw new GuardValueError(`front-merge: ${name} phải là số nguyên ≥ 0 (nhận ${typeof v === "string" ? JSON.stringify(v) : String(v)})`);
   }
   const list = Array.isArray(products) ? products : [];
   const base = t1Items(list, t1Result, k);

@@ -10,11 +10,11 @@ import {
 } from "./render.js";
 import {
   ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
-  photoOutcome, photoMessage, isUnconfirmed, OFF_WAIT_TEXT
+  photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, OFF_WAIT_TEXT
 } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
-import { mergeFront, joinOffResults } from "./front-merge.js";
+import { mergeFront, joinOffResults, isGuardError } from "./front-merge.js";
 import { createOffSearch, cleanQuery } from "./off-search.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
@@ -258,6 +258,11 @@ let shownProduct = null;
 // Sản phẩm TỰ MỞ từ ảnh đang chờ bấm "Đúng" (đợt tu-dong vòng 4): { code, lookupId, top, others } hoặc null.
 // Đặt khi lookup(…, { photo }); xóa khi bấm "Đúng", khi tra mã khác không từ ảnh, khi chọn ảnh mới, khi đăng xuất.
 let photoPending = null;
+// Số lượt lookup đã vẽ sản phẩm đang hiện (shownProduct); 0 khi không có. Cờ "chưa xác nhận" so lượt này với
+// photoPending.lookupId (vòng 5, gợi ý 2 vòng 4: không so mã).
+let shownLookupId = 0;
+// #frontMsg đang là câu KẾT QUẢ của "Chụp mặt trước" (sau khi tìm xong) chứ không phải câu tiến độ / lỗi gửi ảnh.
+let frontMsgIsResult = false;
 
 /** Vẽ lại CHỈ khung cảnh báo đầu kết quả (không vẽ lại cả kết quả: giữ chữ đang gõ trong form tủ đồ).
  *  Còn "chưa xác nhận" thì giữ dòng nhắc (đổi hồ sơ / đổi ở tab khác cũng vậy). */
@@ -265,7 +270,12 @@ function redrawAllergyAlert() {
   const box = document.getElementById(ALLERGY_ALERT_ID);
   if (!shownProduct || !box) return;
   box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length,
-    { unconfirmed: isUnconfirmed(photoPending, shownProduct.code) });
+    { unconfirmed: isUnconfirmed(photoPending, shownLookupId) });
+}
+
+/** Mã sản phẩm đang hiện mà còn "chưa xác nhận" (tự mở từ ảnh), không thì null: màn So sánh thêm dòng nhắc cho mã này. */
+function unconfirmedShownCode() {
+  return shownProduct && isUnconfirmed(photoPending, shownLookupId) ? shownProduct.code : null;
 }
 
 /** Vẽ ô tick + số nhóm của khung "Hồ sơ dị ứng" theo biến allergyProfile. */
@@ -338,9 +348,22 @@ async function lookup(raw, { photo = null } = {}) {
   if (!code) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
   const id = ++current;
   photoPending = photo ? { code, lookupId: id, top: photo.top, others: photo.others || [] } : null;
+  // Tra không từ ảnh (quét / nhập mã / lịch sử / mã mẫu / gợi ý khác): câu kết quả "Chụp mặt trước" không còn nói về
+  // trang đang hiện → xóa (vòng 5, NÊN SỬA 1 vòng 4). Câu tiến độ của lượt ảnh đang chạy (vd "Đang gửi ảnh…") giữ.
+  if (!photo && frontMsgIsResult) {
+    const m = photoFollowMessage("notPhoto");
+    sayFront(m.text, m.warn);
+  }
   codeInput.value = code;
   setMsg(`Đang tra cứu mã ${code}…`);
   shownProduct = null; // kết quả cũ bị xóa ngay dưới đây: đổi hồ sơ lúc này không vẽ gì
+  shownLookupId = 0;
+  // Lượt tự mở lấy trang lỗi / không có trên OFF → #frontMsg báo đúng (không để câu "Đã tìm xong…" một mình).
+  const openFailed = () => {
+    if (!photo || photoPending?.lookupId !== id) return;
+    const m = photoFollowMessage("openFailed");
+    sayFront(m.text, m.warn, true);
+  };
   let out = result; // nơi vẽ trang sản phẩm / lỗi
   if (photo) {
     result.innerHTML = renderPhotoShell(photo.top);
@@ -362,6 +385,7 @@ async function lookup(raw, { photo = null } = {}) {
     // Lỗi không có kind (ví dụ lỗi lập trình) thì báo "bất thường", không đổ cho mạng.
     // Tự mở từ ảnh: khung (tên / ảnh từ kết quả gộp) vẫn ở trên, "Không, xem gợi ý khác" vẫn dùng được.
     out.innerHTML = renderError(code, e?.kind || "unknown", e);
+    openFailed();
     return;
   }
   if (id !== current) return;
@@ -371,20 +395,24 @@ async function lookup(raw, { photo = null } = {}) {
   let product;
   try {
     // Không tìm thấy vẫn cho thêm vào tủ đồ, tên để trống bắt buộc nhập (lỗi mạng / máy chủ thì không có form)
-    if (!data) { out.innerHTML = renderNotFound(code) + renderAddForm({ code }); return; }
+    if (!data) { out.innerHTML = renderNotFound(code) + renderAddForm({ code }); openFailed(); return; }
     product = normalize(data, code);
-    // OFF có thể trả mã viết khác mã đã tra (vd thêm / bỏ số 0 đầu): cờ "chưa xác nhận" theo mã của sản phẩm đang hiện.
+    // OFF có thể trả mã viết khác mã đã tra (vd thêm / bỏ số 0 đầu): giữ mã của sản phẩm đang hiện (màn So sánh dùng).
     if (photo && photoPending?.lookupId === id) photoPending.code = product.code;
     // Khung cảnh báo dị ứng ngay đầu kết quả (trước <article>); hồ sơ 0 nhóm thì khung rỗng (trừ khi chưa xác nhận).
+    // Cờ "chưa xác nhận" theo LƯỢT tra (id), không theo mã (vòng 5).
     out.innerHTML = renderAllergyBox(matchAllergies(product, allergyProfile), allergyProfile.length,
-      { unconfirmed: isUnconfirmed(photoPending, product.code) })
+      { unconfirmed: isUnconfirmed(photoPending, id) })
       + renderProduct(product) + renderCompareButton(product.code) + renderAddForm(product);
     shownProduct = product;
+    shownLookupId = id;
   } catch (e) {
     console.error(e);
     if (id !== current) return;
     shownProduct = null;
+    shownLookupId = 0;
     out.innerHTML = renderError(code, "display", e);
+    openFailed();
     return;
   }
 
@@ -643,7 +671,8 @@ let lastCompare = null;
 let compareTurn = 0; // số thứ tự lượt so sánh, như biến current của lookup(): lượt cũ về muộn thì bỏ
 
 function drawCompare() {
-  compareResult.innerHTML = lastCompare ? renderCompare(lastCompare, allergyProfile) : "";
+  // Sản phẩm tự mở từ ảnh còn chưa xác nhận: khối dị ứng ở So sánh cũng có dòng nhắc (vòng 5, gợi ý 6 vòng 4).
+  compareResult.innerHTML = lastCompare ? renderCompare(lastCompare, allergyProfile, { unconfirmedCode: unconfirmedShownCode() }) : "";
 }
 
 /** Vẽ lại màn So sánh khi mở: danh sách "đã quét gần đây" mới nhất + kết quả cũ theo hồ sơ hiện tại. */
@@ -900,11 +929,13 @@ if (ocrPick.warning) console.warn(ocrPick.warning);
 /**
  * Dòng trạng thái của "Chụp mặt trước": chỉ đổi chữ (textContent), chữ máy chủ không bao giờ thành HTML.
  * Câu bị xóa / thay thì nút "Tới phần đăng nhập" ẩn theo (nút chỉ đi kèm câu lỗi 401; chỗ hiện nút gọi SAU sayFront).
+ * isResult: câu là KẾT QUẢ tìm (lookup không từ ảnh sẽ xóa câu này), không phải câu tiến độ / lỗi gửi ảnh.
  */
-function sayFront(text = "", warn = false) {
+function sayFront(text = "", warn = false, isResult = false) {
   frontMsg.textContent = text;
   frontMsg.classList.toggle("warn", warn);
   frontRelogin.hidden = true;
+  frontMsgIsResult = isResult && text !== "";
 }
 
 /** Hiện nút theo frontButtonState(authState): hidden / loading / login / ready. */
@@ -942,6 +973,7 @@ function clearPhotoResult() {
   ++current; // lượt lookup tự mở đang chờ mạng (nếu có) về muộn thì bỏ
   photoPending = null;
   shownProduct = null;
+  shownLookupId = 0;
   result.innerHTML = "";
   setMsg();
 }
@@ -1007,6 +1039,11 @@ function bindFrontImages(el) {
  */
 async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded }) {
   const stale = () => id !== frontTurn || current !== lookupMark;
+  // Vòng 5 (gợi ý 1 vòng 4): đã chọn ảnh khác / tra mã khác trong lúc chờ máy chủ OCR → thôi, KHÔNG gọi Open Food Facts.
+  if (stale()) {
+    if (id === frontTurn) sayFront();
+    return;
+  }
   // Câu tìm làm sạch như khung đo vòng 3 (≤ 2 câu = ≤ 2 lượt, chạy song song, mỗi lượt hết giờ SEARCH_TIMEOUT_MS).
   const queries = cleanQuery(found.lines, { idf: s.rIndex.index.idf });
   let off = { ok: false, kind: "none" };
@@ -1026,6 +1063,8 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   try {
     merged = mergeFront(s.t1, s.rIndex, s.products, found, off); // lớp chặn mặc định (không truyền lockTop / offMax)
   } catch (e) {
+    // Chỉ lỗi "giá trị chặn sai" mới quay về kết quả T1 (vòng 5, gợi ý 3 vòng 4); lỗi khác ném tiếp cho nơi gọi.
+    if (!isGuardError(e)) throw e;
     console.error(e);
     merged = mergeFront(s.t1, s.rIndex, s.products, found, null); // = đúng kết quả T1
   }
@@ -1035,7 +1074,7 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     frontBox.hidden = false;
   }
   const note = photoMessage({ kind: outcome.kind, offFailed: queries.length > 0 && !off.ok });
-  sayFront(note.text, note.warn);
+  sayFront(note.text, note.warn, true);
   if (outcome.kind === "open") {
     lookup(outcome.top.code, { photo: outcome }); // vẽ khung NGAY (trước khi gọi mạng), trang sản phẩm vẽ sau
   } else {
@@ -1056,9 +1095,20 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
 function confirmPhoto() {
   const p = photoPending;
   if (!p) return;
-  if (!shownProduct || shownProduct.code !== p.code || p.lookupId !== current) { lookup(p.code); return; }
+  if (!shownProduct || shownLookupId !== p.lookupId || p.lookupId !== current) { lookup(p.code); return; }
   photoPending = null;
   redrawAllergyAlert();
+  // #frontMsg không còn nhắc kiểm tra sau khi đã xác nhận (vòng 5, NÊN SỬA 1 vòng 4).
+  const m = photoFollowMessage("confirmed");
+  sayFront(m.text, m.warn);
+  // Lưu TRƯỚC, câu báo theo kết quả (vòng 5, gợi ý 5 vòng 4): addHistory nuốt lỗi ghi (storage.js) nên đọc lại để biết.
+  let saved = false;
+  try {
+    renderHistory(addHistory(shownProduct.code, shownProduct.name));
+    saved = getHistory().some((x) => x.code === shownProduct.code);
+  } catch (e) {
+    console.error(e);
+  }
   const box = document.getElementById(PHOTO_CONFIRM_ID);
   if (box) {
     const ask = box.querySelector(".photo-ask");
@@ -1067,12 +1117,7 @@ function confirmPhoto() {
     if (others) { others.hidden = true; others.innerHTML = ""; }
     box.focus({ preventScroll: true }); // nút vừa bấm đã mất: giữ focus trong khung
     const status = box.querySelector(".photo-status");
-    if (status) status.textContent = "Đã xác nhận, đã lưu vào lịch sử tra cứu.";
-  }
-  try {
-    renderHistory(addHistory(shownProduct.code, shownProduct.name));
-  } catch (e) {
-    console.error(e);
+    if (status) status.textContent = confirmStatusText(saved);
   }
 }
 
@@ -1237,7 +1282,13 @@ frontFile.addEventListener("change", async (ev) => {
   // Đợt tu-dong vòng 4: tìm thêm trên OFF, gộp, TỰ MỞ mục 1 (khung xác nhận) hoặc "Chưa tìm thấy…", cuộn tới đó.
   // (Đợt chup-mat-gon / cung-co: màn 360×740 thì kết quả nằm dưới mép màn hình, nên cuộn ÍT NHẤT tới khung, block
   // "nearest"; không đổi focus.)
-  await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded });
+  // Vòng 5 (NÊN SỬA 2 vòng 4): lỗi bất ngờ khi tìm / gộp / vẽ không để dòng trạng thái kẹt ở "Đang tìm thêm…".
+  try {
+    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded });
+  } catch (e) {
+    console.error(e);
+    if (id === frontTurn) sayFront("Có lỗi khi tìm sản phẩm. Chọn ảnh lại.", true);
+  }
 });
 
 // Ủy quyền sự kiện: #result (khung xác nhận, gợi ý khác, "Chưa tìm thấy…") và #frontBox (ô sửa chữ + "Tìm lại").

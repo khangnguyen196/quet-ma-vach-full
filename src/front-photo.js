@@ -241,17 +241,37 @@ export function photoOutcome(merged) {
  */
 export function photoMessage({ kind, offFailed = false } = {}) {
   if (offFailed === true) return { text: OFF_FAIL_TEXT, warn: false };
-  if (kind === "open") return { text: "Đã mở sản phẩm khớp nhất bên dưới. Hãy kiểm tra có đúng sản phẩm không.", warn: false };
+  // Vòng 5 (NÊN SỬA 1 vòng 4): câu trung tính, không khẳng định trang đang hiện (trang có thể lỗi, người dùng có thể đã
+  // tra mã khác hoặc đã bấm "Đúng"). Câu cũ: "Đã mở sản phẩm khớp nhất bên dưới. Hãy kiểm tra có đúng sản phẩm không."
+  if (kind === "open") return { text: "Đã tìm xong, xem kết quả bên dưới.", warn: false };
   return { text: "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts.", warn: false };
 }
 
 /**
- * Sản phẩm đang hiện (shownCode) có đang "chưa xác nhận" không: pending = sản phẩm tự mở từ ảnh đang chờ bấm "Đúng"
- * ({ code }) hoặc null. main.js đặt pending khi tự mở, xóa khi bấm "Đúng", khi tra mã khác không từ ảnh, khi chọn ảnh
- * mới, khi đăng xuất.
+ * Câu #frontMsg khi lượt tự mở xong / bị thay (vòng 5, NÊN SỬA 1 vòng 4). what:
+ * "openFailed" (trang sản phẩm tự mở lỗi mạng / máy chủ / không có trên OFF) → câu cảnh báo;
+ * "notPhoto" (tra mã không từ ảnh: quét / nhập mã / lịch sử / mã mẫu / gợi ý khác) và "confirmed" (đã bấm "Đúng")
+ * → xóa câu. Khác → xóa câu. Trả { text, warn }.
  */
-export function isUnconfirmed(pending, shownCode) {
-  return !!pending && plainCode(pending.code) && pending.code === shownCode;
+export function photoFollowMessage(what) {
+  if (what === "openFailed") return { text: "Không mở được trang sản phẩm khớp nhất, xem bên dưới.", warn: true };
+  return { text: "", warn: false };
+}
+
+/**
+ * Sản phẩm đang hiện có đang "chưa xác nhận" không (vòng 5, gợi ý 2 vòng 4: theo LƯỢT TRA, không theo mã): pending =
+ * sản phẩm tự mở từ ảnh đang chờ bấm "Đúng" ({ lookupId, code }) hoặc null; shownLookupId = số lượt lookup đã vẽ sản
+ * phẩm đang hiện. Không phụ thuộc mã có đúng 8–14 chữ số. main.js đặt pending khi tự mở, xóa khi bấm "Đúng", khi tra mã
+ * khác không từ ảnh, khi chọn ảnh mới, khi đăng xuất.
+ * Ví dụ: isUnconfirmed({ code: "abc", lookupId: 7 }, 7) → true
+ */
+export function isUnconfirmed(pending, shownLookupId) {
+  return !!pending && Number.isInteger(pending.lookupId) && pending.lookupId > 0 && pending.lookupId === shownLookupId;
+}
+
+/** Câu trong khung sau khi bấm "Đúng" (vòng 5, gợi ý 5 vòng 4): theo kết quả lưu lịch sử (saved: đọc lại thấy mã). */
+export function confirmStatusText(saved) {
+  return saved === true ? "Đã xác nhận, đã lưu vào lịch sử tra cứu." : "Đã xác nhận (chưa lưu được vào lịch sử).";
 }
 
 /**
