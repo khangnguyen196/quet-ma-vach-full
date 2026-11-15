@@ -1069,7 +1069,7 @@ function bindFrontImages(el) {
  * id: lượt frontTurn; lookupMark: số lượt lookup lúc bắt đầu (quét / nhập mã / bấm lịch sử trong lúc chờ → bỏ, không tự
  * mở); fromRetry: "Tìm lại" (không cuộn, không vẽ lại ô sửa chữ).
  */
-async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded }) {
+async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded, extraP = null }) {
   const stale = () => id !== frontTurn || current !== lookupMark;
   // Vòng 5 (gợi ý 1 vòng 4): đã chọn ảnh khác / tra mã khác trong lúc chờ máy chủ OCR → thôi, KHÔNG gọi Open Food Facts.
   if (stale()) {
@@ -1079,11 +1079,12 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   // Câu tìm làm sạch như khung đo vòng 3 (≤ 2 câu = ≤ 2 lượt, chạy song song, mỗi lượt hết giờ SEARCH_TIMEOUT_MS).
   const queries = cleanQuery(found.lines, { idf: s.rIndex.index.idf });
   // Vòng 7: kho phụ chờ SONG SONG với OFF, tối đa SEARCH_TIMEOUT_MS (bằng hết giờ một lượt OFF; không có câu OFF cũng vậy).
-  // Đã có thì dùng ngay; chưa tải thì bắt đầu tải ("Tìm lại"). Hết giờ / lỗi → xi = null → kết quả GIỐNG HỆT khi chưa có
-  // kho phụ; lần tải dở vẫn chạy tiếp, lần sau dùng được.
+  // extraP = lần tải của CHÍNH lượt này (bắt đầu ở sự kiện chọn ảnh / "Tìm lại"): mỗi lượt thử tải nhiều nhất 1 lần, lỗi
+  // thì lượt sau thử lại. Đã có thì dùng ngay. Hết giờ / lỗi → xi = null → kết quả GIỐNG HỆT khi chưa có kho phụ; lần tải
+  // dở vẫn chạy tiếp, lần sau dùng được.
   const extraReady = frontExtra
     ? Promise.resolve(frontExtra)
-    : raceTimeout(loadFrontExtra(), SEARCH_TIMEOUT_MS, () => new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua."))
+    : raceTimeout(Promise.resolve(extraP), SEARCH_TIMEOUT_MS, () => new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua."))
       .catch((e) => { console.warn(e?.message || e); return null; });
   let off = { ok: false, kind: "none" };
   if (queries.length) {
@@ -1214,7 +1215,10 @@ function onFrontClick(ev) {
   frontAbort?.abort();
   const id = ++frontTurn;
   retryTurn = id;
-  showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true })
+  // kho phụ chưa tải (hoặc lần trước lỗi) thì "Tìm lại" cũng bắt đầu tải (vòng 7)
+  const extraP = loadFrontExtra();
+  extraP.catch(() => {});
+  showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true, extraP })
     .catch((e) => { console.error(e); if (id === frontTurn) sayFront("Có lỗi khi tìm lại. Thử lại.", true); })
     .finally(() => { if (retryTurn === id) retryTurn = 0; });
 }
@@ -1260,7 +1264,8 @@ frontFile.addEventListener("change", async (ev) => {
   const searchReady = loadFrontSearch();
   searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
   // Vòng 7: kho phụ tải cùng lúc (cùng điều kiện như T1 + danh mục); lỗi chỉ ghi console (trong loadFrontExtra).
-  loadFrontExtra().catch(() => {});
+  const extraP = loadFrontExtra();
+  extraP.catch(() => {});
 
   // Token lấy NGAY lúc gửi (thư viện tự làm mới), chỉ giữ trong lượt này, không ghi ra console.
   let token = "";
@@ -1337,7 +1342,7 @@ frontFile.addEventListener("change", async (ev) => {
   // "nearest"; không đổi focus.)
   // Vòng 5 (NÊN SỬA 2 vòng 4): lỗi bất ngờ khi tìm / gộp / vẽ không để dòng trạng thái kẹt ở "Đang tìm thêm…".
   try {
-    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded });
+    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded, extraP });
   } catch (e) {
     console.error(e);
     if (id === frontTurn) sayFront("Có lỗi khi tìm sản phẩm. Chọn ảnh lại.", true);
