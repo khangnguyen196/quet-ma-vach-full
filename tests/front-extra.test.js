@@ -1,4 +1,4 @@
-// Test src/front-extra.js (đợt tu-dong vòng 6, P5): kho phụ 893 cách C1 (phần thuần, CHƯA nối vào app).
+// Test src/front-extra.js (đợt tu-dong vòng 6, P5): kho phụ 893 cách C1 (phần thuần, đã nối vào app ở vòng 7: main.js qua photoMerge).
 // Danh mục thật public/chup-mat-do/danh-muc-vn.json; kho phụ là dữ liệu giả nhỏ (không đọc file kho phụ lớn, không
 // gọi mạng). Chạy: npm test
 import { test, describe } from "node:test";
