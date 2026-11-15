@@ -30,8 +30,12 @@ export const SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const SEARCH_CACHE_MAX = 30;
 export const SEARCH_CACHE_KEY = "qmv-off-search";
 export const SEARCH_PAGE_SIZE = 24;
-// generic_name*: để chữ ứng viên OFF giống trường text của danh mục (tên + hãng + tên chung) khi chấm BM25
-export const SEARCH_FIELDS = "code,product_name,product_name_vi,product_name_en,generic_name,generic_name_vi,generic_name_en,brands,image_front_small_url,countries_tags";
+// product_name* + brands + generic_name*: để chữ ứng viên OFF giống trường text của danh mục (docText của
+// test-ocr/chup-mat-do/vn-data.mjs: MỌI product_name*, brands, MỌI generic_name*) khi chấm BM25. Không xin được "mọi
+// ngôn ngữ" nên chọn theo 1.699 bản ghi VN của bản xuất 08/11/2026: product_name 1.404, _en 928, _vi 358, _fr 191,
+// _de 19, _es 16, _it 10 (các ngôn ngữ khác ≤ 10 mỗi thứ, cộng 64); generic_name 27, _vi 20, _en 12, _fr 5.
+export const SEARCH_FIELDS = "code,product_name,product_name_vi,product_name_en,product_name_fr,product_name_de,product_name_es,product_name_it,"
+  + "generic_name,generic_name_vi,generic_name_en,generic_name_fr,brands,image_front_small_url,countries_tags";
 /** Độ dài tối đa chữ chấm điểm (text) của một ứng viên. */
 export const HIT_TEXT_MAX = 400;
 const IMG_PREFIX = "https://images.openfoodfacts.org/";
@@ -227,8 +231,8 @@ const str = (x) => (typeof x === "string" ? x.trim() : "");
 /**
  * Thân JSON của search.pl → [{ code, name, brand, img, vn, text }]; thân sai dạng (không có mảng products) → null.
  * Bỏ mã không phải 8–14 chữ số (như gợi ý danh mục), bỏ mã trùng; img chỉ nhận URL images.openfoodfacts.org.
- * text = các product_name* + brands + các generic_name* khác nhau (như trường text của danh mục), tối đa HIT_TEXT_MAX
- * ký tự: chữ để chấm điểm BM25 khi gộp với T1 (không hiển thị).
+ * text = mọi product_name* + brands + mọi generic_name* (chuỗi khác rỗng, theo thứ tự khóa trong JSON, KHÔNG bỏ trùng),
+ * y như docText của danh mục, tối đa HIT_TEXT_MAX ký tự: chữ để chấm điểm BM25 khi gộp với T1 (không hiển thị).
  */
 export function parseSearch(json) {
   if (!json || typeof json !== "object" || !Array.isArray(json.products)) return null;
@@ -244,8 +248,15 @@ export function parseSearch(json) {
     const brand = Array.isArray(p.brands) ? p.brands.map(str).filter(Boolean).join(", ") : str(p.brands);
     const img = typeof p.image_front_small_url === "string" && p.image_front_small_url.startsWith(IMG_PREFIX) ? p.image_front_small_url : "";
     const vn = Array.isArray(p.countries_tags) && p.countries_tags.includes("en:vietnam");
-    const generic = [p.generic_name_vi, p.generic_name, p.generic_name_en].map(str);
-    const text = [...new Set([...names, brand, ...generic].filter(Boolean))].join(" ").slice(0, HIT_TEXT_MAX);
+    // như vnRecord + docText (vn-data.mjs): giữ trùng, cùng thứ tự trường
+    const allNames = [];
+    const generic = [];
+    for (const [k, v] of Object.entries(p)) {
+      if (typeof v !== "string" || !v.trim()) continue;
+      if (/^product_name(_[a-z]{2,3})?$/.test(k)) allNames.push(v.trim());
+      else if (/^generic_name(_[a-z]{2,3})?$/.test(k)) generic.push(v.trim());
+    }
+    const text = [...allNames, brand, ...generic].join(" ").slice(0, HIT_TEXT_MAX);
     out.push({ code, name, brand, img, vn, text });
   }
   return out;
