@@ -1,5 +1,6 @@
 // Test src/front-rank.js (đợt nang-t1): xếp hạng gợi ý "Chụp mặt trước" có tùy chọn thử cách tìm mới.
-// opts tắt hết (mặc định) phải TRÙNG suggestFromItems / suggestFromText của src/front-search.js trên danh mục thật
+// opts tắt hết (mặc định) phải trùng suggestFromItems / suggestFromText của src/front-search.js trừ các luật tách chữ
+// có từ vựng (đợt tu-dong: front-rank truyền từ vựng + bí danh của chỉ mục, front-search không), trên danh mục thật
 // và fixture tests/fixtures/front-ocr-3.json (chữ máy chủ OCR thật của 3 ảnh). Chạy: npm test
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -39,6 +40,20 @@ describe("front-rank mặc định = front-search (đường B / ô sửa chữ)
       assert.deepEqual(mod.rankFromItems(t1, rIndex, a.items).hits.map((h) => h.code), a.top5);
     });
   }
+
+  test("chỗ KHÁC duy nhất (đợt tu-dong): dòng 'Up' / '7 up' — rankFrom* có 'up' / '7up', suggestFrom* thì không", () => {
+    const items = ["Up", "Soda chanh", "Khong calo"].map((text, k) => ({ text, poly: [[10, 10 + k * 60], [410, 10 + k * 60], [410, 50 + k * 60], [10, 50 + k * 60]], score: 0.95 }));
+    const got = mod.rankFromItems(t1, rIndex, items);
+    const want = suggestFromItems(t1, index, items);
+    assert.deepEqual(got.query, ["up", "soda", "chanh", "calo"]);
+    assert.deepEqual(want.query, ["soda", "chanh", "calo"]);
+    assert.deepEqual(got.lines, want.lines, "dòng chữ vẫn trùng");
+    assert.equal(got.hits[0].code, "8934588022111", "7Up hương chanh");
+    assert.notEqual(want.hits[0].code, "8934588022111");
+    const typed = "Soda chanh diet 7 up";
+    assert.ok(mod.rankFromText(t1, rIndex, typed).query.includes("7up"));
+    assert.ok(!suggestFromText(t1, index, typed).query.includes("7up"));
+  });
 
   test("ô sửa chữ (ca muối + chữ 1 ảnh) trùng suggestFromText", () => {
     for (const text of [SALT, fixture.anh[0].items.map((it) => it.text).join("\n"), "", "  \n "]) {
