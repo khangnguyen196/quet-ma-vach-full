@@ -126,6 +126,8 @@ test("pickMethod: chỉ cách qua; 7Up vị trí 1 → trong 5 → ngoại → d
   const m = (name, o = {}) => ({ name, pass: true, diet1: 0, diet5: 0, foreign5: 0, probe5: 0, ...o });
   assert.equal(pickMethod([m("G1"), m("G3", { diet1: 2 }), m("G2-g1-w2", { diet1: 3, pass: false })]), "G3");
   assert.equal(pickMethod([m("G1", { diet5: 1 }), m("G2-g1-w2", { diet5: 2 })]), "G2-g1-w2");
+  assert.equal(pickMethod([m("G3", { diet1: 1, diet5: 1 }), m("G1", { diet1: 0, diet5: 4, foreign5: 9 })]), "G3", "vị trí 1 xét trước trong 5");
+  assert.equal(pickMethod([m("G3", { diet5: 2, foreign5: 0 }), m("G1", { diet5: 1, foreign5: 9 })]), "G3", "trong 5 xét trước ca ngoại");
   assert.equal(pickMethod([m("G1", { foreign5: 1, probe5: 9 }), m("G3", { foreign5: 2 })]), "G3");
   assert.equal(pickMethod([m("G3"), m("G2-g1-w3"), m("G1")]), "G1");
   assert.equal(pickMethod([m("G3"), m("G2-g1-w3"), m("G2-g2-w2")]), "G2-g2-w2");
