@@ -18,6 +18,16 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(process.env.TEMP || os.tmpdir(), "off-test-"));
 }
 
+// Vòng 5 tu-dong (P2.10): thư mục tạm off-test-* phải được dọn sau mỗi test (trước đây còn sót 273 thư mục ở D:\tmp).
+let leftover = null;
+test("tmpDir: thư mục tạm của test trước đã được dọn (1/2: tạo)", () => {
+  leftover = tmpDir();
+  assert.ok(fs.existsSync(leftover));
+});
+test("tmpDir: thư mục tạm của test trước đã được dọn (2/2: kiểm)", () => {
+  assert.equal(fs.existsSync(leftover), false, leftover);
+});
+
 function fakeFetch(responses) {
   const calls = [];
   const fn = async (url) => {
