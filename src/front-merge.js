@@ -20,6 +20,7 @@
 //   offTopRule { gap, minWords } (chỉ f1): ứng viên chỉ có trên OFF chỉ được xếp trên mục danh mục khi điểm ≥ điểm mục
 //               đó + gap VÀ khớp ≥ minWords từ khác nhau của câu tìm T1; không đạt thì xếp sau mọi mục danh mục.
 //   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k, offGap: 0 } = không chặn.
+//   Giá trị sai (null, NaN, Infinity, số âm / lẻ, chuỗi) → báo lỗi (vòng 4), không bao giờ lặng lẽ tắt lớp chặn.
 //
 // Ví dụ:
 //   const r = rankFromItems(t1, rIndex, items);                         // T1 (src/front-rank.js)
@@ -96,7 +97,7 @@ function t1Items(products, t1Result, k) {
  * đã xếp, mục chỉ có trên OFF (source "off") tối đa offMax; còn chỗ trống thì lấp bằng mục OFF bị gạt (thứ tự cũ).
  */
 function applyGuard(ranked, base, { k, lockTop, offMax }) {
-  const lock = base.slice(0, Math.max(0, Math.min(lockTop | 0, base.length)));
+  const lock = base.slice(0, Math.min(lockTop, base.length));
   const out = [...lock];
   const have = new Set(lock.map((x) => x.code));
   const spare = [];
@@ -123,7 +124,8 @@ function applyGuard(ranked, base, { k, lockTop, offMax }) {
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
  * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule }
- * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD).
+ * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD; lockTop / offMax / offGap không phải số nguyên
+ * ≥ 0 thì báo lỗi, không tự tắt lớp chặn).
  */
 export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {}) {
   const {
@@ -131,10 +133,16 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
     lockTop = DEFAULT_GUARD.lockTop, offMax = DEFAULT_GUARD.offMax, offTopRule = DEFAULT_GUARD.offTopRule,
   } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
+  // Vòng 4: giá trị chặn sai (null, NaN, Infinity, số âm, số lẻ, chuỗi…) → báo lỗi ngay, kể cả khi OFF lỗi. Trước đây
+  // null / NaN làm lớp chặn tự TẮT (lockTop | 0 = 0, offMax null = không giới hạn). Chọn báo lỗi thay vì lặng lẽ dùng
+  // mặc định: truyền sai là lỗi lập trình, test phải thấy ngay; app gọi không truyền (undefined = DEFAULT_GUARD).
+  for (const [name, v] of [["lockTop", lockTop], ["offMax", offMax], ["offGap", offGap]]) {
+    if (!Number.isInteger(v) || v < 0) throw new Error(`front-merge: ${name} phải là số nguyên ≥ 0 (nhận ${typeof v === "string" ? JSON.stringify(v) : String(v)})`);
+  }
   const list = Array.isArray(products) ? products : [];
   const base = t1Items(list, t1Result, k);
   if (!okOff(offResult)) return base;
-  const guard = (ranked) => applyGuard(ranked, base, { k, lockTop, offMax: Number.isFinite(offMax) ? offMax : k });
+  const guard = (ranked) => applyGuard(ranked, base, { k, lockTop, offMax });
 
   const index = rIndex.index;
   const byCode = new Map();
