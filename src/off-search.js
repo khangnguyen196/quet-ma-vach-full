@@ -131,16 +131,15 @@ export function isVietSyllable(w) {
   return typeof w === "string" && w.length <= 7 && SYLLABLE.test(w);
 }
 
-const unknownIdfCache = new WeakMap();
-/** idf cho từ không có trong chỉ mục: trung vị idf của chỉ mục (từ lạ không được coi là "hiếm nhất"). */
-function unknownIdf(idf) {
-  if (!idf || typeof idf.values !== "function") return 1;
-  if (unknownIdfCache.has(idf)) return unknownIdfCache.get(idf);
-  const v = [...idf.values()].filter(Number.isFinite).sort((a, b) => a - b);
-  const m = v.length ? v[Math.floor(v.length / 2)] : 1;
-  unknownIdfCache.set(idf, m);
-  return m;
-}
+/**
+ * idf cho từ KHÔNG có trong chỉ mục (âm tiết hợp lệ nhưng danh mục không có) khi xếp dòng / chọn từ: 0 = không cộng điểm,
+ * chỉ dùng để lấp câu khi dòng thiếu từ danh mục. Vòng 2 dùng trung vị idf của chỉ mục, nhưng trong danh mục 1.452 sản
+ * phẩm 1.296 / 2.116 từ chỉ có ở 1 sản phẩm nên trung vị = idf lớn nhất (6,876): từ lạ thành "hiếm nhất", dòng rác dài
+ * ("Mui Bin Tinh Sấy", "khoi lung tinh") đứng đầu. Đo vòng 3 (câu tìm 30 ảnh, thước đo: câu 1 có ≥ 2 từ của sản phẩm
+ * đúng; D:\tmp\tu-dong\ket-qua\v3-unknown-idf.json): trung vị 6/30 (B), 8/30 (A); phân vị 25% (6,029) 6 / 8; phân vị
+ * 10% (5,41) 6 / 8; idf nhỏ nhất (2,798) 7 / 9; 0: 8 / 9, và chỉ 0 cho câu ca muối có "coop" → chọn 0.
+ */
+export const UNKNOWN_IDF = 0;
 
 /** Ghép từ thành câu, tối đa QUERY_CHARS_MAX ký tự. */
 function joinCapped(words) {
@@ -161,17 +160,20 @@ function topWords(words, n, idfOf) {
 /**
  * Chữ OCR (mảng dòng, mảng { text }, hoặc chuỗi nhiều dòng) → tối đa QUERY_MAX (2) câu tìm, mỗi câu 2–3 từ (không dấu).
  * - Chỉ giữ từ "đáng tin": có trong từ vựng danh mục (vocab / idf) HOẶC là âm tiết tiếng Việt hợp lệ (isVietSyllable).
- * - Xếp dòng theo tổng idf các từ (từ hiếm trước; từ không có trong chỉ mục lấy trung vị idf), không theo độ dài.
+ * - Xếp dòng theo tổng idf các từ (từ hiếm trước; từ không có trong chỉ mục: UNKNOWN_IDF = 0), không theo độ dài.
  * - Câu 1 = dòng điểm cao nhất (dòng > 3 từ: lấy 3 từ hiếm nhất; dòng 1 từ: ghép từ hiếm nhất của dòng khác);
  *   câu 2 = dòng điểm cao thứ hai (cùng cách), không có thì 2–3 từ hiếm tiếp theo của dòng 1.
  * - Câu 1 từ chỉ được khi không còn từ nào để ghép và từ đó ≥ 5 chữ cái.
- * opts: idf (Map từ → idf của chỉ mục T1, cũng dùng làm từ vựng), vocab (từ vựng riêng nếu khác idf).
+ * opts: idf (Map từ → idf của chỉ mục T1, cũng dùng làm từ vựng), vocab (từ vựng riêng nếu khác idf), unknownIdf (số:
+ * thay UNKNOWN_IDF, chỉ để đo).
  * Không có từ đáng tin → [].
  */
-export function cleanQuery(input, { vocab = null, idf = null } = {}) {
+export function cleanQuery(input, { vocab = null, idf = null, unknownIdf: unk = null } = {}) {
   const vb = vocab || idf;
-  const dflt = unknownIdf(idf);
-  const idfOf = (w) => (idf && typeof idf.get === "function" && Number.isFinite(idf.get(w)) ? idf.get(w) : dflt);
+  const hasIdf = !!(idf && typeof idf.get === "function");
+  // không có chỉ mục: mọi từ 1 điểm (dòng nhiều từ trước, như vòng 2); có chỉ mục: từ lạ UNKNOWN_IDF (unknownIdf để đo)
+  const dflt = Number.isFinite(unk) ? unk : hasIdf ? UNKNOWN_IDF : 1;
+  const idfOf = (w) => (hasIdf && Number.isFinite(idf.get(w)) ? idf.get(w) : dflt);
   const lines = [];
   const seen = new Set();
   toLines(input).forEach((text, i) => {
