@@ -13,6 +13,10 @@
 // vị trí (tới 50) của 8934588022111 "7Up hương chanh" và 8934588023064 "7Up"; thêm danh mục THỬ có 8934588752117
 // (D:\tmp\tu-dong\ket-qua\danh-muc-thu-7up.json, vòng 1) nếu có file.
 // Luật giữ: không ảnh nào ở bộ B mất vị trí 1 hay rơi khỏi 5 so với mốc (bộ A chỉ báo số).
+//
+// LƯU Ý (vòng 4, gợi ý 2 của reviewer vòng 3): luật ii trong file này là bản ĐỜI VÒNG 2 (shortLineOk riêng của script).
+// Vòng 3 đã thu hẹp luật ii trong app (t1.shortLineOk có aliasDf, public/chup-mat-do/t1.mjs), nên số chạy lại bằng
+// script này CHỈ đúng cho vòng 2, không trùng số của app hiện tại. Đo luật của app thì dùng tu-dong-do.mjs / front-rank.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

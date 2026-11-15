@@ -4,7 +4,8 @@
 //
 //   node test-ocr/chup-mat-do/tu-dong-do.mjs [--sets B,A] [--loo] [--chi-cache] [--max-calls 120] [--run-cap N]
 //        [--mot-luot] [--tag dot1] [--cache D:\tmp\tu-dong\cache-off] [--out D:\tmp\tu-dong\ket-qua]
-//        [--luot D:\tmp\tu-dong\off-luot.json]
+//        [--luot D:\tmp\tu-dong\off-luot.json] [--vong 6]
+// Vòng 4: --vong N chọn khóa đếm lượt "vongN" của file --luot (mặc định vong3, sổ cũ vẫn đọc được), tên file ra theo vòng.
 // Vòng 3: trần --max-calls tính trên khóa "vong3" của file --luot; --run-cap chia trần cho từng đợt lấy; --loo thêm câu
 // OFF của bỏ-một-ra không rò bộ B (looCases: chỉ mục + từ vựng không có sản phẩm đúng); ra độ phủ từng bộ (coverage).
 //
@@ -47,8 +48,16 @@ export const BREAKER_PAUSE_MS = 120000;
 export const DEFAULT_CAP = 120;
 export const LUOT_FILE = "D:\\tmp\\tu-dong\\off-luot.json";
 export const LUOT_START = 76;
-/** Khóa đếm lượt của vòng đang chạy trong file --luot. */
+/** Khóa đếm lượt mặc định trong file --luot (vòng 3); vòng khác truyền --vong N (roundKeyOf). */
 export const ROUND_KEY = "vong3";
+
+/** Tham số --vong N → khóa "vongN" (N 1–99); không truyền → ROUND_KEY (sổ cũ vẫn đọc được); sai → báo lỗi. */
+export function roundKeyOf(arg) {
+  if (arg === undefined || arg === null) return ROUND_KEY;
+  const s = String(arg);
+  if (!/^[1-9]\d?$/.test(s)) throw new Error(`--vong phải là số vòng 1–99 (nhận "${s}")`);
+  return `vong${s}`;
+}
 /** Nơi cộng lượt OFF (test-ocr/outputs/api_usage.json, đã gitignore): worktree đang chạy VÀ thư mục chính của repo
  *  (hồ sơ dự án đếm ở thư mục chính; vòng 1–2 chỉ ghi worktree). */
 export const MAIN_ROOT = "D:\\quet-ma-vach-full";
@@ -89,7 +98,14 @@ function writeLuot(file, c) {
 /** Cộng n lượt OFF vào test-ocr/outputs/api_usage.json (theo tháng) của từng thư mục trong roots (mặc định: worktree
  *  đang chạy + thư mục chính MAIN_ROOT, bỏ trùng). */
 export function addUsage(n, now = new Date(), roots = [ROOT, MAIN_ROOT]) {
-  for (const root of [...new Set(roots.map((r) => path.resolve(r)))]) {
+  // Vòng 4: Windows không phân biệt hoa / thường ("d:\x" và "D:\X" là một) → bỏ trùng theo chữ thường.
+  const seen = new Set();
+  const uniq = [];
+  for (const r of roots.map((x) => path.resolve(x))) {
+    const k = process.platform === "win32" ? r.toLowerCase() : r;
+    if (!seen.has(k)) { seen.add(k); uniq.push(r); }
+  }
+  for (const root of uniq) {
     const file = path.join(root, "test-ocr", "outputs", "api_usage.json");
     let j = {};
     try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* chưa có */ }
@@ -279,6 +295,8 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const outDir = arg("--out", "D:\\tmp\\tu-dong\\ket-qua");
   const luotFile = arg("--luot", LUOT_FILE);
   const tag = arg("--tag", "");
+  // --vong N (vòng 4): lượt của lần chạy này đếm vào khóa vongN của file --luot (mặc định vong3 như cũ)
+  const roundKey = roundKeyOf(argv.includes("--vong") ? argv[argv.indexOf("--vong") + 1] : undefined);
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.mkdirSync(outDir, { recursive: true });
   if (!fs.existsSync(luotFile)) writeLuot(luotFile, { batDau: LUOT_START });
@@ -287,7 +305,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const app = await loadApp();
   let net = null;
   const disk = makeDiskFetch({
-    cacheDir, chiCache, cap, runCap, luotFile,
+    cacheDir, chiCache, cap, runCap, luotFile, roundKey,
     netFetch: async (url) => { net ||= await browserNet(); return net.fetch(url); },
   });
   // timeoutMs dài hơn app (7 giây) để đo chất lượng tìm, không đo tốc độ mạng; limit cao vì đã giãn 8 giây ở makeDiskFetch.
@@ -327,7 +345,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const per = rows.flatMap((r) => r.offPer);
   const allSets = [...new Set(rows.map((r) => r.set))];
   const summary = {
-    startedAt, endedAt: new Date().toISOString(), sets: setNames, withLoo, chiCache, cap, runCap: Number.isFinite(runCap) ? runCap : null,
+    startedAt, endedAt: new Date().toISOString(), sets: setNames, withLoo, chiCache, cap, roundKey, runCap: Number.isFinite(runCap) ? runCap : null,
     bySet: Object.fromEntries(allSets.map((s) => {
       const p = rows.filter((r) => r.set === s);
       return [s, { baseline: SETS[s]?.baseline ?? null, t1: tallyBy(p, "t1Rank"), off: tallyBy(p, "offRank"), offAny: p.filter((r) => r.offAnyPos != null).length, caseErr: p.filter((r) => !r.offAllOk).length, coverage: coverage(p) }];
@@ -341,7 +359,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     luot: readLuot(luotFile),
   };
   const stamp = startedAt.replace(/[:.]/g, "-");
-  const outFile = path.join(outDir, `tu-dong-do-v3-${setNames.join("")}${withLoo ? "-loo" : ""}${chiCache ? "-chi-cache" : ""}${tag ? "-" + tag : ""}-${stamp}.json`);
+  const outFile = path.join(outDir, `tu-dong-do-${roundKey.replace("vong", "v")}-${setNames.join("")}${withLoo ? "-loo" : ""}${chiCache ? "-chi-cache" : ""}${tag ? "-" + tag : ""}-${stamp}.json`);
   fs.writeFileSync(outFile, JSON.stringify({ at: new Date().toISOString(), summary, rows }, null, 1), "utf8");
   console.log(JSON.stringify({ ...summary, case7up: summary.case7up.map((c) => ({ kind: c.kind, offAnyPos: c.offAnyPos, queries: c.queries })), caseSalt: summary.caseSalt.map((c) => ({ queries: c.queries, top5: c.top5.map((h) => h.name) })) }, null, 1));
   console.log(`Ghi: ${outFile}`);
