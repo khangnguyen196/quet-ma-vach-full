@@ -43,6 +43,9 @@
 //   Trong các biến thể qua: nhiều ca hàng ngoại có mã đúng trong 5 nhất ((ii)), rồi ở vị trí 1, hòa thì X1. Không biến
 //   thể nào qua → giữ tắt (STRANGE_MODE null).
 // ===================================================================================================================
+// Ghi SAU khi đo (vòng 7, không đổi luật trên): P2 lệch luật chốt trước — luật chọn X1 nhưng không bật vì qua rỗng (câu
+// X1 / X2 thiếu cache 76/76, 0/6 ca ngoại có dữ liệu); dieu-phoi quyết giữ tắt (vòng 6), đo lại ở đợt kho-lon với luật
+// có cổng độ phủ chốt trước.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";

@@ -203,7 +203,9 @@ export function cleanQuery(input, { vocab = null, idf = null, unknownIdf: unk = 
 export const STRANGE_MAX = 2;
 /** Cách dùng từ lạ trong câu tìm OFF: null = tắt; "x1" = thêm vào câu 1; "x2" = câu riêng thay câu 2. Mặc định chỉ đổi
  *  theo luật đo chốt trước (test-ocr/chup-mat-do/tu-dong-v42-do.mjs, phần P2). front-merge.js đọc hằng này để bật
- *  luật "mục OFF chứa từ lạ lấp chỗ trống" (strangeFill). */
+ *  luật "mục OFF chứa từ lạ lấp chỗ trống" (strangeFill).
+ *  null = LỆCH luật chốt trước: luật chọn X1 nhưng không bật vì qua rỗng (câu X1 / X2 thiếu cache 76/76, 0/6 ca ngoại
+ *  có dữ liệu); dieu-phoi quyết giữ tắt (vòng 6), đo lại ở đợt kho-lon với luật có cổng độ phủ chốt trước. */
 export const STRANGE_MODE = null;
 export const STRANGE_MODES = Object.freeze(["x1", "x2"]);
 
