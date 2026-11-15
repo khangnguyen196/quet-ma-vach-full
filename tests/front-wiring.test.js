@@ -342,6 +342,24 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     ]) assert.notDeepEqual(rule15(bad), [], bad);
   });
 
+  test("(16) câu chờ kho phụ: showPhotoResult gọi extraWaitMessage({ … stale: stale() … }) SAU khi OFF xong, TRƯỚC await kho phụ", () => {
+    assert.deepEqual(rule16(CODE), []);
+  });
+  test("(16) luật bắt được chuỗi mẫu sai", () => {
+    const fn = (wait, { off = "off = joinOffResults(await Promise.all(x));" } = {}) =>
+      `async function showPhotoResult({ id }) {\nif (queries.length) {\n${off}\n}\n${wait}\nconst xi = await extraReady;\n}`;
+    const ok = "const w = extraWaitMessage({ extraDone, stale: stale() });\nif (w) sayFront(w);";
+    assert.deepEqual(rule16(fn(ok)), []);
+    for (const bad of [
+      fn(""), // không có câu chờ
+      fn("sayFront(EXTRA_WAIT_TEXT);"), // nói thẳng hằng, không qua hàm chọn câu (không kiểm stale)
+      fn("const w = extraWaitMessage({ extraDone, stale: false });\nif (w) sayFront(w);"), // không kiểm stale()
+      fn(ok).replace("const xi = await extraReady;\n", "").replace("async function showPhotoResult({ id }) {\n", "async function showPhotoResult({ id }) {\nconst xi = await extraReady;\n"), // trước OFF
+      fn("const xi0 = await extraReady;\n" + ok), // sau khi đã chờ kho phụ
+      fn(ok, { off: "off = 1;" }), // không có bước chờ OFF
+    ]) assert.notDeepEqual(rule16(bad), [], bad);
+  });
+
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
     const body = lookupBody(CODE);
     assert.match(body, /\bphotoFollowMessage\s*\(\s*["']openFailed["']\s*\)/, "lookup: lượt tự mở lỗi → photoFollowMessage(\"openFailed\")");
@@ -450,16 +468,6 @@ function pickBody(code) {
   return blockAt(code, h.index + h[0].length);
 }
 
-/** Thay comment bằng khoảng trắng cùng độ dài (giữ vị trí ký tự): dòng bắt đầu bằng // /* * , khối /* … *\/ trên một
- *  dòng, đuôi " // …" sau code (URL "https://" không có khoảng trắng trước // nên không bị xóa). */
-function blankComments(code) {
-  const sp = (s) => s.replace(/[^\n]/g, " ");
-  return code.split("\n").map((line) => {
-    if (/^\s*(\/\/|\/\*|\*)/.test(line)) return sp(line);
-    return line.replace(/\/\*.*?\*\//g, sp).replace(/\s\/\/\s.*$/, sp);
-  }).join("\n");
-}
-
 /** Luật (15): mọi lời gọi loadExtra( (không tính dòng khai báo function) nằm trong thân loadFrontExtra. Vòng 8 (NÊN SỬA 2
  *  + gợi ý 2 vòng 7): MỌI lần xuất hiện tên loadFrontExtra ngoài comment (trừ dòng khai báo function) phải là lời gọi
  *  "loadFrontExtra(" (không truyền tên hàm làm tham chiếu: .then(loadFrontExtra), const f = loadFrontExtra) và chỉ nằm
@@ -467,7 +475,7 @@ function blankComments(code) {
  *  thử tải kho phụ nhiều nhất 1 lần. Handler chọn ảnh có loadFrontExtra( SAU loadFrontSearch( và sau câu hỏi gửi
  *  nguyên bản (confirm(). */
 function rule15(code) {
-  code = blankComments(code);
+  code = stripComments(code); // CODE đã bỏ comment; chuỗi mẫu sai thì chưa
   const out = [];
   const spans = {};
   for (const name of ["loadFrontExtra", "onFrontClick"]) {
@@ -508,6 +516,29 @@ function rule15(code) {
       if (!cf || lx.index < cf.index) out.push("loadFrontExtra( phải đứng sau câu hỏi gửi nguyên bản (confirm()");
     }
   }
+  return out;
+}
+
+/** Luật (16) (vòng 8, gợi ý 1 vòng 7): câu chờ kho phụ chỉ nói qua extraWaitMessage( của front-photo.js (không dùng thẳng
+ *  EXTRA_WAIT_TEXT), tham số có stale: stale() (lượt cũ thì không nói), đứng SAU bước chờ OFF (joinOffResults() và
+ *  TRƯỚC await extraReady, rồi đưa vào sayFront(. Không đổi thời gian chờ hay thứ tự xử lý. */
+function rule16(code) {
+  code = stripComments(code);
+  if (/\bEXTRA_WAIT_TEXT\b/.test(code)) return ["dùng thẳng EXTRA_WAIT_TEXT (phải qua extraWaitMessage()"];
+  const body = bodyAfterParams(code, "showPhotoResult");
+  if (!body) return ["không có function showPhotoResult(…)"];
+  const out = [];
+  const off = /\bjoinOffResults\s*\(/.exec(body);
+  const awaitX = /\bawait\s+extraReady\b/.exec(body);
+  const w = /\bextraWaitMessage\s*\(/.exec(body);
+  if (!off) out.push("showPhotoResult không chờ OFF (joinOffResults()");
+  if (!awaitX) out.push("showPhotoResult không có await extraReady");
+  if (!w) return [...out, "showPhotoResult không gọi extraWaitMessage("];
+  const args = topArgs(body, w.index + w[0].length - 1).join(",");
+  if (!/\bstale\s*:\s*stale\s*\(\s*\)/.test(args)) out.push("extraWaitMessage( phải nhận stale: stale()");
+  if (off && w.index < off.index) out.push("extraWaitMessage( đứng trước bước chờ OFF");
+  if (awaitX && w.index > awaitX.index) out.push("extraWaitMessage( đứng sau await extraReady");
+  if (!/\bsayFront\s*\(/.test(body.slice(w.index, awaitX ? awaitX.index : body.length))) out.push("câu chờ kho phụ không được nói (sayFront()");
   return out;
 }
 

@@ -78,6 +78,28 @@ describe("photoMessage: câu #frontMsg sau khi tìm", () => {
   });
 });
 
+describe("extraWaitMessage: câu chờ kho phụ khi OFF đã xong mà kho phụ chưa xong (vòng 8, gợi ý 1 vòng 7)", () => {
+  const WAIT = "Đang tải thêm dữ liệu sản phẩm, lần đầu có thể lâu hơn…";
+  test("hằng câu chờ kho phụ: khác câu chờ OFF, không nhắc Open Food Facts", () => {
+    assert.equal(fp.EXTRA_WAIT_TEXT, WAIT);
+    assert.notEqual(fp.EXTRA_WAIT_TEXT, fp.OFF_WAIT_TEXT);
+    assert.doesNotMatch(fp.EXTRA_WAIT_TEXT, /Open Food Facts/);
+  });
+  test("kho phụ chưa xong + lượt chưa cũ → câu chờ", () => {
+    assert.equal(fp.extraWaitMessage({ extraDone: false, stale: false }), WAIT);
+  });
+  test("kho phụ đã xong (kể cả trước OFF) / lượt đã cũ → không câu (null)", () => {
+    assert.equal(fp.extraWaitMessage({ extraDone: true, stale: false }), null);
+    assert.equal(fp.extraWaitMessage({ extraDone: false, stale: true }), null);
+    assert.equal(fp.extraWaitMessage({ extraDone: true, stale: true }), null);
+  });
+  test("giá trị lạ (không phải boolean) → không câu (null), không ném", () => {
+    for (const a of [undefined, null, {}, { extraDone: 0, stale: false }, { extraDone: false }, { extraDone: "no", stale: "no" }]) {
+      assert.equal(fp.extraWaitMessage(a), null, JSON.stringify(a));
+    }
+  });
+});
+
 describe("photoFollowMessage: #frontMsg sau khi lượt tự mở xong / bị thay (vòng 5, NÊN SỬA 1 vòng 4)", () => {
   test("trang sản phẩm tự mở lỗi / không có trên OFF → câu tương ứng (cảnh báo)", () => {
     assert.deepEqual(fp.photoFollowMessage("openFailed"), { text: "Không mở được trang sản phẩm khớp nhất, xem bên dưới.", warn: true });
