@@ -1,0 +1,185 @@
+{
+ "nguon": "Open Food Facts (ODbL), cgi/search.pl search_terms=\"soda diet 7up\" không lọc VN, page_size 24, lấy 2026-11-15T04:06:18.409Z (đợt tu-dong vòng 2); bỏ ảnh, giữ trường chữ",
+ "products": [
+  {
+   "code": "4062139012862",
+   "product_name": "7up Zero Sugar",
+   "product_name_en": "7up Zero Sugar",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:ireland"
+   ]
+  },
+  {
+   "code": "5410188033847",
+   "product_name": "Seven up free",
+   "product_name_en": "Seven up free",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:belgium",
+    "en:france"
+   ]
+  },
+  {
+   "code": "4060800310002",
+   "product_name": "REFRESHING 7UP TASTE. ZERO SUGAR up ZERO SUGAR FR",
+   "product_name_en": "REFRESHING 7UP TASTE. ZERO SUGAR up ZERO SUGAR FR",
+   "brands": "Pepsi",
+   "countries_tags": [
+    "en:germany",
+    "en:united-kingdom"
+   ]
+  },
+  {
+   "code": "0065400008087",
+   "product_name": "Zero Sugar 7Up Mini Cans",
+   "product_name_en": "Zero Sugar 7Up Mini Cans",
+   "generic_name": "",
+   "generic_name_en": "",
+   "brands": "7UP, Pepsico",
+   "countries_tags": [
+    "en:canada"
+   ]
+  },
+  {
+   "code": "4060800310057",
+   "product_name": "7up zero sugar",
+   "product_name_en": "7up zero sugar",
+   "brands": "7UP ZERO",
+   "countries_tags": [
+    "en:germany"
+   ]
+  },
+  {
+   "code": "06547436",
+   "product_name": "7up",
+   "product_name_en": "7up",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:canada"
+   ]
+  },
+  {
+   "code": "0078000000757",
+   "product_name": "Diet up",
+   "product_name_en": "Diet up",
+   "generic_name": "",
+   "generic_name_en": "",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:france",
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "7310070005281",
+   "product_name": "7up Zero Sugar",
+   "product_name_en": "7up Zero Sugar",
+   "generic_name": "",
+   "generic_name_en": "7up Zero Sugar",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:sweden"
+   ]
+  },
+  {
+   "code": "8934588752117",
+   "product_name": "Soda Chanh - Diet 7Up",
+   "product_name_en": "Soda Chanh - Diet 7Up",
+   "brands": "PepsiCo",
+   "countries_tags": []
+  },
+  {
+   "code": "4060800310033",
+   "product_name": "7 up",
+   "product_name_en": "7 up",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:united-kingdom"
+   ]
+  },
+  {
+   "code": "0078000013634",
+   "product_name": "7up, caffeine free diet soda, diet cherry",
+   "product_name_en": "7up, caffeine free diet soda, diet cherry",
+   "countries_tags": [
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "0078000010411",
+   "product_name": "Diet 7up, naturally flavored caffeine free soda",
+   "product_name_en": "Diet 7up, naturally flavored caffeine free soda",
+   "countries_tags": [
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "0078000000764",
+   "product_name": "7up, caffeine free diet soda",
+   "product_name_en": "7up, caffeine free diet soda",
+   "countries_tags": [
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "0078000008319",
+   "product_name": "Diet cherry",
+   "product_name_en": "Diet cherry",
+   "generic_name": "",
+   "generic_name_en": "",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "0078000012811",
+   "product_name": "Diet lemon-lime soda",
+   "product_name_en": "Diet lemon-lime soda",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:united-states"
+   ]
+  },
+  {
+   "code": "87170856",
+   "product_name": "7up Free",
+   "product_name_en": "7up Free",
+   "generic_name": "Carbonated low calorie lemon and lime flavoured soft drink with sweeteners",
+   "generic_name_en": "Carbonated low calorie lemon and lime flavoured soft drink with sweeteners",
+   "brands": "PepsiCo",
+   "countries_tags": [
+    "en:france",
+    "en:united-kingdom"
+   ]
+  },
+  {
+   "code": "8858998583188",
+   "product_name": "7UP Free Plus Fiber",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:thailand"
+   ]
+  },
+  {
+   "code": "7044612876205",
+   "product_name": "7up Zero Sugar",
+   "product_name_en": "",
+   "generic_name_en": "",
+   "brands": "7UP, Ringnes, PepsiCo",
+   "countries_tags": [
+    "en:norway"
+   ]
+  },
+  {
+   "code": "5404043500216",
+   "product_name": "7 UP - PINK (zero Sugar)",
+   "product_name_en": "7 UP - PINK (zero Sugar)",
+   "brands": "7UP",
+   "countries_tags": [
+    "en:belgium"
+   ]
+  }
+ ]
+}
