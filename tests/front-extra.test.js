@@ -174,6 +174,104 @@ describe("joinExtra + mergeFront (C1: dùng chung 1 chỗ offMax với OFF)", ()
   });
 });
 
+// ---------------------------------------------------------------------------
+// Vòng 7 (P1): photoMerge — hàm gộp thuần DÙNG CHUNG cho app (main.js showPhotoResult) và khung đo cuối
+// ---------------------------------------------------------------------------
+
+describe("photoMerge (vòng 7, P1)", () => {
+  const xi = mod.buildExtraIndex?.(t1, STORE) ?? [];
+  const ngoai = JSON.parse(fs.readFileSync(new URL("./fixtures/off-7up-ngoai.json", import.meta.url), "utf8"));
+  const LEMON = { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "", vn: true, text: "7Up hương chanh 7UP" };
+  const DIET_OFF = { code: DIET.code, name: DIET.name, brand: DIET.brand, img: "", vn: false, text: DIET.text };
+  const salt = fr.rankFromText(t1, rIndex, "COOP\nSelect\nMui Bin Tinh Sấy l-t\nIODIZES REFINED SEA SALT");
+  // mọi ca của tests/front-merge.test.js (3 ảnh fixture, 7Up chữ máy chủ + câu gõ, muối, ca từ lạ Haribo, T1 rỗng)
+  const allCases = [
+    ...fixture.anh.map((a) => fr.rankFromItems(t1, rIndex, a.items)), machine, typed, salt,
+    fr.rankFromText(t1, rIndex, "Haribo\nGoldbears"), fr.rankFromText(t1, rIndex, "Goldbears"), fr.rankFromItems(t1, rIndex, []),
+  ];
+  /** OFF giả xấu nhất (như worstOff của front-merge.test.js). */
+  const worst = (r) => {
+    const q = [...new Set(r.query)];
+    return { ok: true, hits: Array.from({ length: 24 }, (_, j) => ({ code: String(9990000000000 + j), name: q.join(" "), brand: "X", img: "", vn: false, text: `${q.join(" ")} X` })) };
+  };
+  const offsFor = async (r) => {
+    const { parseSearch } = await import("../src/off-search.js");
+    return [null, undefined, { ok: false, kind: "none" }, { ok: false, kind: "network" }, { ok: false, kind: "aborted" }, { ok: false, kind: "limited" },
+      { ok: true, hits: [] }, { ok: true }, { ok: true, hits: [DIET_OFF, LEMON] }, { ok: true, hits: [LEMON, DIET_OFF] }, { ok: true, hits: parseSearch(ngoai) }, worst(r)];
+  };
+  const ctx = (x) => ({ t1, rIndex, products, xi: x });
+
+  test("xi null / undefined (kho phụ chưa tải / lỗi) → merged GIỐNG HỆT mergeFront(…, off) trên mọi ca cũ, cả off null", async () => {
+    assert.equal(typeof mod.photoMerge, "function");
+    for (const r of allCases) for (const off of await offsFor(r)) for (const x of [null, undefined]) {
+      const got = mod.photoMerge(ctx(x), r, off, { called: true });
+      assert.deepEqual(got.merged, fm.mergeFront(t1, rIndex, products, r, off), JSON.stringify(off)?.slice(0, 80));
+    }
+  });
+
+  test("có kho phụ → merged = mergeFront(…, joinExtra(off, searchExtra(…)))", async () => {
+    for (const r of allCases) for (const off of await offsFor(r)) {
+      const got = mod.photoMerge(ctx(xi), r, off, { called: true });
+      assert.deepEqual(got.merged, fm.mergeFront(t1, rIndex, products, r, mod.joinExtra(off, mod.searchExtra(rIndex.index, xi, r))));
+    }
+  });
+
+  test("off 'none' (có câu tìm T1 nhưng không có câu OFF, không gọi mạng) → kho phụ vẫn chạy", () => {
+    const got = mod.photoMerge(ctx(xi), typed, { ok: false, kind: "none" }, { called: false });
+    assert.ok(got.merged.some((x) => x.code === DIET.code), got.merged.map((x) => x.code).join(","));
+    assert.equal(got.offFailed, false);
+  });
+
+  test("offFailed tính từ off GỐC + cờ 'có gọi' (như main.js: queries.length > 0 && !off.ok), không từ kết quả đã nối", () => {
+    const fail = { ok: false, kind: "network" };
+    // OFF lỗi nhưng kho phụ trả được: kết quả đã nối ok, offFailed vẫn true
+    assert.equal(mod.photoMerge(ctx(xi), typed, fail, { called: true }).offFailed, true);
+    assert.equal(mod.photoMerge(ctx(null), typed, fail, { called: true }).offFailed, true);
+    assert.equal(mod.photoMerge(ctx(xi), typed, { ok: true, hits: [] }, { called: true }).offFailed, false);
+    assert.equal(mod.photoMerge(ctx(xi), typed, { ok: true, hits: [LEMON] }, { called: true }).offFailed, false);
+    // không gọi mạng (không có câu OFF) → không báo lỗi OFF
+    assert.equal(mod.photoMerge(ctx(xi), typed, { ok: false, kind: "none" }, { called: false }).offFailed, false);
+    assert.equal(mod.photoMerge(ctx(xi), typed, fail, { called: false }).offFailed, false);
+    // không truyền cờ: suy từ off (kind "none" / null = không gọi)
+    assert.equal(mod.photoMerge(ctx(xi), typed, { ok: false, kind: "none" }).offFailed, false);
+    assert.equal(mod.photoMerge(ctx(xi), typed, null).offFailed, false);
+    assert.equal(mod.photoMerge(ctx(xi), typed, fail).offFailed, true);
+  });
+
+  test("lỗi giá trị chặn (GuardValueError) → console.error rồi mergeFront(…, null) = đúng kết quả T1; lỗi khác ném tiếp", () => {
+    const calls = [];
+    const merge = (...a) => {
+      calls.push(a);
+      if (calls.length === 1) throw new fm.GuardValueError("front-merge: lockTop phải là số nguyên ≥ 0 (nhận x)");
+      return fm.mergeFront(...a);
+    };
+    const origErr = console.error;
+    const logged = [];
+    console.error = (...a) => logged.push(a);
+    let got;
+    try { got = mod.photoMerge(ctx(xi), typed, { ok: true, hits: [LEMON] }, { called: true, merge }); } finally { console.error = origErr; }
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].length, 5);
+    assert.equal(calls[1][4], null);
+    assert.deepEqual(got.merged, fm.mergeFront(t1, rIndex, products, typed, null));
+    assert.equal(logged.length, 1);
+    assert.ok(fm.isGuardError(logged[0][0]));
+    const boom = () => { throw new TypeError("lỗi lập trình"); };
+    assert.throws(() => mod.photoMerge(ctx(xi), typed, null, { called: false, merge: boom }), TypeError);
+  });
+
+  test("mục ra: mục kho phụ có cờ extra: true; mục OFF trùng mã với mục kho phụ giữ bản OFF, không có cờ extra", () => {
+    const fromExtra = mod.photoMerge(ctx(xi), typed, null, { called: false }).merged.find((x) => x.code === DIET.code);
+    assert.ok(fromExtra, "7Up Diet từ kho phụ");
+    assert.equal(fromExtra.extra, true);
+    assert.equal(fromExtra.source, "off");
+    const fromOff = mod.photoMerge(ctx(xi), typed, { ok: true, hits: [DIET_OFF] }, { called: true }).merged.find((x) => x.code === DIET.code);
+    assert.ok(fromOff, "7Up Diet từ OFF");
+    assert.ok(!("extra" in fromOff) || fromOff.extra === false, JSON.stringify(fromOff));
+    assert.equal(fromOff.img, "", "bản OFF (img rỗng), không phải bản kho phụ");
+  });
+});
+
 describe("không lưu sẵn (precache)", () => {
   test("precacheList (tools/sw-build.mjs) KHÔNG chứa chup-mat-do/kho-phu-893.json", () => {
     const list = swBuild.precacheList(["index.html", "assets/app.js", "chup-mat-do/kho-phu-893.json", "chup-mat-do/danh-muc-vn.json"]);

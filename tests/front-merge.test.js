@@ -379,6 +379,20 @@ describe("offPromote (V4-2)", () => {
     }
   });
 
+  // Vòng 7 (gợi ý 2 reviewer vòng 6): mục kho phụ giữ cờ extra ở mục ra; mục OFF thường không có khóa extra
+  test("mục ra: hit extra: true → mục có extra: true; hit OFF thường → không có khóa extra (dạng mục cũ)", () => {
+    const extraDiet = { ...DIET, extra: true };
+    const got = mod.mergeFront(t1, rIndex, products, typed, { ok: true, hits: [extraDiet] });
+    const d = got.find((x) => x.code === DIET.code);
+    assert.ok(d, got.map((x) => x.code).join(","));
+    assert.equal(d.extra, true);
+    const plain = mod.mergeFront(t1, rIndex, products, typed, { ok: true, hits: [{ ...DIET, extra: false }] }).find((x) => x.code === DIET.code);
+    assert.ok(plain && !("extra" in plain), JSON.stringify(plain));
+    const plain2 = mod.mergeFront(t1, rIndex, products, typed, { ok: true, hits: [DIET] }).find((x) => x.code === DIET.code);
+    assert.deepEqual(Object.keys(plain2).sort(), ["brand", "code", "img", "name", "score", "source", "vn"]);
+    for (const x of got) if (x.source === "catalog") assert.ok(!("extra" in x));
+  });
+
   test("giá trị offPromote sai → GuardValueError (kể cả khi OFF lỗi); null hợp lệ", () => {
     const BAD = ["x", 1, true, [], { gap: -1, minWords: 2 }, { gap: NaN, minWords: 2 }, { gap: Infinity, minWords: 2 }, { gap: "1", minWords: 2 },
       { minWords: 2 }, { gap: 1 }, { gap: 1, minWords: 1 }, { gap: 1, minWords: 2.5 }, { gap: 1, minWords: "2" }, { gap: 1, minWords: 0 }, { gap: null, minWords: 2 }];
@@ -429,6 +443,25 @@ describe("từ lạ (strangeFill, P2)", () => {
   test("mục kho phụ (extra) không dùng luật từ lạ", () => {
     const got = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [{ ...GOLD, extra: true }] }, { strangeFill: true });
     assert.deepEqual(got.map((x) => x.code), found.hits.map((h) => h.code));
+  });
+
+  // Vòng 7 (gợi ý 4 reviewer vòng 6)
+  test("T1 rỗng nhưng có từ lạ, strangeFill: true → mục OFF chứa từ lạ lấp chỗ trống (mục không chứa từ lạ vẫn bỏ)", () => {
+    const only = fr.rankFromText(t1, rIndex, "Goldbears");
+    assert.equal(only.hits.length, 0, "ca dựng: T1 rỗng");
+    const got = mod.mergeFront(t1, rIndex, products, only, { ok: true, hits: [OTHER, GOLD, GOLD2] }, { strangeFill: true });
+    assert.deepEqual(got.map((x) => x.code), [GOLD.code, GOLD2.code]);
+    assert.ok(got.every((x) => x.source === "off"));
+    assert.deepEqual(mod.mergeFront(t1, rIndex, products, only, { ok: true, hits: [OTHER, GOLD, GOLD2] }, { strangeFill: false }), []);
+  });
+
+  // Vòng 7 (gợi ý 3 reviewer vòng 6)
+  test("strangeFill không phải boolean → GuardValueError (kể cả khi OFF lỗi); true / false / không truyền hợp lệ", () => {
+    for (const bad of ["x1", 1, 0, null, "true", {}, []]) for (const off of [{ ok: true, hits: [GOLD] }, { ok: false, kind: "network" }, null]) {
+      assert.throws(() => mod.mergeFront(t1, rIndex, products, found, off, { strangeFill: bad }),
+        (e) => mod.isGuardError(e) && e.message.includes("strangeFill"), JSON.stringify(bad));
+    }
+    for (const okv of [true, false, undefined]) assert.doesNotThrow(() => mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [GOLD] }, { strangeFill: okv }));
   });
 
   test("mặc định strangeFill theo STRANGE_MODE của off-search.js (null = tắt)", async () => {
