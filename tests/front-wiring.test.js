@@ -199,8 +199,8 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   test("(9) showPhotoResult: kiểm stale() TRƯỚC khi gọi tìm Open Food Facts (.search( )", () => {
-    const [start, end] = functionBody("showPhotoResult");
-    const body = CODE.slice(start, end);
+    const body = bodyAfterParams(CODE, "showPhotoResult");
+    assert.ok(body, "main.js phải có function showPhotoResult(…)");
     const search = /\.search\s*\(/.exec(body);
     assert.ok(search, "showPhotoResult phải gọi .search(");
     const check = /\bif\s*\(\s*stale\s*\(\s*\)\s*\)/.exec(body);
@@ -208,8 +208,8 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   test("(10) showPhotoResult: catch quanh mergeFront chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
-    const [start, end] = functionBody("showPhotoResult");
-    const body = CODE.slice(start, end);
+    const body = bodyAfterParams(CODE, "showPhotoResult");
+    assert.ok(body, "main.js phải có function showPhotoResult(…)");
     const mf = /\bmergeFront\s*\(/.exec(body);
     assert.ok(mf);
     const cm = /\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g;
@@ -233,7 +233,12 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
 
 /** Thân hàm lookup (tính SAU danh sách tham số: tham số dạng { photo = null } = {} có dấu { trước thân). */
 function lookupBody(code) {
-  const m = /\bfunction\s+lookup\s*\(/.exec(code);
+  return bodyAfterParams(code, "lookup");
+}
+
+/** Thân `function <name>(…) { … }` tính SAU danh sách tham số (tham số có thể là { … }). Không có → null. */
+function bodyAfterParams(code, name) {
+  const m = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(code);
   if (!m) return null;
   let depth = 0, close = -1;
   for (let i = m.index + m[0].length - 1; i < code.length; i++) {
