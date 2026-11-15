@@ -60,9 +60,12 @@ describe("photoMessage: câu #frontMsg sau khi tìm", () => {
     }
   });
 
-  test("OFF được / không gọi: mở → nhắc kiểm tra; không có → câu 'Chưa tìm thấy…'", () => {
+  test("OFF được / không gọi: mở → câu trung tính; không có → câu 'Chưa tìm thấy…'", () => {
+    // Đổi expected (vòng 5, NÊN SỬA 1 vòng 4): câu cũ "Đã mở sản phẩm khớp nhất bên dưới. Hãy kiểm tra…" nói sai khi trang
+    // sản phẩm lỗi / người dùng đã tra mã khác / đã bấm "Đúng" → câu trung tính, không khẳng định trang đang hiện.
     const open = fp.photoMessage({ kind: "open", offFailed: false });
-    assert.match(open.text, /kiểm tra/i);
+    assert.equal(open.text, "Đã tìm xong, xem kết quả bên dưới.");
+    assert.doesNotMatch(open.text, /Đã mở sản phẩm khớp nhất|kiểm tra/i);
     assert.equal(open.warn, false);
     const none = fp.photoMessage({ kind: "none", offFailed: false });
     assert.match(none.text, new RegExp(NONE));
@@ -75,13 +78,44 @@ describe("photoMessage: câu #frontMsg sau khi tìm", () => {
   });
 });
 
-describe("isUnconfirmed: cờ 'chưa xác nhận' của sản phẩm đang hiện", () => {
-  test("đang chờ xác nhận đúng mã đang hiện → true; khác mã / không chờ → false", () => {
-    assert.equal(fp.isUnconfirmed({ code: "8934588752117" }, "8934588752117"), true);
-    assert.equal(fp.isUnconfirmed({ code: "8934588752117" }, "8934588022111"), false);
-    assert.equal(fp.isUnconfirmed(null, "8934588752117"), false);
+describe("photoFollowMessage: #frontMsg sau khi lượt tự mở xong / bị thay (vòng 5, NÊN SỬA 1 vòng 4)", () => {
+  test("trang sản phẩm tự mở lỗi / không có trên OFF → câu tương ứng (cảnh báo)", () => {
+    assert.deepEqual(fp.photoFollowMessage("openFailed"), { text: "Không mở được trang sản phẩm khớp nhất, xem bên dưới.", warn: true });
+  });
+  test("tra mã không từ ảnh / đã bấm Đúng → xóa câu", () => {
+    assert.deepEqual(fp.photoFollowMessage("notPhoto"), { text: "", warn: false });
+    assert.deepEqual(fp.photoFollowMessage("confirmed"), { text: "", warn: false });
+  });
+  test("không câu nào còn nhắc 'Hãy kiểm tra' / 'Đã mở sản phẩm khớp nhất'", () => {
+    for (const k of ["openFailed", "notPhoto", "confirmed", "x", undefined]) {
+      assert.doesNotMatch(fp.photoFollowMessage(k).text, /Hãy kiểm tra|Đã mở sản phẩm khớp nhất/);
+    }
+    assert.deepEqual(fp.photoFollowMessage("x"), { text: "", warn: false });
+  });
+});
+
+describe("isUnconfirmed: cờ 'chưa xác nhận' theo LƯỢT TRA đã vẽ (vòng 5, gợi ý 2 vòng 4)", () => {
+  // Đổi expected (vòng 5, gợi ý 2 vòng 4): tham số 2 là số lượt tra (lookup) của sản phẩm đang hiện, không còn là mã;
+  // cờ không phụ thuộc mã có đúng 8–14 chữ số (OFF trả mã dạng lạ thì dòng dị ứng vẫn hiện).
+  test("đang chờ xác nhận đúng lượt đang hiện → true; khác lượt / không chờ → false", () => {
+    assert.equal(fp.isUnconfirmed({ code: "8934588752117", lookupId: 3 }, 3), true);
+    assert.equal(fp.isUnconfirmed({ code: "8934588752117", lookupId: 3 }, 4), false);
+    assert.equal(fp.isUnconfirmed(null, 3), false);
     assert.equal(fp.isUnconfirmed(undefined, undefined), false);
-    assert.equal(fp.isUnconfirmed({ code: "" }, ""), false);
+    assert.equal(fp.isUnconfirmed({ code: "8934588752117" }, undefined), false, "thiếu lượt → không coi là đang chờ");
+    assert.equal(fp.isUnconfirmed({ lookupId: 0 }, 0), false, "lượt 0 = chưa tra lần nào");
+  });
+  test("mã dạng lạ (không phải 8–14 chữ số) vẫn 'chưa xác nhận'", () => {
+    for (const code of ["abc", "", "0012-345", "123456789012345678"]) {
+      assert.equal(fp.isUnconfirmed({ code, lookupId: 7 }, 7), true, code);
+    }
+  });
+});
+
+describe("confirmStatusText: câu sau khi bấm 'Đúng' theo kết quả lưu lịch sử (vòng 5, gợi ý 5 vòng 4)", () => {
+  test("lưu được / không lưu được", () => {
+    assert.equal(fp.confirmStatusText(true), "Đã xác nhận, đã lưu vào lịch sử tra cứu.");
+    assert.equal(fp.confirmStatusText(false), "Đã xác nhận (chưa lưu được vào lịch sử).");
   });
 });
 
@@ -244,6 +278,28 @@ describe("renderAllergyAlert / renderAllergyBox: dòng 'chưa xác nhận'", () 
     assert.equal(render.ALLERGY_UNCONFIRMED, UNCONFIRMED);
     assert.equal(render.PHOTO_ASK_TEXT, ASK);
     assert.equal(render.PHOTO_NONE_TEXT, NONE);
+  });
+});
+
+describe("renderCompare: sản phẩm tự mở chưa xác nhận → dòng 'chưa xác nhận' ở khối dị ứng màn So sánh (vòng 5, gợi ý 6)", () => {
+  const prod = (code) => ({ code, name: "SP " + code, image: "", allergenKeys: ["milk"], traceKeys: [], hasAllergenData: true, nutriments: {} });
+  const sides = [{ code: "8934588752117", status: "ok", product: prod("8934588752117") }, { code: "8934588022111", status: "ok", product: prod("8934588022111") }];
+  const cols = (html) => html.split('aria-label="Sản phẩm B"');
+
+  test("mã chưa xác nhận ở cột A → dòng ở cột A, không ở cột B", () => {
+    const [a, b] = cols(render.renderCompare(sides, ["milk"], { unconfirmedCode: "8934588752117" }));
+    assert.ok(text(a).includes(UNCONFIRMED), text(a));
+    assert.ok(!text(b).includes(UNCONFIRMED));
+  });
+  test("hồ sơ 0 nhóm vẫn có dòng ở cột chưa xác nhận (như màn tra cứu)", () => {
+    const [a] = cols(render.renderCompare(sides, [], { unconfirmedCode: "8934588752117" }));
+    assert.ok(text(a).includes(UNCONFIRMED));
+  });
+  test("không truyền / mã khác / không phải chuỗi → như cũ (không có dòng)", () => {
+    for (const opts of [undefined, {}, { unconfirmedCode: "1" }, { unconfirmedCode: null }]) {
+      assert.ok(!render.renderCompare(sides, ["milk"], opts).includes(UNCONFIRMED), JSON.stringify(opts));
+    }
+    assert.equal(render.renderCompare(sides, ["milk"]), render.renderCompare(sides, ["milk"], { unconfirmedCode: null }));
   });
 });
 

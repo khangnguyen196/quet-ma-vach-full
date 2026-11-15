@@ -239,6 +239,23 @@ describe("lớp chặn: giá trị sai → báo lỗi (không tự tắt)", () =
     assert.deepEqual(a, c);
   });
 
+  test("vòng 5 (gợi ý 3 vòng 4): lỗi giá trị chặn sai được đánh dấu (isGuardError, name GuardValueError); lỗi khác thì không", () => {
+    assert.equal(typeof mod.isGuardError, "function");
+    for (const key of ["lockTop", "offMax", "offGap"]) {
+      let err = null;
+      try { mod.mergeFront(t1, rIndex, products, r, off, { [key]: -1 }); } catch (e) { err = e; }
+      assert.ok(err, key);
+      assert.equal(err.name, "GuardValueError");
+      assert.equal(mod.isGuardError(err), true, key);
+    }
+    let other = null;
+    try { mod.mergeFront(t1, rIndex, products, r, off, { method: "x" }); } catch (e) { other = e; }
+    assert.equal(mod.isGuardError(other), false, "cách gộp lạ không phải lỗi giá trị chặn");
+    for (const x of [new Error("lockTop"), new TypeError("x"), null, undefined, "GuardValueError", { name: "GuardValueError" }]) {
+      assert.equal(mod.isGuardError(x), false, String(x));
+    }
+  });
+
   test("'không chặn' tường minh { lockTop: 0, offMax: k, offGap: 0 } vẫn dùng được", () => {
     const got = mod.mergeFront(t1, rIndex, products, r, off, { lockTop: 0, offMax: mod.MERGE_K, offGap: 0 });
     assert.equal(got.length, mod.MERGE_K);

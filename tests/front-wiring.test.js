@@ -142,18 +142,19 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   // Đợt tu-dong vòng 4: nối "tự mở sản phẩm".
-  test("(5) mọi lệnh gọi mergeFront(…) dùng lớp chặn mặc định: không truyền lockTop / offMax / offGap / offTopRule", () => {
-    const calls = [...CODE.matchAll(/\bmergeFront\s*\(/g)];
-    assert.ok(calls.length >= 1, "main.js phải gọi mergeFront(…)");
-    for (const m of calls) {
-      const open = m.index + m[0].length - 1;
-      let depth = 0, end = open;
-      for (let i = open; i < CODE.length; i++) {
-        if (CODE[i] === "(") depth++;
-        else if (CODE[i] === ")" && --depth === 0) { end = i; break; }
-      }
-      const args = CODE.slice(open, end + 1);
-      assert.doesNotMatch(args, /\b(lockTop|offMax|offGap|offTopRule)\b/, `dòng ${lineOf(CODE, m.index)}: ${args}`);
+  test("(5) mọi lệnh gọi mergeFront(…) dùng lớp chặn mặc định: đúng 5 tham số, KHÔNG có tham số tùy chọn (kể cả qua biến)", () => {
+    assert.deepEqual(rule5(CODE), []);
+  });
+  test("(5) luật bắt được chuỗi mẫu sai (vòng 5, gợi ý 4)", () => {
+    for (const bad of [
+      "mergeFront(a, b, c, d, e, opts);",
+      "mergeFront(a, b, c, d, e, { lockTop: 0 });",
+      "mergeFront(a, b, c, d, e, {});",
+      "const o = { ...x }; mergeFront(s.t1, s.rIndex, s.products, found, off, o);",
+      "mergeFront(a, b, c, d, f(x, y), g);",
+    ]) assert.notDeepEqual(rule5(bad), [], bad);
+    for (const ok of ["mergeFront(a, b, c, d, e);", "mergeFront(s.t1, s.rIndex, s.products, found, f(x, y));", "mergeFront(a, b, c, [1, 2], { ok: 1, hits: [] });"]) {
+      assert.deepEqual(rule5(ok), [], ok);
     }
   });
 
@@ -163,20 +164,121 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.doesNotMatch(pickHandlerBody(), /\bcreateOffSearch\s*\(/);
   });
 
-  test("(7) lookup: tự mở từ ảnh (chưa xác nhận) KHÔNG lưu lịch sử: addHistory( nằm sau một điều kiện có 'photo'", () => {
-    // Thân hàm tính SAU danh sách tham số (lookup có tham số dạng { photo = null } = {}: dấu { đầu tiên không phải thân).
-    const m = /\bfunction\s+lookup\s*\(/.exec(CODE);
-    assert.ok(m, "main.js phải có function lookup(…)");
-    let depth = 0, close = -1;
-    for (let i = m.index + m[0].length - 1; i < CODE.length; i++) {
-      if (CODE[i] === "(") depth++;
-      else if (CODE[i] === ")" && --depth === 0) { close = i; break; }
-    }
-    const [start, end] = blockAt(CODE, close);
+  test("(7) lookup: tự mở từ ảnh (chưa xác nhận) KHÔNG lưu lịch sử: MỌI addHistory( nằm trong khối if (!photo) { … }", () => {
+    assert.deepEqual(rule7(CODE), []);
+  });
+  test("(7) luật bắt được chuỗi mẫu sai (vòng 5, gợi ý 4)", () => {
+    const wrap = (body) => `async function lookup(raw, { photo = null } = {}) {\n${body}\n}`;
+    for (const bad of [
+      "if (photo) x(); addHistory(code, name);",
+      "if (!photo) { y(); }\naddHistory(code, name);",
+      "if (photo) { addHistory(code, name); }",
+      "if (!photo || z) { addHistory(code, name); }",
+      "if (!photo) { a(); } else { addHistory(code, name); }",
+      "addHistory(code, name);",
+    ]) assert.notDeepEqual(rule7(wrap(bad)), [], bad);
+    assert.deepEqual(rule7(wrap("if (!photo) {\n  try { renderHistory(addHistory(code, product.name)); } catch (e) { console.error(e); }\n}")), []);
+  });
+
+  // Vòng 5: NÊN SỬA 1 / 2 + gợi ý 1 / 3 của reviewer vòng 4.
+  test("(8) sự kiện chọn ảnh: await showPhotoResult(…) nằm trong try, catch ghi console.error và báo 'Có lỗi khi tìm sản phẩm' khi lượt chưa cũ", () => {
+    const body = pickHandlerBody();
+    const call = /\bawait\s+showPhotoResult\s*\(/.exec(body);
+    assert.ok(call, "handler chọn ảnh phải await showPhotoResult(…)");
+    const tries = [...body.matchAll(/\btry\s*\{/g)].map((m) => [m.index, blockAt(body, m.index + m[0].length - 1)]);
+    const own = tries.filter(([, [o, c]]) => call.index > o && call.index < c).at(-1);
+    assert.ok(own, "await showPhotoResult( phải nằm trong một khối try { … }");
+    const after = body.slice(own[1][1] + 1);
+    const cm = /^\s*catch\s*(\([^)]*\))?\s*\{/.exec(after);
+    assert.ok(cm, "khối try phải có catch ngay sau");
+    const [co, cc] = blockAt(after, cm.index + cm[0].length - 1);
+    const cat = after.slice(co, cc);
+    assert.match(cat, /\bconsole\.error\s*\(/, "catch phải ghi console.error");
+    assert.match(cat, /\bsayFront\s*\(\s*["']Có lỗi khi tìm sản phẩm\. Chọn ảnh lại\.["']\s*,\s*true\s*\)/, "catch phải báo câu lỗi (cảnh báo)");
+    assert.match(cat, /\bfrontTurn\b/, "catch chỉ báo khi lượt chưa cũ (so với frontTurn)");
+  });
+
+  test("(9) showPhotoResult: kiểm stale() TRƯỚC khi gọi tìm Open Food Facts (.search( )", () => {
+    const [start, end] = functionBody("showPhotoResult");
     const body = CODE.slice(start, end);
-    const add = /\baddHistory\s*\(/.exec(body);
-    assert.ok(add, "lookup phải còn lưu lịch sử (tra bình thường)");
-    const before = body.slice(Math.max(0, add.index - 200), add.index);
-    assert.match(before, /\bif\s*\([^)]*\bphoto\b[^)]*\)/, "addHistory( phải được chặn bằng điều kiện tự mở từ ảnh");
+    const search = /\.search\s*\(/.exec(body);
+    assert.ok(search, "showPhotoResult phải gọi .search(");
+    const check = /\bif\s*\(\s*stale\s*\(\s*\)\s*\)/.exec(body);
+    assert.ok(check && check.index < search.index, "phải có if (stale()) trước .search(");
+  });
+
+  test("(10) showPhotoResult: catch quanh mergeFront chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
+    const [start, end] = functionBody("showPhotoResult");
+    const body = CODE.slice(start, end);
+    const mf = /\bmergeFront\s*\(/.exec(body);
+    assert.ok(mf);
+    const cm = /\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g;
+    cm.lastIndex = mf.index;
+    const m = cm.exec(body);
+    assert.ok(m, "phải có catch sau mergeFront(");
+    const [o, c] = blockAt(body, m.index + m[0].length - 1);
+    const cat = body.slice(o, c);
+    assert.match(cat, new RegExp(`\\bisGuardError\\s*\\(\\s*${m[1]}\\s*\\)`), "catch phải hỏi isGuardError(lỗi)");
+    assert.match(cat, new RegExp(`\\bthrow\\s+${m[1]}\\b`), "lỗi khác phải ném tiếp");
+  });
+
+  test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
+    const body = lookupBody(CODE);
+    assert.match(body, /\bphotoFollowMessage\s*\(\s*["']openFailed["']\s*\)/, "lookup: lượt tự mở lỗi → photoFollowMessage(\"openFailed\")");
+    assert.match(body, /\bphotoFollowMessage\s*\(\s*["']notPhoto["']\s*\)/, "lookup: tra không từ ảnh → photoFollowMessage(\"notPhoto\")");
+    const [s, e] = functionBody("confirmPhoto");
+    assert.match(CODE.slice(s, e), /\bphotoFollowMessage\s*\(\s*["']confirmed["']\s*\)/, "confirmPhoto → photoFollowMessage(\"confirmed\")");
   });
 });
+
+/** Thân hàm lookup (tính SAU danh sách tham số: tham số dạng { photo = null } = {} có dấu { trước thân). */
+function lookupBody(code) {
+  const m = /\bfunction\s+lookup\s*\(/.exec(code);
+  if (!m) return null;
+  let depth = 0, close = -1;
+  for (let i = m.index + m[0].length - 1; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) { close = i; break; }
+  }
+  const [start, end] = blockAt(code, close);
+  return code.slice(start, end + 1);
+}
+
+/** Tách tham số cấp cao nhất của lời gọi bắt đầu ở dấu "(" (bỏ qua ngoặc lồng (), [], {} và chuỗi). */
+function topArgs(code, open) {
+  const args = [];
+  let depth = 0, quote = null, cur = "";
+  for (let i = open; i < code.length; i++) {
+    const c = code[i];
+    if (quote) { cur += c; if (c === "\\") { cur += code[++i] ?? ""; continue; } if (c === quote) quote = null; continue; }
+    if (c === "'" || c === '"' || c === "`") { quote = c; cur += c; continue; }
+    if ("([{".includes(c)) { if (depth++ === 0) continue; }
+    else if (")]}".includes(c)) { if (--depth === 0) { args.push(cur.trim()); return args.filter((a, k) => a || k < args.length - 1); } }
+    else if (c === "," && depth === 1) { args.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  throw new Error("lời gọi không đóng ngoặc");
+}
+
+/** Luật (5): mọi mergeFront( có đúng 5 tham số (t1, chỉ mục, danh mục, kết quả T1, kết quả OFF). Trả danh sách vi phạm. */
+function rule5(code) {
+  const out = [];
+  const calls = [...code.matchAll(/\bmergeFront\s*\(/g)];
+  if (!calls.length) return ["không gọi mergeFront("];
+  for (const m of calls) {
+    const args = topArgs(code, m.index + m[0].length - 1);
+    if (args.length !== 5) out.push(`dòng ${lineOf(code, m.index)}: ${args.length} tham số (${args.join(" | ")})`);
+  }
+  return out;
+}
+
+/** Luật (7): trong thân lookup, mọi addHistory( nằm trong khối then của if (!photo) { … } (điều kiện đúng "!photo").
+ *  Trả danh sách vi phạm. */
+function rule7(code) {
+  const body = lookupBody(code);
+  if (!body) return ["không có function lookup(…)"];
+  const adds = [...body.matchAll(/\baddHistory\s*\(/g)].map((m) => m.index);
+  if (!adds.length) return ["lookup phải còn lưu lịch sử (tra bình thường)"];
+  const guards = [...body.matchAll(/\bif\s*\(\s*!\s*photo\s*\)\s*\{/g)].map((m) => blockAt(body, m.index + m[0].length - 1));
+  return adds.filter((i) => !guards.some(([o, c]) => i > o && i < c)).map((i) => `addHistory( ngoài if (!photo) { … } (dòng ${lineOf(body, i)} của lookup)`);
+}
