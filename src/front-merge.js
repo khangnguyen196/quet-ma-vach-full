@@ -76,6 +76,26 @@ export function offDoc(t1, text) {
   return { m, len: base.length };
 }
 
+/**
+ * Gộp kết quả các câu tìm OFF của MỘT ảnh (mỗi câu 1 lượt search(), vòng 4 tu-dong: như runOff của khung đo
+ * test-ocr/chup-mat-do/tu-dong-do.mjs): nối hits theo thứ tự câu, bỏ mã trùng. ≥ 1 câu trả được → { ok: true, hits };
+ * mọi câu lỗi → { ok: false, kind của câu lỗi đầu }; không có câu nào → { ok: false, kind: "none" } (không gọi mạng).
+ */
+export function joinOffResults(results) {
+  const list = Array.isArray(results) ? results.filter((r) => r && typeof r === "object") : [];
+  if (!list.length) return { ok: false, kind: "none" };
+  const oks = list.filter((r) => r.ok === true);
+  if (!oks.length) return { ok: false, kind: String(list[0].kind ?? "network") };
+  const hits = [];
+  const seen = new Set();
+  for (const r of oks) for (const h of Array.isArray(r.hits) ? r.hits : []) {
+    if (!h || typeof h.code !== "string" || seen.has(h.code)) continue;
+    seen.add(h.code);
+    hits.push(h);
+  }
+  return { ok: true, hits };
+}
+
 function okOff(offResult) {
   return !!(offResult && offResult.ok === true && Array.isArray(offResult.hits) && offResult.hits.length);
 }

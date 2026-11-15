@@ -507,6 +507,35 @@ table.cmp-table .empty { font-size: 13px; }
 .front-code { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .front-source { padding-top: 0; }
 
+/* Tự mở sản phẩm từ ảnh (đợt tu-dong vòng 4): khung "Nhận ra tự động từ ảnh, có thể nhầm" ở đầu #result, trước khối dị
+   ứng. Viền màu cảnh báo (biến :root, có bản tối); 2 nút cao ≥ 44 px, xếp một cột ở màn hẹp. */
+.photo-confirm { margin-bottom: 16px; padding: 10px 12px; border: 2px solid var(--warn); border-radius: 6px; background: var(--warn-bg); color: var(--ink); display: grid; gap: 8px; scroll-margin: 12px; }
+.photo-confirm:focus { outline: none; }
+.photo-confirm:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.photo-ask { display: grid; gap: 8px; }
+.photo-ask-text { font-weight: 700; color: var(--warn); }
+.photo-item { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.photo-item .front-img, .photo-item .noimg { flex: 0 0 auto; width: 80px; height: 80px; }
+.photo-item .front-img { object-fit: contain; background: #fff; border: 1px solid var(--rule); border-radius: 4px; }
+.photo-item .front-img[hidden], .photo-item .noimg[hidden] { display: none; }
+.photo-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.photo-actions .btn { min-width: 0; min-height: 44px; padding: 6px 8px; line-height: 1.25; overflow-wrap: anywhere; }
+.photo-others[hidden] { display: none; }
+.photo-others .front-unsure:first-child { margin-top: 0; }
+.photo-done { font-weight: 500; overflow-wrap: anywhere; }
+.photo-status:empty { display: none; }
+.photo-status { font-size: 14px; color: var(--ink-2); }
+.allergy-alert.unconfirmed { background: var(--warn-bg); color: var(--ink); border-color: var(--warn); }
+.photo-loading { color: var(--ink-2); }
+.photo-none { scroll-margin: 12px; }
+.photo-none:focus { outline: none; }
+.photo-lines { margin: 4px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+/* Ô sửa chữ đóng sẵn (dưới kết quả, không bắt buộc) */
+.front-edit summary { min-height: 44px; padding: 11px 0; box-sizing: border-box; cursor: pointer; font-weight: 500; line-height: 22px; }
+.front-edit label { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; }
+.front-edit .front-text { margin-top: 6px; }
+.front-edit .front-retry { margin-top: 8px; }
+
 /* Khu thử máy chủ OCR: CHỈ khi chạy dev (src/dev-ocr.js), không có trong bản build */
 .dev-ocr {
   margin-bottom: 18px; padding: 12px 14px;

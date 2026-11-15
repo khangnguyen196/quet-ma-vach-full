@@ -5,13 +5,17 @@ import {
   renderProduct, renderNotFound, renderError, renderAddForm, renderPantry, errorText, esc,
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
-  renderFrontResult, renderFrontHits, frontHitsText, FRONT_TEXT_ID
+  FRONT_TEXT_ID, renderPhotoShell, renderPhotoDone, renderPhotoOthers, renderPhotoNone, renderFrontEdit,
+  PHOTO_CONFIRM_ID, PHOTO_NONE_ID
 } from "./render.js";
 import {
-  ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock
+  ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
+  photoOutcome, photoMessage, isUnconfirmed, OFF_WAIT_TEXT
 } from "./front-photo.js";
-import { loadT1, loadCatalog, t1ModuleUrl, hitProducts } from "./front-search.js";
-import { buildRankIndex, rankFromItems, rankFromText, confidenceOf } from "./front-rank.js";
+import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
+import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
+import { mergeFront, joinOffResults } from "./front-merge.js";
+import { createOffSearch, cleanQuery } from "./off-search.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
@@ -251,12 +255,17 @@ document.querySelectorAll(".try button[data-code]").forEach((b) =>
 let allergyProfile = getAllergyProfile();
 // Sản phẩm (đã normalize) đang hiện trong #result; null khi đang tra, không tìm thấy hoặc lỗi.
 let shownProduct = null;
+// Sản phẩm TỰ MỞ từ ảnh đang chờ bấm "Đúng" (đợt tu-dong vòng 4): { code, lookupId, top, others } hoặc null.
+// Đặt khi lookup(…, { photo }); xóa khi bấm "Đúng", khi tra mã khác không từ ảnh, khi chọn ảnh mới, khi đăng xuất.
+let photoPending = null;
 
-/** Vẽ lại CHỈ khung cảnh báo đầu kết quả (không vẽ lại cả kết quả: giữ chữ đang gõ trong form tủ đồ). */
+/** Vẽ lại CHỈ khung cảnh báo đầu kết quả (không vẽ lại cả kết quả: giữ chữ đang gõ trong form tủ đồ).
+ *  Còn "chưa xác nhận" thì giữ dòng nhắc (đổi hồ sơ / đổi ở tab khác cũng vậy). */
 function redrawAllergyAlert() {
   const box = document.getElementById(ALLERGY_ALERT_ID);
   if (!shownProduct || !box) return;
-  box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length);
+  box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length,
+    { unconfirmed: isUnconfirmed(photoPending, shownProduct.code) });
 }
 
 /** Vẽ ô tick + số nhóm của khung "Hồ sơ dị ứng" theo biến allergyProfile. */
@@ -317,15 +326,30 @@ function scrollToEl(el, block) {
 }
 
 let current = 0;
-async function lookup(raw) {
+/**
+ * Tra một mã trên Open Food Facts rồi vẽ trang sản phẩm vào #result.
+ * opts.photo (đợt tu-dong vòng 4): { top, others } của photoOutcome khi "Chụp mặt trước" TỰ MỞ mục 1: #result có khung
+ * "Nhận ra tự động từ ảnh, có thể nhầm…" ở đầu (vẽ ngay, trước khi gọi mạng), trang sản phẩm vẽ vào .photo-body, khối
+ * dị ứng kèm dòng "chưa xác nhận", KHÔNG lưu lịch sử (bấm "Đúng" mới lưu), không tự cuộn (người gọi cuộn tới khung).
+ * Không có opts.photo (quét / nhập mã / lịch sử / gợi ý khác): như cũ, và xóa trạng thái "chưa xác nhận".
+ */
+async function lookup(raw, { photo = null } = {}) {
   const code = cleanCode(raw);
   if (!code) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
   const id = ++current;
+  photoPending = photo ? { code, lookupId: id, top: photo.top, others: photo.others || [] } : null;
   codeInput.value = code;
   setMsg(`Đang tra cứu mã ${code}…`);
   shownProduct = null; // kết quả cũ bị xóa ngay dưới đây: đổi hồ sơ lúc này không vẽ gì
-  result.innerHTML = "";
-  scrollToEl(result, "nearest");
+  let out = result; // nơi vẽ trang sản phẩm / lỗi
+  if (photo) {
+    result.innerHTML = renderPhotoShell(photo.top);
+    bindFrontImages(result);
+    out = result.querySelector(".photo-body") || result;
+  } else {
+    result.innerHTML = "";
+    scrollToEl(result, "nearest");
+  }
 
   // (a) Gọi API: lỗi ở đây là lỗi mạng / hết giờ / máy chủ (e.kind do getProduct gắn).
   let data;
@@ -336,7 +360,8 @@ async function lookup(raw) {
     if (id !== current) return;
     setMsg();
     // Lỗi không có kind (ví dụ lỗi lập trình) thì báo "bất thường", không đổ cho mạng.
-    result.innerHTML = renderError(code, e?.kind || "unknown", e);
+    // Tự mở từ ảnh: khung (tên / ảnh từ kết quả gộp) vẫn ở trên, "Không, xem gợi ý khác" vẫn dùng được.
+    out.innerHTML = renderError(code, e?.kind || "unknown", e);
     return;
   }
   if (id !== current) return;
@@ -346,25 +371,31 @@ async function lookup(raw) {
   let product;
   try {
     // Không tìm thấy vẫn cho thêm vào tủ đồ, tên để trống bắt buộc nhập (lỗi mạng / máy chủ thì không có form)
-    if (!data) { result.innerHTML = renderNotFound(code) + renderAddForm({ code }); return; }
+    if (!data) { out.innerHTML = renderNotFound(code) + renderAddForm({ code }); return; }
     product = normalize(data, code);
-    // Khung cảnh báo dị ứng ngay đầu kết quả (trước <article>); hồ sơ 0 nhóm thì khung rỗng.
-    result.innerHTML = renderAllergyBox(matchAllergies(product, allergyProfile), allergyProfile.length)
+    // OFF có thể trả mã viết khác mã đã tra (vd thêm / bỏ số 0 đầu): cờ "chưa xác nhận" theo mã của sản phẩm đang hiện.
+    if (photo && photoPending?.lookupId === id) photoPending.code = product.code;
+    // Khung cảnh báo dị ứng ngay đầu kết quả (trước <article>); hồ sơ 0 nhóm thì khung rỗng (trừ khi chưa xác nhận).
+    out.innerHTML = renderAllergyBox(matchAllergies(product, allergyProfile), allergyProfile.length,
+      { unconfirmed: isUnconfirmed(photoPending, product.code) })
       + renderProduct(product) + renderCompareButton(product.code) + renderAddForm(product);
     shownProduct = product;
   } catch (e) {
     console.error(e);
     if (id !== current) return;
     shownProduct = null;
-    result.innerHTML = renderError(code, "display", e);
+    out.innerHTML = renderError(code, "display", e);
     return;
   }
 
   // (c) Lưu lịch sử: lỗi chỉ ghi ra console, giữ nguyên kết quả đang hiện.
-  try {
-    renderHistory(addHistory(code, product.name));
-  } catch (e) {
-    console.error(e);
+  // Tự mở từ ảnh (chưa xác nhận): KHÔNG lưu, bấm "Đúng" mới lưu (confirmPhoto).
+  if (!photo) {
+    try {
+      renderHistory(addHistory(code, product.name));
+    } catch (e) {
+      console.error(e);
+    }
   }
 }
 
@@ -844,9 +875,18 @@ window.addEventListener("pageshow", (e) => {
 });
 
 // ---- Chụp mặt trước (đợt chup-mat): ảnh mặt trước → máy chủ OCR (cần đăng nhập) → T1 → tối đa 5 gợi ý ----
-// Không đọc ảnh trên máy (chỉ thu nhỏ rồi gửi), không lấy dị ứng từ ảnh: bấm gợi ý thì tra mã như khi quét.
+// Không đọc ảnh trên máy (chỉ thu nhỏ rồi gửi), không lấy dị ứng từ ảnh: thông tin + dị ứng luôn tra theo mã trên OFF.
 // T1 (public/chup-mat-do/t1.mjs) và danh mục (danh-muc-vn.json) chỉ tải ở lần chọn ảnh đầu tiên được gửi đi: sau khi
 // thu nhỏ ảnh (prepareImage) và sau câu hỏi gửi nguyên bản; bấm "Không gửi" thì không tải (xem loadFrontSearch).
+// Đợt tu-dong vòng 4: sau T1, TỰ tìm thêm trên Open Food Facts (search.pl, src/off-search.js, một bộ cho cả phiên: cache
+// + ≤ 10 lượt / phút), gộp (mergeFront mặc định, lớp chặn DEFAULT_GUARD), rồi TỰ MỞ mục 1 kèm khung xác nhận
+// (showPhotoResult). OFF lỗi / hết giờ / bị giới hạn → kết quả danh mục.
+let offSearchOne = null;
+/** MỘT bộ tìm OFF cho cả phiên (tạo ở lần tìm đầu: mở app không đụng tới localStorage / mạng). */
+function offSearch() {
+  if (!offSearchOne) offSearchOne = createOffSearch();
+  return offSearchOne;
+}
 const frontLabel = $("#frontLabel"), frontFile = $("#frontFile"), btnFrontLogin = $("#btnFrontLogin");
 const frontInfo = $("#frontInfo"), frontHint = $("#frontHint"), frontMsg = $("#frontMsg");
 const frontRelogin = $("#frontRelogin"), btnFrontRelogin = $("#btnFrontRelogin"), frontBox = $("#frontBox");
@@ -889,7 +929,21 @@ function updateFrontButton() {
     sayFront();
     frontBox.hidden = true;
     frontBox.innerHTML = "";
+    clearPhotoResult(); // đợt tu-dong vòng 4: sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" của người trước
   }
+}
+
+/**
+ * Xóa kết quả "Chụp mặt trước" đang ở #result (sản phẩm tự mở CHƯA xác nhận, hoặc khối "Chưa tìm thấy…") và hủy lượt
+ * tra đang chạy của nó. Sản phẩm đã bấm "Đúng" / tra bình thường thì giữ. Gọi khi chọn ảnh mới và khi đăng xuất.
+ */
+function clearPhotoResult() {
+  if (!photoPending && !document.getElementById(PHOTO_NONE_ID)) return;
+  ++current; // lượt lookup tự mở đang chờ mạng (nếu có) về muộn thì bỏ
+  photoPending = null;
+  shownProduct = null;
+  result.innerHTML = "";
+  setMsg();
 }
 
 /**
@@ -937,21 +991,133 @@ function loadFrontSearch() {
   return frontSearchPromise;
 }
 
-/** Vẽ kết quả vào #frontBox; ảnh gợi ý tải lỗi thì thay bằng "chưa có ảnh". */
-function bindFrontImages() {
-  frontBox.querySelectorAll("img.front-img").forEach((img) => img.addEventListener("error", () => {
+/** Ảnh sản phẩm (class front-img) trong el tải lỗi thì thay bằng "chưa có ảnh" (phần tử ngay sau ảnh). */
+function bindFrontImages(el) {
+  el.querySelectorAll("img.front-img").forEach((img) => img.addEventListener("error", () => {
     img.hidden = true;
     if (img.nextElementSibling) img.nextElementSibling.hidden = false;
   }, { once: true }));
 }
 
 /**
- * Tìm (khung chữ máy chủ hoặc chữ trong ô) → { hits để vẽ, confident } theo src/front-rank.js.
- * Luật hiện tại (CONFIDENCE_RULE) = luôn không chắc. Nếu bật lại luật: confident tính trên found.hits thô (trước khi
- * render.js lọc mã 8–14 số) và ngưỡng chỉ đo trên chữ máy chủ, chưa đo cho "Tìm lại" (xem comment trong front-rank.js).
+ * Đợt tu-dong vòng 4: kết quả T1 (found: rankFromItems / rankFromText) → tìm thêm trên OFF → gộp → TỰ MỞ mục 1 (khung
+ * xác nhận) hoặc "Chưa tìm thấy…". Luôn hiện khung "có thể nhầm" (CONFIDENCE_RULE của front-rank.js = luôn không chắc).
+ * id: lượt frontTurn; lookupMark: số lượt lookup lúc bắt đầu (quét / nhập mã / bấm lịch sử trong lúc chờ → bỏ, không tự
+ * mở); fromRetry: "Tìm lại" (không cuộn, không vẽ lại ô sửa chữ).
  */
-function frontFound(s, found) {
-  return { found, hits: hitProducts(s.products, found.hits), confident: confidenceOf(found).confident };
+async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded }) {
+  const stale = () => id !== frontTurn || current !== lookupMark;
+  // Câu tìm làm sạch như khung đo vòng 3 (≤ 2 câu = ≤ 2 lượt, chạy song song, mỗi lượt hết giờ SEARCH_TIMEOUT_MS).
+  const queries = cleanQuery(found.lines, { idf: s.rIndex.index.idf });
+  let off = { ok: false, kind: "none" };
+  if (queries.length) {
+    const ctrl = new AbortController(); // chọn ảnh khác / đăng xuất thì hủy (frontAbort)
+    frontAbort = ctrl;
+    sayFront(OFF_WAIT_TEXT);
+    const os = offSearch();
+    off = joinOffResults(await Promise.all(queries.map((q) => os.search(q, { signal: ctrl.signal }))));
+    if (frontAbort === ctrl) frontAbort = null;
+  }
+  if (stale()) {
+    if (id === frontTurn) sayFront(); // bỏ vì đã tra mã khác: xóa câu "Đang tìm…"
+    return;
+  }
+  let merged;
+  try {
+    merged = mergeFront(s.t1, s.rIndex, s.products, found, off); // lớp chặn mặc định (không truyền lockTop / offMax)
+  } catch (e) {
+    console.error(e);
+    merged = mergeFront(s.t1, s.rIndex, s.products, found, null); // = đúng kết quả T1
+  }
+  const outcome = photoOutcome(merged);
+  if (!fromRetry) {
+    frontBox.innerHTML = renderFrontEdit({ lines: found.lines, reencoded });
+    frontBox.hidden = false;
+  }
+  const note = photoMessage({ kind: outcome.kind, offFailed: queries.length > 0 && !off.ok });
+  sayFront(note.text, note.warn);
+  if (outcome.kind === "open") {
+    lookup(outcome.top.code, { photo: outcome }); // vẽ khung NGAY (trước khi gọi mạng), trang sản phẩm vẽ sau
+  } else {
+    ++current; // lượt tra đang chạy (nếu có) về muộn thì bỏ
+    photoPending = null;
+    shownProduct = null;
+    setMsg();
+    result.innerHTML = renderPhotoNone({ lines: found.lines });
+  }
+  // Lần chọn ảnh (không phải "Tìm lại"): cuộn ít nhất để khung xác nhận / câu "Chưa tìm thấy…" hiện trong màn hình.
+  const to = afterResultScroll({ kind: outcome.kind, fromRetry });
+  const target = to === "confirm" ? document.getElementById(PHOTO_CONFIRM_ID) : to === "none" ? document.getElementById(PHOTO_NONE_ID) : null;
+  if (target) scrollToEl(target, "nearest");
+}
+
+/** "Đúng": bỏ dòng chưa xác nhận, thu gọn khung, báo qua role="status", lưu lịch sử. Trang chưa tải được → tra lại mã
+ *  như người dùng tự chọn (lưu lịch sử khi xong). */
+function confirmPhoto() {
+  const p = photoPending;
+  if (!p) return;
+  if (!shownProduct || shownProduct.code !== p.code || p.lookupId !== current) { lookup(p.code); return; }
+  photoPending = null;
+  redrawAllergyAlert();
+  const box = document.getElementById(PHOTO_CONFIRM_ID);
+  if (box) {
+    const ask = box.querySelector(".photo-ask");
+    if (ask) ask.outerHTML = renderPhotoDone(p.top);
+    const others = box.querySelector(".photo-others");
+    if (others) { others.hidden = true; others.innerHTML = ""; }
+    box.focus({ preventScroll: true }); // nút vừa bấm đã mất: giữ focus trong khung
+    const status = box.querySelector(".photo-status");
+    if (status) status.textContent = "Đã xác nhận, đã lưu vào lịch sử tra cứu.";
+  }
+  try {
+    renderHistory(addHistory(shownProduct.code, shownProduct.name));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/** "Không, xem gợi ý khác": hiện tối đa 4 mục còn lại + khối "Không chắc chắn…" + 3 nút cũ. */
+function showPhotoOthers(btn) {
+  const p = photoPending;
+  const box = document.getElementById("photoOthers");
+  if (!p || !box) return;
+  box.innerHTML = renderPhotoOthers(p.others);
+  box.hidden = false;
+  bindFrontImages(box);
+  btn.setAttribute("aria-expanded", "true");
+}
+
+/**
+ * Bấm trong #result / #frontBox (ủy quyền sự kiện): "Đúng" / "Không, xem gợi ý khác", gợi ý khác (data-front-code: tra
+ * mã như người dùng tự chọn), 3 nút cũ ("Quét mã vạch", "Nhập số mã"; "Góp sản phẩm" là link thường), "Tìm lại".
+ */
+function onFrontClick(ev) {
+  if (ev.target.closest("button[data-photo-yes]")) { confirmPhoto(); return; }
+  const no = ev.target.closest("button[data-photo-no]");
+  if (no) { showPhotoOthers(no); return; }
+  const pick = ev.target.closest("button[data-front-code]");
+  if (pick) { lookup(pick.dataset.frontCode); return; } // không tự chọn thay người dùng: chỉ khi bấm
+  const act = ev.target.closest("button[data-front-action]");
+  if (act) {
+    if (act.dataset.frontAction === "scan") {
+      // Bật camera NGAY trong sự kiện bấm (như nút "Bật camera"), rồi cuộn tới khung camera. App đang bận (mở camera /
+      // đọc ảnh mã) thì không bật, chỉ cuộn và nhắc ở #frontMsg (chỉ đổi chữ).
+      if (busy) sayFront("App đang bận, chờ xong rồi bấm Quét mã vạch lại.", true);
+      else if (!scanner.running) startCam();
+      scrollToEl(reader, "center");
+    } else if (act.dataset.frontAction === "code") {
+      scrollToEl(codeInput, "center");
+      codeInput.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (!ev.target.closest("button[data-front-retry]") || !frontSearch) return;
+  // "Tìm lại": chữ trong ô → cùng luồng (T1 + OFF cùng bộ tìm, có cache / giới hạn), không cuộn.
+  const text = frontBox.querySelector(`#${FRONT_TEXT_ID}`)?.value || "";
+  frontAbort?.abort();
+  const id = ++frontTurn;
+  showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true })
+    .catch((e) => { console.error(e); if (id === frontTurn) sayFront("Có lỗi khi tìm lại. Thử lại.", true); });
 }
 
 frontFile.addEventListener("change", async (ev) => {
@@ -977,6 +1143,8 @@ frontFile.addEventListener("change", async (ev) => {
   const stale = () => id !== frontTurn;
   frontBox.hidden = true;
   frontBox.innerHTML = "";
+  clearPhotoResult(); // sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" của ảnh trước
+  const lookupMark = current; // quét / nhập mã / bấm lịch sử trong lúc chờ → không tự mở (showPhotoResult)
   sayFront("Đang chuẩn bị ảnh…");
 
   const prep = await prepareImage(file);
@@ -1063,48 +1231,15 @@ frontFile.addEventListener("change", async (ev) => {
     return;
   }
   if (stale()) return;
-  const { found, hits, confident } = frontFound(s, rankFromItems(s.t1, s.rIndex, r.items));
-  frontBox.innerHTML = renderFrontResult({ lines: found.lines, hits, reencoded: prep.reencoded, confident });
-  frontBox.hidden = false;
-  bindFrontImages();
-  sayFront(frontHitsText(hits, confident));
-  // Đợt chup-mat-gon: màn 360×740, nút "Chụp mặt trước" đang trong màn hình thì kết quả nằm dưới mép màn hình
-  // (đo: gợi ý 1 ở ~1.240 px). Cuộn ÍT NHẤT để gợi ý 1 vừa hiện trọn (block "nearest"), chỉ sau lần chọn ảnh (không
-  // phải "Tìm lại"); không đổi focus, không thu ô chữ. Đợt cung-co: 0 gợi ý thì cuộn tới khối "Không chắc chắn" (đo:
-  // khối + 3 nút ở ~930–1.060 px, ngoài màn 360×740).
-  const shown = [...frontBox.querySelectorAll("button[data-front-code]")];
-  const to = afterResultScroll({ hits: shown, fromRetry: false });
-  const target = to === "hit" ? shown[0] : to === "unsure" ? frontBox.querySelector(".front-unsure") : null;
-  if (target) scrollToEl(target, "nearest");
+  // Đợt tu-dong vòng 4: tìm thêm trên OFF, gộp, TỰ MỞ mục 1 (khung xác nhận) hoặc "Chưa tìm thấy…", cuộn tới đó.
+  // (Đợt chup-mat-gon / cung-co: màn 360×740 thì kết quả nằm dưới mép màn hình, nên cuộn ÍT NHẤT tới khung, block
+  // "nearest"; không đổi focus.)
+  await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded });
 });
 
-// Ủy quyền sự kiện trên #frontBox: "Tìm lại" (tìm theo chữ trong ô), bấm gợi ý (tra mã như khi quét) và 2 nút của khối
-// "Không chắc chắn…" ("Quét mã vạch", "Nhập số mã"; nút góp sản phẩm là link thường).
-frontBox.addEventListener("click", (ev) => {
-  const pick = ev.target.closest("button[data-front-code]");
-  if (pick) { lookup(pick.dataset.frontCode); return; } // không tự chọn thay người dùng: chỉ khi bấm
-  const act = ev.target.closest("button[data-front-action]");
-  if (act) {
-    if (act.dataset.frontAction === "scan") {
-      // Bật camera NGAY trong sự kiện bấm (như nút "Bật camera"), rồi cuộn tới khung camera. App đang bận (mở camera /
-      // đọc ảnh mã) thì không bật, chỉ cuộn và nhắc ở #frontMsg (chỉ đổi chữ).
-      if (busy) sayFront("App đang bận, chờ xong rồi bấm Quét mã vạch lại.", true);
-      else if (!scanner.running) startCam();
-      scrollToEl(reader, "center");
-    } else if (act.dataset.frontAction === "code") {
-      scrollToEl(codeInput, "center");
-      codeInput.focus({ preventScroll: true });
-    }
-    return;
-  }
-  if (!ev.target.closest("button[data-front-retry]") || !frontSearch) return;
-  const text = frontBox.querySelector(`#${FRONT_TEXT_ID}`)?.value || "";
-  const { hits, confident } = frontFound(frontSearch, rankFromText(frontSearch.t1, frontSearch.rIndex, text));
-  const list = frontBox.querySelector(".front-hits");
-  if (list) list.innerHTML = renderFrontHits(hits, { confident });
-  bindFrontImages();
-  sayFront(frontHitsText(hits, confident));
-});
+// Ủy quyền sự kiện: #result (khung xác nhận, gợi ý khác, "Chưa tìm thấy…") và #frontBox (ô sửa chữ + "Tìm lại").
+result.addEventListener("click", onFrontClick);
+frontBox.addEventListener("click", onFrontClick);
 
 updateFrontButton();
 initAuth();

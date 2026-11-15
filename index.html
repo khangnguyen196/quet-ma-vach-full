@@ -55,7 +55,8 @@
       <button id="btnZoom" class="btn" type="button" hidden>Phóng to 2×</button>
     </div>
     <!-- Chụp mặt trước: ghi chú (hiện cùng nút), dòng trạng thái cố định (#frontMsg chỉ đổi chữ), nút tới phần đăng nhập
-         khi phiên hết hạn, khối gợi ý (#frontBox, render.js renderFrontResult). -->
+         khi phiên hết hạn. Kết quả (đợt tu-dong vòng 4) vào #result (tự mở sản phẩm + khung xác nhận, hoặc "Chưa tìm
+         thấy…"); ô sửa chữ đóng sẵn ở #frontBox ngay SAU #result. -->
     <div id="frontInfo" class="front-info-box" hidden>
       <p id="frontHint" class="front-hint" hidden>Chụp mặt trước cần đăng nhập. Chưa đăng nhập vẫn quét mã vạch được.</p>
       <p class="front-note">Ảnh được gửi lên máy chủ chỉ để đọc chữ, máy chủ không lưu ảnh. Thông tin và dị ứng lấy theo mã sản phẩm bạn chọn trên Open Food Facts, không đoán từ ảnh.</p>
@@ -64,7 +65,6 @@
     <div id="frontRelogin" class="actions front-relogin" hidden>
       <button id="btnFrontRelogin" class="btn" type="button">Tới phần đăng nhập</button>
     </div>
-    <section id="frontBox" class="front-box" aria-label="Gợi ý từ ảnh mặt trước" hidden></section>
     <form id="manual" class="manual" autocomplete="off">
       <input id="codeInput" inputmode="numeric" pattern="[0-9 ]*" placeholder="Hoặc nhập số dưới mã vạch" aria-label="Số mã vạch">
       <button class="btn" type="submit">Tra cứu</button>
@@ -88,6 +88,8 @@
   </details>
 
   <section id="result" aria-live="polite"></section>
+  <!-- Ô sửa chữ đọc được từ ảnh mặt trước (render.js renderFrontEdit): dưới kết quả, đóng sẵn, không bắt buộc -->
+  <section id="frontBox" class="front-box" aria-label="Sửa chữ đọc được từ ảnh mặt trước" hidden></section>
 
   <section id="history" aria-label="Đã quét gần đây">
     <h2>Đã quét gần đây</h2>

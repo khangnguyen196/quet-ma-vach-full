@@ -39,6 +39,9 @@ export const ALLERGY_NEUTRAL = "Dữ liệu Open Food Facts không ghi nhóm nà
 /** id của khung cảnh báo đầu kết quả: main.js tìm khung này để vẽ lại khi đổi hồ sơ. */
 export const ALLERGY_ALERT_ID = "allergyAlert";
 
+/** Dòng trong khung cảnh báo khi sản phẩm được TỰ MỞ từ ảnh mà người dùng chưa bấm "Đúng" (đợt tu-dong vòng 4). */
+export const ALLERGY_UNCONFIRMED = "Sản phẩm nhận ra từ ảnh, chưa xác nhận: kiểm tra tên trên bao bì trước khi tin cảnh báo dị ứng";
+
 /** Tên tiếng Việt của danh sách khóa nhóm, nối bằng ", " (đã escape). */
 const allergenNames = (keys) => keys.map((k) => esc(ALLERGEN_VI[k])).join(", ");
 
@@ -61,10 +64,13 @@ export function renderAllergyOptions(selected = []) {
  * - noData → câu thiếu dữ liệu trong khung xám riêng (có thể đi cùng khung vàng);
  * - có dữ liệu, không đỏ, không vàng → dòng trung tính.
  */
-export function renderAllergyAlert(match, profileLength) {
-  if (!profileLength) return "";
+export function renderAllergyAlert(match, profileLength, { unconfirmed = false } = {}) {
+  // Đợt tu-dong vòng 4: sản phẩm TỰ MỞ từ ảnh, chưa bấm "Đúng" → dòng nhắc đứng đầu khung (kể cả hồ sơ 0 nhóm: trang
+  // sản phẩm vẫn có mục "Chất gây dị ứng"). main.js truyền cờ cả khi vẽ lại (đổi hồ sơ / đổi ở tab khác).
+  const note = unconfirmed === true ? `<p class="allergy-alert unconfirmed" role="note">${esc(ALLERGY_UNCONFIRMED)}</p>` : "";
+  if (!profileLength) return note;
   const { danger = [], traces = [], noData = false } = match || {};
-  let html = "";
+  let html = note;
   if (danger.length) {
     html += `<p class="allergy-alert danger" role="alert"><strong>Cảnh báo dị ứng:</strong> có ${allergenNames(danger)} (nhóm trong hồ sơ của bạn)</p>`;
   }
@@ -80,9 +86,9 @@ export function renderAllergyAlert(match, profileLength) {
   return html;
 }
 
-/** Khung có id riêng chứa renderAllergyAlert(), đặt ngay đầu kết quả (trước <article>). */
-export function renderAllergyBox(match, profileLength) {
-  return `<div id="${ALLERGY_ALERT_ID}" class="allergy-box">${renderAllergyAlert(match, profileLength)}</div>`;
+/** Khung có id riêng chứa renderAllergyAlert(), đặt ngay đầu kết quả (trước <article>). opts: { unconfirmed }. */
+export function renderAllergyBox(match, profileLength, opts = {}) {
+  return `<div id="${ALLERGY_ALERT_ID}" class="allergy-box">${renderAllergyAlert(match, profileLength, opts)}</div>`;
 }
 
 /**
@@ -512,9 +518,14 @@ export const FRONT_UNSURE_TEXT = "Không chắc chắn, có thể sản phẩm c
  */
 function renderFrontUnsure() {
   return `<div class="front-unsure" role="note"><p class="front-unsure-text">${esc(FRONT_UNSURE_TEXT)}</p>
-<div class="front-unsure-actions"><button type="button" class="btn" data-front-action="scan">${esc("Quét mã vạch")}</button>
+${renderFrontActions()}</div>`;
+}
+
+/** Hàng 3 nút cũ (Quét mã vạch, Nhập số mã, Góp sản phẩm): dùng trong khối "Không chắc chắn…" và "Chưa tìm thấy…". */
+function renderFrontActions() {
+  return `<div class="front-unsure-actions"><button type="button" class="btn" data-front-action="scan">${esc("Quét mã vạch")}</button>
 <button type="button" class="btn" data-front-action="code">${esc("Nhập số mã")}</button>
-<a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener" aria-label="${esc(FRONT_ADD_LABEL)}">${esc(FRONT_ADD_TEXT)}</a></div></div>`;
+<a class="btn" href="${esc(OFF_ADD_URL)}" target="_blank" rel="noopener" aria-label="${esc(FRONT_ADD_LABEL)}">${esc(FRONT_ADD_TEXT)}</a></div>`;
 }
 
 /** Chữ hiển thị của link góp trong khối "Không chắc chắn…" (ngắn để 3 nút vừa một hàng ở màn 320 px). */
@@ -540,6 +551,100 @@ export function renderFrontResult({ lines, hits, reencoded, confident = false } 
 </div>${raw}
 <div class="front-hits">${renderFrontHits(hits, { confident })}</div>
 <p class="src front-source">Gợi ý từ danh mục dữ liệu Open Food Facts (<a href="${esc(ODBL_URL)}" target="_blank" rel="noopener">ODbL</a>)</p>`;
+}
+
+// ---- Chụp mặt trước: TỰ MỞ sản phẩm xếp đầu (đợt tu-dong vòng 4) ----
+// main.js: kết quả gộp (src/front-merge.js) → photoOutcome (src/front-photo.js) → có mục 1 thì #result =
+// renderPhotoShell(top) rồi lookup vẽ trang sản phẩm vào .photo-body; 0 mục thì #result = renderPhotoNone.
+// Ô sửa chữ (renderFrontEdit) nằm ở #frontBox, SAU #result (index.html), đóng sẵn.
+
+/** Câu của khung xác nhận (nguyên văn yêu cầu của chủ dự án 15/11/2026). */
+export const PHOTO_ASK_TEXT = "Nhận ra tự động từ ảnh, có thể nhầm. Có phải sản phẩm này?";
+/** Câu khi không có kết quả nào. */
+export const PHOTO_NONE_TEXT = "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts";
+/** id khung xác nhận / khối "Chưa tìm thấy…" (main.js cuộn tới). */
+export const PHOTO_CONFIRM_ID = "photoConfirm";
+export const PHOTO_NONE_ID = "photoNone";
+
+/** Ảnh nhỏ của một mục gộp (chỉ ảnh Open Food Facts qua labelImageUrl; lạ / trống → "chưa có ảnh"). Ảnh tải lỗi:
+ *  main.js đổi sang "chưa có ảnh" bằng addEventListener("error") (class front-img, như gợi ý cũ). */
+function photoPic(it, size) {
+  const img = labelImageUrl(it?.img);
+  const alt = `Ảnh sản phẩm ${it?.name ? it.name : "chưa có tên"}`;
+  return img
+    ? `<img class="front-img" src="${esc(img)}" width="${size}" height="${size}" loading="lazy" alt="${esc(alt)}"><span class="noimg front-noimg" hidden>chưa có ảnh</span>`
+    : '<span class="noimg front-noimg">chưa có ảnh</span>';
+}
+
+const emptyOr = (v) => (v ? esc(v) : '<span class="empty">chưa có dữ liệu</span>');
+
+/**
+ * Khung "Nhận ra tự động từ ảnh, có thể nhầm. Có phải sản phẩm này?" đặt ĐẦU #result, trước khối dị ứng: ảnh + tên +
+ * hãng + 2 nút "Đúng" (data-photo-yes) / "Không, xem gợi ý khác" (data-photo-no, aria-controls chỗ gợi ý khác).
+ * Có dòng trạng thái cố định (role="status", main.js chỉ đổi chữ) và chỗ gợi ý khác (.photo-others, ẩn sẵn).
+ * top: mục gộp { code, name, brand, img }.
+ */
+export function renderPhotoConfirm(top) {
+  return `<div id="${PHOTO_CONFIRM_ID}" class="photo-confirm" tabindex="-1">
+<div class="photo-ask"><p class="photo-ask-text">${esc(PHOTO_ASK_TEXT)}</p>
+<div class="photo-item">${photoPic(top, 80)}<span class="front-info"><span class="front-name">${emptyOr(top?.name)}</span><span class="front-brand">${emptyOr(top?.brand)}</span><span class="front-code">Mã ${esc(top?.code)}</span></span></div>
+<div class="photo-actions"><button type="button" class="btn primary" data-photo-yes>Đúng</button>
+<button type="button" class="btn" data-photo-no aria-expanded="false" aria-controls="photoOthers">Không, xem gợi ý khác</button></div></div>
+<div id="photoOthers" class="photo-others" hidden></div>
+<p class="photo-status" role="status" aria-live="polite"></p>
+</div>`;
+}
+
+/** Khung + chỗ vẽ trang sản phẩm (.photo-body, lúc đầu là câu "Đang tải…"). */
+export function renderPhotoShell(top) {
+  return `${renderPhotoConfirm(top)}<div class="photo-body"><p class="photo-loading">Đang tải thông tin sản phẩm từ Open Food Facts…</p></div>`;
+}
+
+/** Phần thay .photo-ask sau khi bấm "Đúng" (khung thu gọn, không còn nút). */
+export function renderPhotoDone(top) {
+  return `<p class="photo-done">Đã xác nhận: <strong>${emptyOr(top?.name)}</strong></p>`;
+}
+
+/**
+ * "Không, xem gợi ý khác": tối đa 4 mục còn lại (ảnh, tên, hãng, mã; nút data-front-code: bấm thì main.js tra mã như
+ * người dùng tự chọn), rồi khối "Không chắc chắn…" + 3 nút cũ. Không còn mục nào → chỉ khối + 3 nút.
+ */
+export function renderPhotoOthers(others) {
+  const list = (Array.isArray(others) ? others : []).filter((h) => isPlainCode(h?.code)).slice(0, 4);
+  const items = list.map((h) => `<li><button type="button" class="front-hit" data-front-code="${h.code}">${photoPic(h, 64)}
+<span class="front-info"><span class="front-name">${emptyOr(h.name)}</span><span class="front-brand">${emptyOr(h.brand)}</span><span class="front-code">Mã ${h.code}</span></span></button></li>`).join("");
+  const head = list.length ? `<p class="front-lead">Gợi ý khác, bấm để xem</p><ul class="front-list">${items}</ul>` : "";
+  return `${head}${renderFrontUnsure()}`;
+}
+
+/**
+ * 0 kết quả: câu "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts" + chữ đọc được (từng dòng, qua esc()) +
+ * 3 nút cũ. Đặt vào #result.
+ */
+export function renderPhotoNone({ lines } = {}) {
+  const ls = (Array.isArray(lines) ? lines : []).map((s) => String(s ?? "").trim()).filter(Boolean);
+  const read = ls.length
+    ? `<p>Chữ đọc được trên ảnh:</p><ul class="photo-lines">${ls.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`
+    : "<p>Không đọc được chữ nào trên ảnh.</p>";
+  return `<div id="${PHOTO_NONE_ID}" class="notfound photo-none" tabindex="-1"><p class="big">${esc(PHOTO_NONE_TEXT)}</p>
+${read}
+${renderFrontActions()}</div>`;
+}
+
+/**
+ * Ô sửa chữ để phía dưới, không bắt buộc: <details> đóng sẵn "Sửa chữ đọc được" (textarea #frontText + "Tìm lại"),
+ * câu ảnh gửi nguyên bản (reencoded false) và dòng nguồn ODbL. Đặt vào #frontBox (sau #result).
+ */
+export function renderFrontEdit({ lines, reencoded } = {}) {
+  const value = (Array.isArray(lines) ? lines : []).map((s) => String(s ?? "")).join("\n");
+  const raw = reencoded === false ? '<p class="front-raw">Ảnh này được gửi nguyên bản (máy không thu nhỏ được).</p>' : "";
+  return `<details class="front-edit">
+<summary>Sửa chữ đọc được</summary>
+<label for="${FRONT_TEXT_ID}">Chữ đọc được trên ảnh (sửa được, rồi bấm “Tìm lại”)</label>
+<textarea id="${FRONT_TEXT_ID}" class="front-text" rows="4" spellcheck="false" autocomplete="off">${esc(value)}</textarea>
+<div class="actions front-retry"><button class="btn" type="button" data-front-retry>Tìm lại</button></div>
+</details>${raw}
+<p class="src front-source">Tìm trong danh mục dữ liệu Open Food Facts (<a href="${esc(ODBL_URL)}" target="_blank" rel="noopener">ODbL</a>) và trên Open Food Facts</p>`;
 }
 
 // ---- Tài khoản (đăng nhập Google qua Supabase, đợt dang-nhap; không bắt buộc) ----

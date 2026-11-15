@@ -199,12 +199,59 @@ export function frontErrorView(result) {
  * Sau khi vẽ kết quả "Chụp mặt trước", cuộn tới đâu (đợt cung-co)?
  * hits: các gợi ý ĐÃ vẽ ra (mảng); fromRetry: true khi là "Tìm lại" (chữ người dùng sửa).
  * Trả "hit" (cuộn tới gợi ý 1) | "unsure" (0 gợi ý: cuộn tới khối "Không chắc chắn") | null (không cuộn:
- * "Tìm lại", hoặc hits không phải mảng).
+ * "Tìm lại", hoặc hits không phải mảng). Vòng 4 tu-dong: kind "open" → "confirm", "none" → "none" (xem dưới).
  * Ví dụ: afterResultScroll({ hits: [], fromRetry: false }) → "unsure"
  */
-export function afterResultScroll({ hits, fromRetry = false } = {}) {
-  if (fromRetry || !Array.isArray(hits)) return null;
+export function afterResultScroll({ hits, kind, fromRetry = false } = {}) {
+  if (fromRetry) return null;
+  // Đợt tu-dong vòng 4 (luồng tự mở): kind của photoOutcome → "confirm" (khung "Nhận ra tự động…") | "none" (câu
+  // "Chưa tìm thấy…"). Không có kind thì giữ luật cũ theo hits.
+  if (kind === "open") return "confirm";
+  if (kind === "none") return "none";
+  if (!Array.isArray(hits)) return null;
   return hits.length > 0 ? "hit" : "unsure";
+}
+
+// ---- Tự mở sản phẩm xếp đầu (đợt tu-dong vòng 4) ----
+
+/** Câu #frontMsg trong lúc chờ tìm thêm trên Open Food Facts. */
+export const OFF_WAIT_TEXT = "Đang tìm thêm trên Open Food Facts…";
+/** Câu #frontMsg khi Open Food Facts lỗi / hết giờ / bị giới hạn (không cảnh báo đỏ: app vẫn có kết quả danh mục). */
+export const OFF_FAIL_TEXT = "Không tìm thêm được trên Open Food Facts, đang dùng danh mục trong app.";
+/** Số gợi ý khác tối đa (ngoài mục 1 được tự mở). */
+export const PHOTO_OTHERS_MAX = 4;
+
+const plainCode = (c) => typeof c === "string" && /^\d{8,14}$/.test(c);
+
+/**
+ * Kết quả gộp (mergeFront của src/front-merge.js) → việc giao diện làm:
+ * { kind: "open", top: mục 1, others: tối đa 4 mục sau } hoặc { kind: "none", top: null, others: [] }.
+ * Mục có mã không phải 8–14 chữ số bị bỏ (không mở, không vẽ).
+ * Ví dụ: photoOutcome([]) → { kind: "none", top: null, others: [] }
+ */
+export function photoOutcome(merged) {
+  const list = (Array.isArray(merged) ? merged : []).filter((x) => x && plainCode(x.code));
+  if (!list.length) return { kind: "none", top: null, others: [] };
+  return { kind: "open", top: list[0], others: list.slice(1, 1 + PHOTO_OTHERS_MAX) };
+}
+
+/**
+ * Câu #frontMsg sau khi tìm xong. kind: của photoOutcome; offFailed: đã gọi Open Food Facts mà không câu nào trả được
+ * (lỗi mạng / 503 / hết giờ / bị giới hạn). Trả { text, warn } (warn luôn false: không cảnh báo đỏ).
+ */
+export function photoMessage({ kind, offFailed = false } = {}) {
+  if (offFailed === true) return { text: OFF_FAIL_TEXT, warn: false };
+  if (kind === "open") return { text: "Đã mở sản phẩm khớp nhất bên dưới. Hãy kiểm tra có đúng sản phẩm không.", warn: false };
+  return { text: "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts.", warn: false };
+}
+
+/**
+ * Sản phẩm đang hiện (shownCode) có đang "chưa xác nhận" không: pending = sản phẩm tự mở từ ảnh đang chờ bấm "Đúng"
+ * ({ code }) hoặc null. main.js đặt pending khi tự mở, xóa khi bấm "Đúng", khi tra mã khác không từ ảnh, khi chọn ảnh
+ * mới, khi đăng xuất.
+ */
+export function isUnconfirmed(pending, shownCode) {
+  return !!pending && plainCode(pending.code) && pending.code === shownCode;
 }
 
 /**
