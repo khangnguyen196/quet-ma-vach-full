@@ -58,6 +58,8 @@ import { loadApp, makeDiskFetch, rank5, ROOT, SETS, CODE_7UP, LINES_7UP, TYPED_7
 import { foreignCases, lossOf, MO_RONG, LEMON_7UP, PLAIN_7UP } from "./tu-dong-v42-do.mjs";
 import { ALL_CODES, SALT_LINES, SALT_CODE, saltItems } from "./nang-t1-do.mjs";
 import { memEstimate } from "./tu-dong-kho-lon.mjs";
+import { mergeFront } from "../../src/front-merge.js";
+import { joinExtra } from "../../src/front-extra.js";
 
 export const LEVEL_NAMES = Object.freeze(["a", "b", "c"]);
 export const SERVER_K = 10;
@@ -153,6 +155,31 @@ export function g3Merge(merged0, server, { k = 5, lockTop = LOCK_TOP, offMax = O
     out.push(it);
   }
   return out.slice(0, k);
+}
+
+/**
+ * Gộp theo cách (thân hàm run của khung đo, tách ra ở vòng 2 để test được). found = rankFromItems / rankFromText trên
+ * danh mục 1.452 (null → []); off = kết quả OFF đã nối ({ ok, hits } | { ok: false, kind }); S = mục máy chủ
+ * [{ code, name, brand, img, vn, text, grp, score }]; method = tên trong methodGrid() hoặc { kind, gap?, minWords? };
+ * catalogCodes (tùy chọn) = Set mã danh mục (không truyền thì tính từ products). Trả tối đa 5 mục (dạng mergeFront).
+ */
+export function mergeByMethod({ t1, rIndex, products, found, off, S, method, catalogCodes }) {
+  if (!found) return [];
+  const m = typeof method === "string" ? methodGrid()[method] : method;
+  if (!m || !["g1", "g2", "g3"].includes(m.kind)) throw new Error(`kho-lon-do: cách gộp không hỗ trợ: ${JSON.stringify(method)}`);
+  const server = Array.isArray(S) ? S : [];
+  const o = off;
+  if (m.kind === "g1") return mergeFront(t1, rIndex, products, found, joinExtra(o, server.map((h) => ({ ...h, extra: true }))));
+  if (m.kind === "g2") {
+    const offMarked = o && o.ok === true ? { ...o, hits: o.hits.map((h) => ({ ...h, extra: true })) } : o;
+    return mergeFront(t1, rIndex, products, found, joinExtra(offMarked, server.map(({ extra, ...h }) => h)), { offPromote: { gap: m.gap, minWords: m.minWords } });
+  }
+  const codes = catalogCodes instanceof Set ? catalogCodes : new Set((products || []).map((p) => p.code));
+  const merged0 = mergeFront(t1, rIndex, products, found, o);
+  const sv = server.map((h) => (codes.has(h.code)
+    ? { code: h.code, name: h.name, brand: h.brand, img: h.img, source: "catalog", vn: true, score: h.score }
+    : { code: h.code, name: h.name, brand: h.brand, img: h.img, source: "server", vn: h.vn, score: h.score }));
+  return g3Merge(merged0, sv);
 }
 
 /**
@@ -332,21 +359,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     }
     const heap2 = process.memoryUsage();
     // gộp theo cách
-    const run = (c, mname, cond) => {
-      if (!c.found) return [];
-      const m = grid[mname];
-      const o = c.off[cond];
-      if (m.kind === "g1") return fm.mergeFront(t1, rIndex, products, c.found, fx.joinExtra(o, c.S.map((h) => ({ ...h, extra: true }))));
-      if (m.kind === "g2") {
-        const offMarked = o && o.ok === true ? { ...o, hits: o.hits.map((h) => ({ ...h, extra: true })) } : o;
-        return fm.mergeFront(t1, rIndex, products, c.found, fx.joinExtra(offMarked, c.S.map(({ extra, ...h }) => h)), { offPromote: { gap: m.gap, minWords: m.minWords } });
-      }
-      const merged0 = fm.mergeFront(t1, rIndex, products, c.found, o);
-      const server = c.S.map((h) => (catalogCodes.has(h.code)
-        ? { code: h.code, name: h.name, brand: h.brand, img: h.img, source: "catalog", vn: true, score: h.score }
-        : { code: h.code, name: h.name, brand: h.brand, img: h.img, source: "server", vn: h.vn, score: h.score }));
-      return g3Merge(merged0, server);
-    };
+    const run = (c, mname, cond) => mergeByMethod({ t1, rIndex, products, found: c.found, off: c.off[cond], S: c.S, method: grid[mname], catalogCodes });
     const methods = {};
     for (const mname of Object.keys(grid)) {
       const res = {};
