@@ -79,6 +79,14 @@ describe("hằng số + URL", () => {
     assert.equal(u.searchParams.get("tag_0"), null);
   });
 
+  test("vòng 2: page_size 24; fields có generic_name, generic_name_vi, generic_name_en; mặc định không lọc VN", () => {
+    const u = new URL(mod.searchUrl("soda chanh"));
+    assert.equal(u.searchParams.get("page_size"), "24");
+    const f = u.searchParams.get("fields").split(",");
+    for (const k of ["generic_name", "generic_name_vi", "generic_name_en", "countries_tags", "brands"]) assert.ok(f.includes(k), k);
+    assert.equal(u.searchParams.get("tagtype_0"), null);
+  });
+
   test("APP_NAME / APP_VERSION một nguồn: src/off.js export, khớp package.json; off-search dùng lại", () => {
     assert.equal(offMod.APP_NAME, "quet-ma-vach-full");
     assert.equal(offMod.APP_VERSION, PKG.version);
@@ -120,6 +128,16 @@ describe("parseSearch", () => {
     assert.equal(hits[1].img, "", "ảnh khác tên miền bị bỏ");
     assert.equal(hits[1].vn, true);
     assert.equal(hits[2].brand, "7up, Pepsi");
+  });
+
+  test("text = tên các ngôn ngữ + hãng + tên chung (generic_name*), bỏ trùng, không quá HIT_TEXT_MAX", () => {
+    const [h] = mod.parseSearch({ products: [{
+      code: "8934588752117", product_name: "Soda Chanh - Diet 7Up", product_name_en: "Soda Chanh - Diet 7Up", product_name_vi: "",
+      brands: "PepsiCo", generic_name_vi: "Nước giải khát có ga", generic_name: 42, generic_name_en: "Soft drink",
+    }] });
+    assert.equal(h.text, "Soda Chanh - Diet 7Up PepsiCo Nước giải khát có ga Soft drink");
+    const [long] = mod.parseSearch({ products: [{ code: "12345678", product_name: "x".repeat(1000) }] });
+    assert.equal(long.text.length, mod.HIT_TEXT_MAX);
   });
 
   test("trùng mã chỉ giữ lần đầu; thân sai dạng → null", () => {
@@ -350,8 +368,8 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
     const r = await mod.createOffSearch({ fetchImpl: async () => { n++; return okResponse(); }, storage: st, now: () => t + 1000 }).search("soda");
     assert.deepEqual([r.ok, r.cached, n], [true, true, 0]);
     assert.deepEqual(r.hits, [
-      { code: "8934588752117", name: "", brand: "", img: "", vn: false },
-      { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "https://images.openfoodfacts.org/images/x.jpg", vn: true },
+      { code: "8934588752117", name: "", brand: "", img: "", vn: false, text: "" },
+      { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "https://images.openfoodfacts.org/images/x.jpg", vn: true, text: "" },
     ]);
   });
 
@@ -398,28 +416,67 @@ describe("searchVnThenAll: ưu tiên Việt Nam rồi không lọc (không loạ
   });
 });
 
-describe("cleanQuery: chữ OCR → 1–3 câu tìm ngắn", () => {
+describe("cleanQuery: chữ OCR → tối đa 2 câu tìm, mỗi câu 2–3 từ", () => {
+  // idf giả kiểu chỉ mục T1 (từ hiếm = idf cao); cũng là từ vựng danh mục
+  const IDF = new Map(Object.entries({
+    "7up": 6.4, up: 6.4, soda: 5.5, chanh: 4.2, diet: 5.8, calo: 3.9, coop: 6.5, select: 5.9, mui: 4.5, sea: 5.2, salt: 4.4,
+    vissan: 7.1, lap: 6.2, xuong: 6.0, mai: 4.0, que: 5.1, khoi: 2.0, tinh: 1.5, ca: 1.2, phe: 3.0, sua: 1.1,
+  }));
   const ok = (qs) => {
-    assert.ok(Array.isArray(qs) && qs.length >= 1 && qs.length <= 3, JSON.stringify(qs));
+    assert.ok(Array.isArray(qs) && qs.length >= 1 && qs.length <= mod.QUERY_MAX, JSON.stringify(qs));
     for (const q of qs) {
-      assert.ok(q.split(" ").length <= mod.QUERY_WORDS_MAX, `câu dài: ${q}`);
+      const n = q.split(" ").length;
+      assert.ok(n <= mod.QUERY_WORDS_MAX, `câu dài: ${q}`);
+      assert.ok(n >= mod.QUERY_WORDS_MIN || q.replace(/[^a-z]/g, "").length >= 5, `câu 1 từ ngắn: ${q}`);
       assert.match(q, /^[a-z0-9 ]+$/, `còn dấu / ký tự lạ: ${q}`);
     }
     assert.equal(new Set(qs).size, qs.length, "không trùng");
   };
 
+  test("hằng số: tối đa 2 câu / ảnh (2 lượt tìm), mỗi câu 2–3 từ", () => {
+    assert.equal(mod.QUERY_MAX, 2);
+    assert.equal(mod.QUERY_WORDS_MIN, 2);
+    assert.equal(mod.QUERY_WORDS_MAX, 3);
+  });
+
   test("ca 7Up (chữ máy chủ đọc): có câu 'soda chanh'", () => {
-    const qs = mod.cleanQuery(["Up", "Soda chanh", "Khong calo"]);
+    const qs = mod.cleanQuery(["Up", "Soda chanh", "Khong calo"], { idf: IDF });
     ok(qs);
     assert.ok(qs.includes("soda chanh"), JSON.stringify(qs));
   });
 
   test("ca 7Up gõ tay: '7 up' ghép thành '7up' khi '7up' có trong từ vựng danh mục", () => {
-    const vocab = new Set(["7up", "soda", "chanh", "diet"]);
-    const qs = mod.cleanQuery("Soda chanh diet 7 up", { vocab });
+    const qs = mod.cleanQuery("Soda chanh diet 7 up", { idf: IDF });
     ok(qs);
     assert.ok(qs.some((q) => q.split(" ").includes("7up")), JSON.stringify(qs));
-    assert.ok(qs.some((q) => q.includes("soda chanh")), JSON.stringify(qs));
+    assert.ok(qs.some((q) => q.includes("soda")), JSON.stringify(qs));
+  });
+
+  test("isVietSyllable: âm tiết tiếng Việt không dấu hợp lệ; rác OCR thì không", () => {
+    for (const w of ["chanh", "nghieng", "khuyen", "huong", "truong", "khoai", "tay", "mui", "tinh", "que", "gia", "up", "oai", "nuoc", "khoang"]) {
+      assert.equal(mod.isVietSyllable(w), true, w);
+    }
+    for (const w of ["lugng", "sog", "vibttef", "mewyork", "soda", "salt", "7up", "th", "", "chanhh", "xyz"]) {
+      assert.equal(mod.isVietSyllable(w), false, w);
+    }
+  });
+
+  test("chỉ giữ từ đáng tin (trong từ vựng hoặc âm tiết hợp lệ); xếp dòng theo tổng idf, không theo độ dài", () => {
+    const qs = mod.cleanQuery(["VISSAN", "khoi lugng tinh sog vibttef", "Lạp xưởng Mai Quế"], { idf: IDF });
+    ok(qs);
+    const all = qs.join(" ").split(" ");
+    for (const bad of ["lugng", "sog", "vibttef"]) assert.ok(!all.includes(bad), `còn rác '${bad}': ${JSON.stringify(qs)}`);
+    assert.ok(!qs[0].split(" ").includes("khoi"), `câu 1 chọn dòng rác: ${JSON.stringify(qs)}`);
+    assert.equal(qs[0], "lap xuong que", "dòng 4 từ → 3 từ hiếm nhất, giữ thứ tự");
+    assert.ok(all.includes("vissan"), JSON.stringify(qs));
+  });
+
+  test("tối đa 2 câu dù nhiều dòng; dòng 1 từ được ghép với từ hiếm nhất của dòng khác", () => {
+    const qs = mod.cleanQuery(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"], { idf: IDF });
+    ok(qs);
+    assert.equal(qs.length, 2);
+    for (const q of qs) assert.ok(q.split(" ").length >= 2, q);
+    assert.deepEqual(mod.cleanQuery(["VISSAN", "Lạp xưởng"], { idf: IDF }), ["lap xuong", "vissan lap"]);
   });
 
   test("ghép số + từ chỉ khi từ ghép có trong từ vựng; không ghép '3 in', '24 lon', '2 túi'", () => {
@@ -455,24 +512,24 @@ describe("cleanQuery: chữ OCR → 1–3 câu tìm ngắn", () => {
   });
 
   test("ca muối Co.op: bỏ dấu, có từ của tên + thương hiệu", () => {
-    const qs = mod.cleanQuery(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"]);
+    const qs = mod.cleanQuery(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"], { idf: IDF });
     ok(qs);
     const all = qs.join(" ");
-    assert.ok(all.includes("coop"), JSON.stringify(qs));
-    assert.ok(all.includes("say") && !all.includes("sấy"), JSON.stringify(qs));
+    assert.ok(all.includes("mui") && !all.includes("sấy"), JSON.stringify(qs));
+    assert.ok(!all.includes("iodizes") && !all.includes("refined"), "từ lạ không trong từ vựng, không phải âm tiết → bỏ");
   });
 
   test("bỏ dòng số liệu / khối lượng / nhiễu", () => {
-    const qs = mod.cleanQuery(["Năng lượng 150 kcal", "Khối lượng tịnh: 500g", "12,5%", "NSX 01/2026", "VISSAN", "Lạp xưởng Mai Quế"]);
+    const qs = mod.cleanQuery(["Năng lượng 150 kcal", "Khối lượng tịnh: 500g", "12,5%", "NSX 01/2026", "VISSAN", "Lạp xưởng Mai Quế"], { idf: IDF });
     ok(qs);
     const all = qs.join(" ");
     for (const bad of ["kcal", "500g", "500", "150", "luong", "nsx", "2026"]) assert.ok(!all.split(" ").includes(bad), `còn '${bad}': ${JSON.stringify(qs)}`);
-    assert.ok(all.includes("lap xuong mai que"), JSON.stringify(qs));
+    assert.ok(all.includes("lap xuong que"), JSON.stringify(qs));
     assert.ok(all.includes("vissan"), JSON.stringify(qs));
   });
 
   test("nhận cả mảng { text }; rỗng / toàn số → []", () => {
-    assert.deepEqual(mod.cleanQuery([{ text: "Soda chanh" }]), ["soda chanh"]);
+    assert.deepEqual(mod.cleanQuery([{ text: "Soda chanh" }], { idf: IDF }), ["soda chanh"]);
     assert.deepEqual(mod.cleanQuery([]), []);
     assert.deepEqual(mod.cleanQuery(""), []);
     assert.deepEqual(mod.cleanQuery(["123", "45 g", "%"]), []);
