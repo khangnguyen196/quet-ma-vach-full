@@ -58,6 +58,17 @@ export function roundKeyOf(arg) {
   if (!/^[1-9]\d?$/.test(s)) throw new Error(`--vong phải là số vòng 1–99 (nhận "${s}")`);
   return `vong${s}`;
 }
+
+/** Vòng 5 (gợi ý 9 reviewer vòng 4): đọc --vong từ argv. Không có cờ → ROUND_KEY; có cờ mà thiếu số (cuối argv hoặc
+ *  theo sau là cờ "--…") → báo lỗi, không lặng lẽ dùng vong3; số sai → lỗi của roundKeyOf. */
+export function roundKeyFromArgv(argv) {
+  const list = Array.isArray(argv) ? argv : [];
+  const i = list.indexOf("--vong");
+  if (i < 0) return ROUND_KEY;
+  const v = list[i + 1];
+  if (v === undefined || String(v).startsWith("--")) throw new Error("--vong cần số vòng ngay sau (vd --vong 5)");
+  return roundKeyOf(v);
+}
 /** Nơi cộng lượt OFF (test-ocr/outputs/api_usage.json, đã gitignore): worktree đang chạy VÀ thư mục chính của repo
  *  (hồ sơ dự án đếm ở thư mục chính; vòng 1–2 chỉ ghi worktree). */
 export const MAIN_ROOT = "D:\\quet-ma-vach-full";
@@ -296,7 +307,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const luotFile = arg("--luot", LUOT_FILE);
   const tag = arg("--tag", "");
   // --vong N (vòng 4): lượt của lần chạy này đếm vào khóa vongN của file --luot (mặc định vong3 như cũ)
-  const roundKey = roundKeyOf(argv.includes("--vong") ? argv[argv.indexOf("--vong") + 1] : undefined);
+  const roundKey = roundKeyFromArgv(argv);
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.mkdirSync(outDir, { recursive: true });
   if (!fs.existsSync(luotFile)) writeLuot(luotFile, { batDau: LUOT_START });
