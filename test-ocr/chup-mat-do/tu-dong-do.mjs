@@ -4,7 +4,8 @@
 //
 //   node test-ocr/chup-mat-do/tu-dong-do.mjs [--sets B,A] [--loo] [--chi-cache] [--max-calls 120] [--run-cap N]
 //        [--mot-luot] [--tag dot1] [--cache D:\tmp\tu-dong\cache-off] [--out D:\tmp\tu-dong\ket-qua]
-//        [--luot D:\tmp\tu-dong\off-luot.json] [--vong 6]
+//        [--luot D:\tmp\tu-dong\off-luot.json] [--vong 6] [--dung-khi-loi]
+// Vòng 6: --dung-khi-loi = cầu dao ngừng hẳn đợt khi 3 lỗi liền (không nghỉ 2 phút / thử lại); đợt sau chạy sau ≥ 15 phút.
 // Vòng 4: --vong N chọn khóa đếm lượt "vongN" của file --luot (mặc định vong3, sổ cũ vẫn đọc được), tên file ra theo vòng.
 // Vòng 3: trần --max-calls tính trên khóa "vong3" của file --luot; --run-cap chia trần cho từng đợt lấy; --loo thêm câu
 // OFF của bỏ-một-ra không rò bộ B (looCases: chỉ mục + từ vựng không có sản phẩm đúng); ra độ phủ từng bộ (coverage).
@@ -137,6 +138,7 @@ export function addUsage(n, now = new Date(), roots = [ROOT, MAIN_ROOT]) {
 export function makeDiskFetch({
   cacheDir, chiCache, netFetch, cap = DEFAULT_CAP, runCap = Infinity, roundKey = ROUND_KEY, luotFile = LUOT_FILE, gapMs = GAP_MS,
   breakerFails = BREAKER_FAILS, pauseMs = BREAKER_PAUSE_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now, usage = true,
+  stopOnTrip = false,
 }) {
   const stats = { calls: 0, ok: 0, cacheHits: 0, notCached: 0, failures: 0, failKinds: {}, breakerOpen: false, breakerPauses: 0, overCap: 0, overRunCap: 0 };
   let last = -Infinity;
@@ -147,7 +149,11 @@ export function makeDiskFetch({
     stats.failures++;
     stats.failKinds[kind] = (stats.failKinds[kind] || 0) + 1;
     if (probing) { stats.breakerOpen = true; return; }
-    if (++streak >= breakerFails) pauseNext = true;
+    if (++streak >= breakerFails) {
+      // vòng 6 (--dung-khi-loi): 3 lỗi liền → ngừng hẳn đợt này (đợt sau chạy sau ≥ 15 phút), không nghỉ / thử lại
+      if (stopOnTrip) stats.breakerOpen = true;
+      else pauseNext = true;
+    }
   };
   async function f(url) {
     const key = cacheKey(url);
@@ -316,7 +322,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const app = await loadApp();
   let net = null;
   const disk = makeDiskFetch({
-    cacheDir, chiCache, cap, runCap, luotFile, roundKey,
+    cacheDir, chiCache, cap, runCap, luotFile, roundKey, stopOnTrip: argv.includes("--dung-khi-loi"),
     netFetch: async (url) => { net ||= await browserNet(); return net.fetch(url); },
   });
   // timeoutMs dài hơn app (7 giây) để đo chất lượng tìm, không đo tốc độ mạng; limit cao vì đã giãn 8 giây ở makeDiskFetch.
