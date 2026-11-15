@@ -80,6 +80,10 @@ describe("luật iii: chỉ mục lập thêm phần chữ của từ 'số + ch
       assert.deepEqual(m.docTokens("Sữa 500ml"), ["sua"]);
       assert.deepEqual(m.docTokens("Cà phê 3in1 24h"), ["ca", "phe", "3in1"]);
       assert.deepEqual(m.bm25Tokens("7Up hương chanh"), ["7up", "huong", "chanh"], "bm25Tokens (câu tìm) không đổi");
+      // vòng 3 (gợi ý 8): docTokens đếm bí danh 1 lần như buildBm25
+      assert.deepEqual(m.docTokens("7Up hương chanh 7Up"), ["7up", "huong", "chanh", "7up", "up"]);
+      const d = m.buildBm25([{ code: "1", text: "7Up hương chanh 7Up" }]).tf[0];
+      assert.deepEqual([...d.m.entries()].sort(), Object.entries(m.docTokens("7Up hương chanh 7Up").reduce((o, w) => ({ ...o, [w]: (o[w] || 0) + 1 }), {})).sort());
     }
   });
 
@@ -123,6 +127,42 @@ describe("ca 7Up qua front-rank (danh mục thật, chưa có 8934588752117)", (
     assert.ok(codes.includes(SEVEN_UP), codes.join(","));
   });
 
+  test("vòng 3: TOÀN BỘ bảng idf + aliasDf + avgdl + tf của bản Node trùng bản trình duyệt (danh mục hiện tại)", () => {
+    const ni = node.buildBm25(catalog.products);
+    const pi = t1.buildBm25(catalog.products);
+    assert.equal(pi.N, ni.N);
+    assert.equal(pi.avgdl, ni.avgdl);
+    assert.equal(pi.idf.size, ni.idf.size);
+    for (const [w, v] of ni.idf) assert.equal(pi.idf.get(w), v, w);
+    assert.deepEqual([...pi.aliasDf.entries()].sort(), [...ni.aliasDf.entries()].sort());
+    pi.tf.forEach((d, i) => {
+      assert.equal(d.len, ni.tf[i].len, d.code);
+      assert.deepEqual([...d.m.entries()].sort(), [...ni.tf[i].m.entries()].sort(), d.code);
+    });
+  });
+
+  test("vòng 3: 3 ảnh fixture (chữ máy chủ thật) + ca muối: câu tìm + 5 gợi ý + điểm (có từ vựng) trùng 2 bản", () => {
+    const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/front-ocr-3.json", import.meta.url), "utf8"));
+    const ni = node.buildBm25(catalog.products);
+    const pi = t1.buildBm25(catalog.products);
+    const all = [
+      ...fixture.anh.map((a) => t1.rowLineInfo(a.items)),
+      t1.rowLineInfo(itemsOf(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"], 0.9)),
+    ];
+    for (const lines of all) {
+      for (const withVocab of [false, true]) {
+        const qn = node.t1QueryFromLines(lines, withVocab ? ni.idf : null, withVocab ? ni.aliasDf : null);
+        const qp = t1.t1QueryFromLines(lines, withVocab ? pi.idf : null, withVocab ? pi.aliasDf : null);
+        assert.deepEqual(qp, qn);
+        assert.ok(qn.length > 0);
+        const hn = node.bm25Search(ni, qn, 5);
+        const hp = t1.bm25Search(pi, qp, 5);
+        assert.deepEqual(hp.map((h) => h.code), hn.map((h) => h.code));
+        hp.forEach((h, k) => assert.ok(Math.abs(h.score - hn[k].score) < 1e-9));
+      }
+    }
+  });
+
   test("bản Node cùng câu tìm + top 5 + điểm với bản trình duyệt (ca 7Up)", () => {
     const ni = node.buildBm25(catalog.products);
     const pi = t1.buildBm25(catalog.products);
@@ -130,9 +170,10 @@ describe("ca 7Up qua front-rank (danh mục thật, chưa có 8934588752117)", (
       t1.rowLineInfo(itemsOf(["Up", "Soda chanh", "Khong calo"])),
       [{ text: "Soda chanh diet 7 up", conf: null }],
     ]) {
-      const qn = node.t1QueryFromLines(lines, ni.idf);
-      const qp = t1.t1QueryFromLines(lines, pi.idf);
+      const qn = node.t1QueryFromLines(lines, ni.idf, ni.aliasDf);
+      const qp = t1.t1QueryFromLines(lines, pi.idf, pi.aliasDf);
       assert.deepEqual(qp, qn);
+      assert.ok(qn.includes("up") || qn.includes("7up"), qn.join(" "));
       const hn = node.bm25Search(ni, qn, 5);
       const hp = t1.bm25Search(pi, qp, 5);
       assert.deepEqual(hp.map((h) => h.code), hn.map((h) => h.code));
