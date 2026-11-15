@@ -130,14 +130,37 @@ describe("parseSearch", () => {
     assert.equal(hits[2].brand, "7up, Pepsi");
   });
 
-  test("text = tên các ngôn ngữ + hãng + tên chung (generic_name*), bỏ trùng, không quá HIT_TEXT_MAX", () => {
+  test("text = tên các ngôn ngữ + hãng + tên chung (generic_name*), KHÔNG bỏ trùng (như docText), không quá HIT_TEXT_MAX", () => {
+    // Vòng 3 ĐỔI KỲ VỌNG (code-reviewer vòng 2 mục 3): vòng 2 bỏ trùng ("Soda Chanh - Diet 7Up" 1 lần) nên chữ OFF ngắn
+    // hơn tài liệu danh mục cùng nội dung → BM25 cộng điểm cho tên OFF ngắn. Nay dựng y như docText của danh mục.
     const [h] = mod.parseSearch({ products: [{
       code: "8934588752117", product_name: "Soda Chanh - Diet 7Up", product_name_en: "Soda Chanh - Diet 7Up", product_name_vi: "",
       brands: "PepsiCo", generic_name_vi: "Nước giải khát có ga", generic_name: 42, generic_name_en: "Soft drink",
     }] });
-    assert.equal(h.text, "Soda Chanh - Diet 7Up PepsiCo Nước giải khát có ga Soft drink");
+    assert.equal(h.text, "Soda Chanh - Diet 7Up Soda Chanh - Diet 7Up PepsiCo Nước giải khát có ga Soft drink");
     const [long] = mod.parseSearch({ products: [{ code: "12345678", product_name: "x".repeat(1000) }] });
     assert.equal(long.text.length, mod.HIT_TEXT_MAX);
+  });
+
+  test("vòng 3: chữ ứng viên OFF = tài liệu danh mục cùng nội dung (cùng bảng đếm từ + độ dài BM25)", async () => {
+    const t1 = await import("../public/chup-mat-do/t1.mjs");
+    const node = await import("../test-ocr/chup-mat-do/vn-data.mjs");
+    const { offDoc } = await import("../src/front-merge.js");
+    const fields = mod.SEARCH_FIELDS.split(",");
+    const samples = [
+      { code: "8934588022111", product_name: "7Up hương chanh", product_name_vi: "7Up hương chanh", brands: "7Up" },
+      { code: "3250391232192", product_name: "Frites au four allumettes", product_name_fr: "Frites au four allumettes", product_name_en: "Oven fries", brands: "Saint Eloi", generic_name_fr: "Frites surgelées" },
+      { code: "8934588752117", product_name: "Soda Chanh - Diet 7Up", product_name_en: "Soda Chanh - Diet 7Up", brands: "PepsiCo", generic_name_vi: "Nước giải khát có ga", generic_name_en: "Soft drink" },
+      { code: "4000000000017", product_name: "Apfelsaft", product_name_de: "Apfelsaft", product_name_es: "Zumo de manzana", product_name_it: "Succo di mela", brands: "X, Y" },
+    ];
+    for (const p of samples) {
+      for (const k of Object.keys(p)) if (/^(product|generic)_name/.test(k)) assert.ok(fields.includes(k), `SEARCH_FIELDS thiếu ${k}`);
+      const [h] = mod.parseSearch({ products: [p] });
+      const catDoc = t1.buildBm25([{ code: p.code, text: node.docText(node.vnRecord(p)) }]).tf[0];
+      const od = offDoc(t1, h.text);
+      assert.equal(od.len, catDoc.len, p.code);
+      assert.deepEqual([...od.m.entries()].sort(), [...catDoc.m.entries()].sort(), p.code);
+    }
   });
 
   test("trùng mã chỉ giữ lần đầu; thân sai dạng → null", () => {
