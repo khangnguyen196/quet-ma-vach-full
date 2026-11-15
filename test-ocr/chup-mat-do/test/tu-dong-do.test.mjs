@@ -41,6 +41,18 @@ test("roundKeyOf (--vong): mặc định vẫn vong3 (đọc được sổ cũ);
   for (const bad of ["", "0", "-1", "6a", "vong6", "100", "1.5"]) assert.throws(() => mod.roundKeyOf(bad), /--vong/, bad);
 });
 
+test("roundKeyFromArgv (vòng 5, gợi ý 9): không có --vong → vong3; --vong thiếu số / theo sau là cờ khác → báo lỗi, không lặng lẽ dùng vong3", () => {
+  assert.equal(typeof mod.roundKeyFromArgv, "function");
+  assert.equal(mod.roundKeyFromArgv([]), "vong3");
+  assert.equal(mod.roundKeyFromArgv(["--sets", "B"]), "vong3");
+  assert.equal(mod.roundKeyFromArgv(["--vong", "5"]), "vong5");
+  assert.equal(mod.roundKeyFromArgv(["--sets", "B,A", "--vong", "5", "--chi-cache"]), "vong5");
+  assert.throws(() => mod.roundKeyFromArgv(["--vong"]), /--vong/);
+  assert.throws(() => mod.roundKeyFromArgv(["--vong", "--chi-cache"]), /--vong/);
+  assert.throws(() => mod.roundKeyFromArgv(["--sets", "B", "--vong"]), /--vong/);
+  for (const bad of ["0", "abc", "1.5", "-2"]) assert.throws(() => mod.roundKeyFromArgv(["--vong", bad]), /--vong/, bad);
+});
+
 test("readLuot: đọc batDau + mọi khóa vongN, tong = tổng; chưa có file → batDau 76", () => {
   const d = tmp();
   const f = path.join(d, "luot.json");
