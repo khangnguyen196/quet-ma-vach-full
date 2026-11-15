@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 import { assembleLevels, processLines, rowFromApp, levelText, foreignGroupOf, LEVELS, GROUP_ORDER } from "../kho-lon-xuat.mjs";
 import {
   pickProbes, g3Merge, judgeMethod, judgeH4, pickMethod, pickLevel, methodGrid, tieRank, mulberry32, quantile,
-  GZIP_MAX_BYTES, DOCKER_MAX_BYTES, SERVER_K, PROBE_SEED, PROBE_N, PROBE_GROUPS,
+  GZIP_MAX_BYTES, DOCKER_MAX_BYTES, SERVER_K, PROBE_SEED, PROBE_N, PROBE_GROUPS, mergeByMethod,
 } from "../kho-lon-do.mjs";
+import * as t1 from "../../../public/chup-mat-do/t1.mjs";
+import { buildRankIndex, rankFromText } from "../../../src/front-rank.js";
 
 const tokens = (s) => String(s).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 2);
 
@@ -97,6 +99,40 @@ test("g3Merge: giữ 3 đầu, chèn 1 mục máy chủ, mục ngoài danh mục
   const m0 = [cat("1"), cat("2"), cat("3"), off("7"), cat("5")];
   assert.deepEqual(g3Merge(m0, []), m0);
   assert.deepEqual(g3Merge([], []), []);
+});
+
+// Vòng 2 (P1): dữ liệu giả nhỏ cho mergeByMethod. Danh mục: "soda chanh" (mã c0) + 1 sp "diet" + 18 sp độn (idf lớn).
+// Câu "soda chanh diet": T1 mục 1 = c0 (khớp 2 từ). Mục "9" (soda chanh diet, khớp 3 từ, điểm cao hơn c0 rõ) có CẢ
+// trên OFF lẫn máy chủ (S).
+function g2Fixture() {
+  const products = [{ code: "c0", text: "soda chanh" }, { code: "c1", text: "nuoc diet" }];
+  for (let i = 0; i < 18; i++) products.push({ code: `f${i}`, text: `banh${String.fromCharCode(97 + i)} quy` });
+  const rIndex = buildRankIndex(t1, products);
+  const found = rankFromText(t1, rIndex, "soda chanh diet");
+  const hit9 = { code: "9", name: "Soda chanh diet", brand: "", img: "", vn: false, text: "soda chanh diet" };
+  const off = { ok: true, hits: [hit9] };
+  const S = [{ ...hit9, grp: "893", score: 9 }];
+  return { products, rIndex, found, off, S };
+}
+
+test("mergeByMethod G2: mục trùng mã OFF + máy chủ được offPromote đẩy lên vị trí 1", () => {
+  const { products, rIndex, found, off, S } = g2Fixture();
+  assert.equal(found.hits[0].code, "c0");
+  const got = mergeByMethod({ t1, rIndex, products, found, off, S, method: "G2-g1-w3" });
+  assert.equal(got[0].code, "9", `nhận ${got.map((x) => x.code).join(",")}`);
+  assert.ok(!got[0].extra, "mục máy chủ không mang extra");
+  // mục chỉ có trên OFF (mã không có trong S) vẫn mang extra → không được đẩy
+  const onlyOff = mergeByMethod({ t1, rIndex, products, found, off, S: [], method: "G2-g1-w3" });
+  assert.equal(onlyOff[0].code, "c0");
+});
+
+test("mergeByMethod G1: giữ hành vi cũ (mục máy chủ không được đẩy lên vị trí 1)", () => {
+  const { products, rIndex, found, off, S } = g2Fixture();
+  const got = mergeByMethod({ t1, rIndex, products, found, off, S, method: "G1" });
+  assert.equal(got[0].code, "c0");
+  assert.ok(got.some((x) => x.code === "9"));
+  assert.deepEqual(mergeByMethod({ t1, rIndex, products, found: null, off, S, method: "G1" }), []);
+  assert.throws(() => mergeByMethod({ t1, rIndex, products, found, off, S, method: "G9" }));
 });
 
 test("judgeMethod: H1 / H5 / muối", () => {
