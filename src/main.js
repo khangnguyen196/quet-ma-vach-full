@@ -1106,6 +1106,9 @@ function confirmPhoto() {
     frontAbort?.abort();
     ++frontTurn;
     retryTurn = 0;
+    // Vòng 7 (NÊN SỬA 1 vòng 6): xóa câu tiến độ ("Đang tìm thêm…") của lượt "Tìm lại" vừa hủy NGAY ở đây, trước nhánh trả
+    // sớm lookup(p.code) bên dưới (trang tự mở lỗi), để #frontMsg không kẹt.
+    sayFront();
   }
   if (!shownProduct || shownLookupId !== p.lookupId || p.lookupId !== current) { lookup(p.code); return; }
   photoPending = null;
