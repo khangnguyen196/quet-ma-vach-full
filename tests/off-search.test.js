@@ -372,7 +372,7 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
     junk.setItem(mod.SEARCH_CACHE_KEY, "{hong");
     assert.equal((await mod.createOffSearch({ fetchImpl: async () => okResponse(), storage: junk }).search("soda")).ok, true);
     const wrong = memStorage();
-    wrong.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t: Date.now(), hits: "khong phai mang" }]] }));
+    wrong.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 2, e: [["all|24|soda", { t: Date.now(), hits: "khong phai mang" }]] }));
     const r = await mod.createOffSearch({ fetchImpl: async () => okResponse(), storage: wrong }).search("soda");
     assert.deepEqual([r.ok, r.cached], [true, false]);
   });
@@ -380,7 +380,7 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
   test("localStorage: mỗi mục đọc lên lọc lại như parseSearch (mã 8–14 số, chuỗi, ảnh images.openfoodfacts.org, vn boolean)", async () => {
     const st = memStorage();
     const t = 1_000_000;
-    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t, hits: [
+    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 2, e: [["all|24|soda", { t, hits: [
       { code: "8934588752117", name: 5, brand: { x: 1 }, img: "https://evil.example.com/a.jpg", vn: "yes" },
       { code: "abc123", name: "mã hỏng" },
       null,
@@ -399,7 +399,7 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
   test("localStorage: mục có thời điểm ở tương lai (đồng hồ chỉnh lùi) coi là hỏng → gọi lại", async () => {
     const st = memStorage();
     const t = 1_000_000;
-    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t: t + 3_600_000, hits: [{ code: "8934588752117", name: "x", brand: "", img: "", vn: false }] }]] }));
+    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 2, e: [["all|24|soda", { t: t + 3_600_000, hits: [{ code: "8934588752117", name: "x", brand: "", img: "", vn: false }] }]] }));
     let n = 0;
     const r = await mod.createOffSearch({ fetchImpl: async () => { n++; return okResponse(); }, storage: st, now: () => t }).search("soda");
     assert.deepEqual([r.ok, r.cached, n], [true, false, 1]);
@@ -414,6 +414,24 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
     t += mod.SEARCH_CACHE_TTL_MS + 1;
     const r = await mod.createOffSearch({ fetchImpl, storage: st, now: () => t }).search("soda chanh");
     assert.deepEqual([r.ok, r.cached, n], [true, false, 2]);
+  });
+
+  test("vòng 3: dạng lưu v: 2, khóa có page_size; mục v: 1 cũ (dạng vòng 1, không có text) bị bỏ qua → gọi lại", async () => {
+    const t = 3_000_000;
+    const old = memStorage();
+    old.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t, hits: [{ code: "8934588752117", name: "x", brand: "", img: "", vn: false }] }]] }));
+    let n = 0;
+    const fetchImpl = async () => { n++; return okResponse(); };
+    const r = await mod.createOffSearch({ fetchImpl, storage: old, now: () => t + 1000 }).search("soda");
+    assert.deepEqual([r.ok, r.cached, n], [true, false, 1]);
+    const saved = JSON.parse(old.getItem(mod.SEARCH_CACHE_KEY));
+    assert.equal(saved.v, 2);
+    assert.deepEqual(saved.e.map((x) => x[0]), [`all|${mod.SEARCH_PAGE_SIZE}|soda`]);
+    // cỡ trang khác → khóa khác (không dùng lẫn)
+    const r2 = await mod.createOffSearch({ fetchImpl, storage: old, now: () => t + 2000, pageSize: 10 }).search("soda");
+    assert.deepEqual([r2.cached, n], [false, 2]);
+    const r3 = await mod.createOffSearch({ fetchImpl, storage: old, now: () => t + 3000 }).search("soda");
+    assert.deepEqual([r3.cached, n], [true, 2]);
   });
 });
 
