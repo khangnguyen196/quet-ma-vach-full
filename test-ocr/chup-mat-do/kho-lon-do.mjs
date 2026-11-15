@@ -2,7 +2,7 @@
 // Python phải khớp bản này). CHỈ đọc cache OFF đĩa (0 lượt OFF thật), không gọi Azure, không sửa src/.
 //
 //   node --max-old-space-size=6144 test-ocr/chup-mat-do/kho-lon-do.mjs [--muc a,b,c] [--danh-muc D:\tmp\kho-lon\danh-muc]
-//        [--cache D:\tmp\tu-dong\cache-off] [--out D:\tmp\kho-lon\ket-qua]
+//        [--cache D:\tmp\tu-dong\cache-off] [--out D:\tmp\kho-lon\ket-qua] [--ban v2]
 //
 // Danh mục mức: kho-lon-xuat.mjs (D:\tmp\kho-lon\danh-muc\{a,b,c}.jsonl.gz). Chữ OCR: CÙNG file các khung đo tu-dong
 // (bộ B = D:\tmp\tu-dong\ocr\bo-b-30.json chữ máy chủ đã ghi, bộ A = bo-a-30.json), không chạy lại OCR.
@@ -261,6 +261,11 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const dmDir = arg("--danh-muc", "D:\\tmp\\kho-lon\\danh-muc");
   const cacheDir = arg("--cache", "D:\\tmp\\tu-dong\\cache-off");
   const outDir = arg("--out", "D:\\tmp\\kho-lon\\ket-qua");
+  // vòng 2: nhãn tên file ra (v1 = số vòng 1, không ghi đè); ghi kèm mã commit khung đo
+  const ban = arg("--ban", "v2");
+  if (!/^v\d{1,2}$/.test(ban)) throw new Error(`--ban phải dạng vN (nhận ${ban})`);
+  let khungDoSha = null;
+  try { khungDoSha = (await import("node:child_process")).execSync("git rev-parse HEAD", { cwd: ROOT }).toString().trim(); } catch { khungDoSha = null; }
   fs.mkdirSync(outDir, { recursive: true });
   const app = await loadApp();
   const { t1, fr, catalog, rIndex } = app;
@@ -440,13 +445,14 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     return [s, { n: rs.length, coCau: rs.filter((c) => c.queries.length).length, duCau: rs.filter((c) => c.queries.length && c.allOk).length }];
   }));
   const out = {
-    at: new Date().toISOString(), cacheOnly: true, offNetCalls: disk.stats.calls, azureCalls: 0, ocrRerun: false,
+    at: new Date().toISOString(), ban, khungDoSha, cacheOnly: true, offNetCalls: disk.stats.calls, azureCalls: 0, ocrRerun: false,
     guard: { ...fm.DEFAULT_GUARD }, serverK: SERVER_K, probeSeed: PROBE_SEED, probeLevel, probes, foreign,
     mCheck, coverage, levels, pick, conclusion, cacheStats: disk.stats,
+    mSalt: Object.fromEntries(CONDS.map((cond) => [cond, (cases.find((x) => x.set === "muoi")?.M?.[cond] || []).map((x) => `${x.code}(${x.source}) ${x.name}`)])),
   };
-  const outFile = path.join(outDir, `v1-do-${levelNames.join("")}.json`);
+  const outFile = path.join(outDir, `${ban}-do-${levelNames.join("")}.json`);
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
-  fs.writeFileSync(path.join(outDir, `v1-tung-ca-${levelNames.join("")}.json`), JSON.stringify({ mCases: Object.fromEntries(cases.map((c) => [`${c.set}|${c.code ?? c.kind}|${c.kind}`, Object.fromEntries(CONDS.map((cond) => [cond, codesOf(c.M[cond])]))])), perCase }, null, 0), "utf8");
+  fs.writeFileSync(path.join(outDir, `${ban}-tung-ca-${levelNames.join("")}.json`), JSON.stringify({ mCases: Object.fromEntries(cases.map((c) => [`${c.set}|${c.code ?? c.kind}|${c.kind}`, Object.fromEntries(CONDS.map((cond) => [cond, codesOf(c.M[cond])]))])), perCase }, null, 0), "utf8");
 
   // ---- in bảng ----
   const f = (v) => (v == null ? "-" : v);
