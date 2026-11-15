@@ -128,22 +128,28 @@ export function mergeDigitWords(norm, vocab) {
   )).trim();
 }
 
-/** Luật ii (đợt tu-dong): dòng chỉ 2 chữ cái (vd "Up") dùng được khi độ tin đạt và mọi từ có trong từ vựng. */
-export function shortLineOk(line, vocab) {
-  if (!vocab) return false;
+/** Luật ii: số tài liệu tối thiểu có bí danh để dòng 2 chữ cái được giữ (xem shortLineOk). */
+export const SHORT_ALIAS_MIN_DF = 2;
+
+/** Luật ii (đợt tu-dong, thu hẹp vòng 3): dòng chỉ 2 chữ cái (vd "Up") dùng được khi độ tin đạt và mọi từ là BÍ DANH
+ *  (aliasDf của chỉ mục) có ở ≥ SHORT_ALIAS_MIN_DF tài liệu ("up" của "7up": 2). Không dùng idf: từ 2 chữ cái trong
+ *  từ vựng hoặc rất phổ biến ("ca" idf 4,31, "ga" 4,21, "mi" 3,66) hoặc chỉ ở 1 tài liệu (idf lớn nhất 6,876: "gi" của
+ *  "32Gi", "so", "ma"…), ngưỡng idf nào cũng giữ mảnh OCR rác. */
+export function shortLineOk(line, vocab, aliasDf = null) {
+  if (!vocab || !aliasDf || typeof aliasDf.get !== "function") return false;
   const letters = normalizeText(line?.text).replace(/[^a-z]/g, "");
   if (letters.length < 2 || letters.length >= MIN_LETTERS) return false;
   const c = Number(line?.conf);
   if (line?.conf != null && Number.isFinite(c) && c < MIN_CONF) return false;
   const ws = stripPhrases(normalizeText(line.text)).split(" ").filter((w) => w && !isNoiseWord(w));
-  return ws.length > 0 && ws.every((w) => inVocab(vocab, w));
+  return ws.length > 0 && ws.every((w) => inVocab(vocab, w) && (aliasDf.get(w) || 0) >= SHORT_ALIAS_MIN_DF);
 }
 
 /** Câu tìm T1: mọi từ của các dòng dùng được, bỏ cụm chung + từ nhiễu. vocab (tùy chọn): từ vựng chỉ mục (index.idf)
- *  -> bật luật i + ii; không truyền thì như cũ. */
-export function t1QueryFromLines(lines, vocab = null) {
+ *  -> bật luật i; aliasDf (index.aliasDf) cùng vocab -> bật luật ii; không truyền thì như cũ. */
+export function t1QueryFromLines(lines, vocab = null, aliasDf = null) {
   const out = [];
-  for (const l of (lines || []).filter((x) => usableLine(x) || shortLineOk(x, vocab))) {
+  for (const l of (lines || []).filter((x) => usableLine(x) || shortLineOk(x, vocab, aliasDf))) {
     for (const w of stripPhrases(mergeDigitWords(normalizeText(l.text), vocab)).split(" ")) if (w && !isNoiseWord(w)) out.push(w);
   }
   return out;
@@ -167,24 +173,31 @@ export function aliasTokens(tokens) {
   return out;
 }
 
-/** Từ của TÀI LIỆU: bm25Tokens + bí danh. */
+/** Từ của TÀI LIỆU đúng như buildBm25 đếm: bm25Tokens + mỗi bí danh 1 lần (độ dài tài liệu chỉ tính bm25Tokens). */
 export function docTokens(s) {
   const base = bm25Tokens(s);
-  return [...base, ...aliasTokens(base)];
+  return [...base, ...new Set(aliasTokens(base))];
 }
 
-/** Dựng chỉ mục BM25. docs: [{ code, text, ... }]. Từ của tài liệu theo docTokens; bí danh KHÔNG tính vào độ dài
- *  tài liệu (len, avgdl như trước luật iii). alias: false = tắt luật iii. */
+/** Dựng chỉ mục BM25. docs: [{ code, text, ... }]. Từ của tài liệu = docTokens (bm25Tokens + mỗi bí danh 1 lần / tài
+ *  liệu); bí danh KHÔNG tính vào độ dài tài liệu (len, avgdl như trước luật iii). alias: false = tắt luật iii.
+ *  aliasDf: bí danh → số tài liệu có bí danh đó (luật ii). */
 export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B, alias = true } = {}) {
   const tf = [];
   const df = new Map();
+  const aliasDf = new Map();
   let total = 0;
   for (const d of docs) {
     const m = new Map();
     const base = bm25Tokens(d.text);
     for (const w of base) m.set(w, (m.get(w) || 0) + 1);
     const len = base.length;
-    if (alias) for (const w of new Set(aliasTokens(base))) m.set(w, (m.get(w) || 0) + 1); // mỗi bí danh 1 lần / tài liệu
+    if (alias) {
+      for (const w of new Set(aliasTokens(base))) { // mỗi bí danh 1 lần / tài liệu
+        m.set(w, (m.get(w) || 0) + 1);
+        aliasDf.set(w, (aliasDf.get(w) || 0) + 1);
+      }
+    }
     total += len;
     tf.push({ code: d.code, m, len });
     for (const w of m.keys()) df.set(w, (df.get(w) || 0) + 1);
@@ -195,7 +208,7 @@ export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B, alias = true } = {})
   for (const [w, n] of df) idf.set(w, Math.log(1 + (N - n + 0.5) / (n + 0.5)));
   const post = new Map();
   tf.forEach((t, i) => { for (const w of t.m.keys()) { if (!post.has(w)) post.set(w, []); post.get(w).push(i); } });
-  return { tf, idf, post, avgdl, k1, b, N };
+  return { tf, idf, post, avgdl, k1, b, N, aliasDf };
 }
 
 /** Tìm BM25: trả [{ code, score, i }] top k (i = vị trí trong danh mục), điểm cao trước, bằng điểm thì đứng trước

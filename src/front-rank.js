@@ -40,8 +40,8 @@ function idfSumOf(index, query) {
 /** Tìm từ danh sách dòng { text, conf }: câu tìm T1 rồi BM25 (câu rỗng thì không tìm). */
 function rankLines(t1, rIndex, lines, k, opts) {
   checkOpts(opts);
-  // từ vựng chỉ mục → luật tách chữ i + ii của T1 (đợt tu-dong: "7 up" → "7up", dòng "Up")
-  const query = t1.t1QueryFromLines(lines, rIndex.index.idf);
+  // từ vựng + bí danh của chỉ mục → luật tách chữ i + ii của T1 (đợt tu-dong: "7 up" → "7up", dòng "Up")
+  const query = t1.t1QueryFromLines(lines, rIndex.index.idf, rIndex.index.aliasDf);
   const hits = query.length ? t1.bm25Search(rIndex.index, query, k) : [];
   return { lines: lines.map((l) => l.text), query, hits, idfSum: idfSumOf(rIndex.index, query) };
 }
