@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,9 +14,17 @@ function fakeClock() {
   return { now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; }, sleeps, advance: (ms) => { t += ms; } };
 }
 
+const madeDirs = [];
+// Windows: thư mục tạm ở ổ D (luật đợt tu-dong: không ghi ổ C; TEMP của máy nằm ở ổ C), như tu-dong-do.test.mjs.
+const TMP_BASE = process.platform === "win32" ? "D:\\tmp\\tu-dong\\test-tmp" : os.tmpdir();
 function tmpDir() {
-  return fs.mkdtempSync(path.join(process.env.TEMP || os.tmpdir(), "off-test-"));
+  fs.mkdirSync(TMP_BASE, { recursive: true });
+  const d = fs.mkdtempSync(path.join(TMP_BASE, "off-test-"));
+  madeDirs.push(d);
+  return d;
 }
+// Dọn sau MỖI test (kể cả test lỗi giữa chừng).
+afterEach(() => { while (madeDirs.length) fs.rmSync(madeDirs.pop(), { recursive: true, force: true }); });
 
 // Vòng 5 tu-dong (P2.10): thư mục tạm off-test-* phải được dọn sau mỗi test (trước đây còn sót 273 thư mục ở D:\tmp).
 let leftover = null;
