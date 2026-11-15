@@ -2,7 +2,7 @@
 // chọn sản phẩm cho chỉ mục ảnh, dựng bộ phụ leave-one-out, BM25 cho danh mục chữ (T1).
 // Không gọi mạng, không DOM, không thư viện ngoài. Dùng được trong trình duyệt (t1.mjs đo BM25 trong trang):
 // node:readline chỉ nạp động trong filterVnStream (chạy ở Node).
-import { normalizeText, isNoiseWord, stripPhrases, usableLine, excludeTestImgids, frontImages } from "./lib.mjs";
+import { normalizeText, isNoiseWord, stripPhrases, usableLine, excludeTestImgids, frontImages, STOP_WORDS, MIN_LETTERS, MIN_CONF } from "./lib.mjs";
 
 // ---------------------------------------------------------------------------
 // Lọc VN từ bản xuất JSONL
@@ -239,16 +239,35 @@ export function bm25Tokens(s) {
   return normalizeText(s).split(" ").filter((w) => w && !isNoiseWord(w));
 }
 
-/** Dựng chỉ mục BM25. docs: [{ code, text }]. */
-export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B } = {}) {
+/** Bí danh (đợt tu-dong, luật iii): phần chữ của từ "số + chữ" ("7up" → "up", để dòng OCR "Up" khớp sản phẩm 7Up);
+ *  phần chữ là từ nhiễu thì không có ("24h", "500ml"). tokens: kết quả bm25Tokens. */
+export function aliasTokens(tokens) {
+  const out = [];
+  for (const w of tokens) {
+    const m = /^\d+([a-z]+)$/.exec(w);
+    if (m && !isNoiseWord(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Từ của TÀI LIỆU trong chỉ mục: bm25Tokens + bí danh (aliasTokens). */
+export function docTokens(s) {
+  const base = bm25Tokens(s);
+  return [...base, ...aliasTokens(base)];
+}
+
+/** Dựng chỉ mục BM25. docs: [{ code, text }]. Từ của tài liệu theo docTokens; bí danh KHÔNG tính vào độ dài tài liệu
+ *  (len, avgdl giữ như trước luật iii, nên điểm mọi câu không có từ bí danh không đổi). alias: false = tắt luật iii. */
+export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B, alias = true } = {}) {
   const tf = [];
   const df = new Map();
   let total = 0;
   for (const d of docs) {
     const m = new Map();
-    for (const w of bm25Tokens(d.text)) m.set(w, (m.get(w) || 0) + 1);
-    let len = 0;
-    for (const c of m.values()) len += c;
+    const base = bm25Tokens(d.text);
+    for (const w of base) m.set(w, (m.get(w) || 0) + 1);
+    const len = base.length;
+    if (alias) for (const w of new Set(aliasTokens(base))) m.set(w, (m.get(w) || 0) + 1); // mỗi bí danh 1 lần / tài liệu
     total += len;
     tf.push({ code: d.code, m, len });
     for (const w of m.keys()) df.set(w, (df.get(w) || 0) + 1);
@@ -284,12 +303,40 @@ export function bm25Search(index, queryWords, k = 5) {
     .map(([i, s]) => ({ code: index.tf[i].code, score: s }));
 }
 
+/** Từ vựng có từ w không (Map idf của chỉ mục, Set…; không có từ vựng → false). */
+function inVocab(vocab, w) {
+  return !!(vocab && typeof vocab.has === "function" && vocab.has(w));
+}
+
+/** Luật i (đợt tu-dong): "7 up" → "7up" (số 1–2 chữ số + từ 1–3 chữ cái) CHỈ khi từ ghép có trong từ vựng; từ sau là
+ *  từ nhiễu (STOP_WORDS: "lon", "tui"…) hoặc "in" thì không ghép. norm: chuỗi đã normalizeText. */
+export function mergeDigitWords(norm, vocab) {
+  if (!vocab) return norm;
+  return ` ${norm} `.replace(/ (\d{1,2}) ([a-z]{1,3})(?= )/g, (m, d, w) => (
+    STOP_WORDS.has(w) || w === "in" || !inVocab(vocab, `${d}${w}`) ? m : ` ${d}${w}`
+  )).trim();
+}
+
+/** Luật ii (đợt tu-dong): dòng chỉ 2 chữ cái (dưới MIN_LETTERS, vd "Up") dùng được khi độ tin đạt và mọi từ không
+ *  nhiễu của dòng có trong từ vựng. */
+export function shortLineOk(line, vocab) {
+  if (!vocab) return false;
+  const letters = normalizeText(line?.text).replace(/[^a-z]/g, "");
+  if (letters.length < 2 || letters.length >= MIN_LETTERS) return false;
+  const c = Number(line?.conf);
+  if (line?.conf != null && Number.isFinite(c) && c < MIN_CONF) return false;
+  const ws = stripPhrases(normalizeText(line.text)).split(" ").filter((w) => w && !isNoiseWord(w));
+  return ws.length > 0 && ws.every((w) => inVocab(vocab, w));
+}
+
 /** Câu tìm T1 từ dòng OCR (luật CHỐT): toàn bộ từ của các dòng qua usableLine (không cắt 3 từ), bỏ cụm chung
- *  + số / đơn vị / từ nhiễu như S2. Dòng phải có độ tin về 0–1 sẵn (như S2). */
-export function t1QueryFromLines(lines) {
+ *  + số / đơn vị / từ nhiễu như S2. Dòng phải có độ tin về 0–1 sẵn (như S2).
+ *  vocab (tùy chọn, đợt tu-dong): từ vựng chỉ mục (index.idf) → bật luật i (ghép "7 up") và ii (dòng "Up");
+ *  không truyền thì như cũ. */
+export function t1QueryFromLines(lines, vocab = null) {
   const out = [];
-  for (const l of (lines || []).filter((x) => usableLine(x))) {
-    for (const w of stripPhrases(normalizeText(l.text)).split(" ")) if (w && !isNoiseWord(w)) out.push(w);
+  for (const l of (lines || []).filter((x) => usableLine(x) || shortLineOk(x, vocab))) {
+    for (const w of stripPhrases(mergeDigitWords(normalizeText(l.text), vocab)).split(" ")) if (w && !isNoiseWord(w)) out.push(w);
   }
   return out;
 }

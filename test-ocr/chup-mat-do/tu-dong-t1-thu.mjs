@@ -57,19 +57,10 @@ export function queryFromLines(lines, vocab, rules) {
   return out;
 }
 
-/** iii: chữ tài liệu → thêm phần chữ của từ "số + chữ". */
-export function indexText(text, rules) {
-  if (!rules.iii) return text;
-  const extra = [];
-  for (const w of t1.normalizeText(text).split(" ")) {
-    const m = /^\d+([a-z]+)$/.exec(w);
-    if (m && !t1.isNoiseWord(w) && !t1.isNoiseWord(m[1])) extra.push(m[1]);
-  }
-  return extra.length ? `${text} ${extra.join(" ")}` : text;
-}
-
+/** iii: chỉ mục có bí danh "7up" → "up" (bí danh không tính vào độ dài tài liệu) = t1.buildBm25 mặc định;
+ *  tắt = { alias: false } (đúng chỉ mục trước đợt tu-dong). */
 export function buildIndex(products, rules) {
-  return t1.buildBm25(products.map((p) => ({ code: p.code, text: indexText(p.text, rules) })));
+  return t1.buildBm25(products, { alias: !!rules.iii });
 }
 
 function rankOf(hits, code) {

@@ -116,11 +116,35 @@ export function usableLine(line) {
   return true;
 }
 
-/** Câu tìm T1: mọi từ của các dòng dùng được, bỏ cụm chung + từ nhiễu. */
-export function t1QueryFromLines(lines) {
+function inVocab(vocab, w) {
+  return !!(vocab && typeof vocab.has === "function" && vocab.has(w));
+}
+
+/** Luật i (đợt tu-dong): "7 up" -> "7up" CHỈ khi từ ghép có trong từ vựng; từ sau là từ nhiễu / "in" thì không ghép. */
+export function mergeDigitWords(norm, vocab) {
+  if (!vocab) return norm;
+  return ` ${norm} `.replace(/ (\d{1,2}) ([a-z]{1,3})(?= )/g, (m, d, w) => (
+    STOP_WORDS.has(w) || w === "in" || !inVocab(vocab, `${d}${w}`) ? m : ` ${d}${w}`
+  )).trim();
+}
+
+/** Luật ii (đợt tu-dong): dòng chỉ 2 chữ cái (vd "Up") dùng được khi độ tin đạt và mọi từ có trong từ vựng. */
+export function shortLineOk(line, vocab) {
+  if (!vocab) return false;
+  const letters = normalizeText(line?.text).replace(/[^a-z]/g, "");
+  if (letters.length < 2 || letters.length >= MIN_LETTERS) return false;
+  const c = Number(line?.conf);
+  if (line?.conf != null && Number.isFinite(c) && c < MIN_CONF) return false;
+  const ws = stripPhrases(normalizeText(line.text)).split(" ").filter((w) => w && !isNoiseWord(w));
+  return ws.length > 0 && ws.every((w) => inVocab(vocab, w));
+}
+
+/** Câu tìm T1: mọi từ của các dòng dùng được, bỏ cụm chung + từ nhiễu. vocab (tùy chọn): từ vựng chỉ mục (index.idf)
+ *  -> bật luật i + ii; không truyền thì như cũ. */
+export function t1QueryFromLines(lines, vocab = null) {
   const out = [];
-  for (const l of (lines || []).filter((x) => usableLine(x))) {
-    for (const w of stripPhrases(normalizeText(l.text)).split(" ")) if (w && !isNoiseWord(w)) out.push(w);
+  for (const l of (lines || []).filter((x) => usableLine(x) || shortLineOk(x, vocab))) {
+    for (const w of stripPhrases(mergeDigitWords(normalizeText(l.text), vocab)).split(" ")) if (w && !isNoiseWord(w)) out.push(w);
   }
   return out;
 }
@@ -133,16 +157,34 @@ export function bm25Tokens(s) {
   return normalizeText(s).split(" ").filter((w) => w && !isNoiseWord(w));
 }
 
-/** Dựng chỉ mục BM25. docs: [{ code, text, ... }]. */
-export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B } = {}) {
+/** Bí danh (luật iii, đợt tu-dong): phần chữ của từ "số + chữ" ("7up" -> "up"); phần chữ là từ nhiễu thì không có. */
+export function aliasTokens(tokens) {
+  const out = [];
+  for (const w of tokens) {
+    const m = /^\d+([a-z]+)$/.exec(w);
+    if (m && !isNoiseWord(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Từ của TÀI LIỆU: bm25Tokens + bí danh. */
+export function docTokens(s) {
+  const base = bm25Tokens(s);
+  return [...base, ...aliasTokens(base)];
+}
+
+/** Dựng chỉ mục BM25. docs: [{ code, text, ... }]. Từ của tài liệu theo docTokens; bí danh KHÔNG tính vào độ dài
+ *  tài liệu (len, avgdl như trước luật iii). alias: false = tắt luật iii. */
+export function buildBm25(docs, { k1 = BM25_K1, b = BM25_B, alias = true } = {}) {
   const tf = [];
   const df = new Map();
   let total = 0;
   for (const d of docs) {
     const m = new Map();
-    for (const w of bm25Tokens(d.text)) m.set(w, (m.get(w) || 0) + 1);
-    let len = 0;
-    for (const c of m.values()) len += c;
+    const base = bm25Tokens(d.text);
+    for (const w of base) m.set(w, (m.get(w) || 0) + 1);
+    const len = base.length;
+    if (alias) for (const w of new Set(aliasTokens(base))) m.set(w, (m.get(w) || 0) + 1); // mỗi bí danh 1 lần / tài liệu
     total += len;
     tf.push({ code: d.code, m, len });
     for (const w of m.keys()) df.set(w, (df.get(w) || 0) + 1);

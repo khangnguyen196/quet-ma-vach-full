@@ -15,9 +15,10 @@ import * as page from "../../public/chup-mat-do/t1.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** So một câu: trả { same, query, nodeTop, pageTop }. Điểm so tới 1e-9 (cùng phép tính, cùng thứ tự). */
-export function compareOne(lines, nodeIndex, pageIndex) {
-  const qn = node.t1QueryFromLines(lines);
-  const qp = page.t1QueryFromLines(lines);
+// withVocab (đợt tu-dong): truyền từ vựng chỉ mục (index.idf) như src/front-rank.js → so cả luật tách chữ i + ii.
+export function compareOne(lines, nodeIndex, pageIndex, withVocab = false) {
+  const qn = node.t1QueryFromLines(lines, withVocab ? nodeIndex.idf : null);
+  const qp = page.t1QueryFromLines(lines, withVocab ? pageIndex.idf : null);
   const hn = node.bm25Search(nodeIndex, qn, 5).map((h) => ({ code: h.code, score: h.score }));
   const hp = page.bm25Search(pageIndex, qp, 5).map((h) => ({ code: h.code, score: h.score }));
   const same = qn.join(" ") === qp.join(" ") && hn.length === hp.length &&
@@ -39,10 +40,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (ocr.status !== "ok") continue;
     const lines = ocr.lines.map((l) => (l.conf == null ? l : { ...l, conf: Number(l.conf) / CONF_SCALE.paddlejs }));
     rows.push({ code: t.code, ...compareOne(lines, nodeIndex, pageIndex) });
+    rows.push({ code: t.code, vocab: true, ...compareOne(lines, nodeIndex, pageIndex, true) });
   }
   const same = rows.filter((r) => r.same).length;
   const out = { at: new Date().toISOString(), catalogSame: nodeDocs.length === pageDocs.length && nodeDocs.every((d, i) => d.code === pageDocs[i].code && d.text === pageDocs[i].text), n: rows.length, same, rows };
   fs.writeFileSync("D:\\tmp\\chup-mat-do\\ket-qua\\trang-thu-parity.json", JSON.stringify(out, null, 1), "utf8");
-  console.log(`Danh mục trùng (mã + text, cùng thứ tự): ${out.catalogSame}. Câu tìm + top5 + điểm trùng: ${same}/${rows.length}.`);
+  console.log(`Danh mục trùng (mã + text, cùng thứ tự): ${out.catalogSame}. Câu tìm + top5 + điểm trùng (không / có từ vựng chỉ mục): ${same}/${rows.length}.`);
   for (const r of rows.filter((x) => !x.same)) console.log(`LỆCH ${r.code}: ${r.query} | ${r.pageQuery}`);
 }

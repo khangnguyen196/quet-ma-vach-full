@@ -1,6 +1,8 @@
 // "Chụp mặt trước" (đợt nang-t1): phần XẾP HẠNG gợi ý từ chữ đọc được, chỗ cắm các cách tìm mới.
 // Thuần: không DOM, không import thư viện, không gọi mạng. Nhận module T1 (public/chup-mat-do/t1.mjs) làm tham số
-// như src/front-search.js. Kết quả TRÙNG suggestFromItems / suggestFromText của front-search.js, kèm idfSum.
+// như src/front-search.js. Kết quả TRÙNG suggestFromItems / suggestFromText của front-search.js, kèm idfSum; riêng từ
+// đợt tu-dong câu tìm có thêm luật tách chữ i + ii của T1 (truyền từ vựng chỉ mục: "7 up" → "7up", giữ dòng "Up"),
+// front-search.js chưa truyền nên khác ở đúng các dòng đó (30 ảnh bộ B / A: không ảnh nào khác).
 //
 // Vòng 2 đã thử (a) chuẩn hóa co.op + sửa 1 ký tự, (c) thương hiệu nặng điểm, (b) n-gram 3 ký tự gộp BM25 trên
 // 30 ảnh (lưới + luật chốt trước, test-ocr/chup-mat-do/nang-t1-do.mjs GRID / choosePoint): không cách nào đạt luật
@@ -38,7 +40,8 @@ function idfSumOf(index, query) {
 /** Tìm từ danh sách dòng { text, conf }: câu tìm T1 rồi BM25 (câu rỗng thì không tìm). */
 function rankLines(t1, rIndex, lines, k, opts) {
   checkOpts(opts);
-  const query = t1.t1QueryFromLines(lines);
+  // từ vựng chỉ mục → luật tách chữ i + ii của T1 (đợt tu-dong: "7 up" → "7up", dòng "Up")
+  const query = t1.t1QueryFromLines(lines, rIndex.index.idf);
   const hits = query.length ? t1.bm25Search(rIndex.index, query, k) : [];
   return { lines: lines.map((l) => l.text), query, hits, idfSum: idfSumOf(rIndex.index, query) };
 }

@@ -74,12 +74,25 @@ describe("luật iii: chỉ mục lập thêm phần chữ của từ 'số + ch
 });
 
 describe("ca 7Up qua front-rank (danh mục thật, chưa có 8934588752117)", () => {
-  test("chữ máy chủ 'Up' / 'Soda chanh' / 'Khong calo' → 7Up hương chanh vị trí 1, 7Up trong 5", () => {
+  test("chữ máy chủ 'Up' / 'Soda chanh' / 'Khong calo' → 7Up hương chanh vị trí 1", () => {
+    // Bí danh đếm 1 lần / tài liệu: "7Up" (8934588023064) không vào 5 ở ca này (vị trí 12). Bản đếm theo số lần
+    // (7Up vào vị trí 2) bị bỏ vì làm ảnh 8936036020977 (Orion "Swing up") ở bộ B tụt 2 → 3.
     const r = fr.rankFromItems(t1, rIndex, itemsOf(["Up", "Soda chanh", "Khong calo"]));
     const codes = r.hits.map((h) => h.code);
     assert.ok(r.query.includes("up"), r.query.join(" "));
     assert.equal(codes[0], SEVEN_UP_LEMON, codes.join(","));
-    assert.ok(codes.includes(SEVEN_UP), codes.join(","));
+  });
+
+  test("bí danh đếm 1 lần mỗi tài liệu, không tính vào độ dài (điểm câu không có 'up' không đổi)", () => {
+    const i = catalog.products.findIndex((p) => p.code === SEVEN_UP);
+    const withAlias = t1.buildBm25(catalog.products);
+    const without = t1.buildBm25(catalog.products, { alias: false });
+    assert.equal(withAlias.tf[i].m.get("up"), 1);
+    assert.equal(withAlias.tf[i].m.get("7up"), 3);
+    assert.equal(withAlias.tf[i].len, without.tf[i].len);
+    assert.equal(withAlias.avgdl, without.avgdl);
+    const q = ["soda", "chanh", "calo"];
+    assert.deepEqual(t1.bm25Search(withAlias, q, 5), t1.bm25Search(without, q, 5));
   });
 
   test("gõ 'Soda chanh diet 7 up' → câu có '7up', 7Up hương chanh vị trí 1, 7Up trong 5", () => {
