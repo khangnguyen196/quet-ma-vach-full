@@ -171,10 +171,68 @@ function topWords(words, n, idfOf) {
  *   câu 2 = dòng điểm cao thứ hai (cùng cách), không có thì 2–3 từ hiếm tiếp theo của dòng 1.
  * - Câu 1 từ chỉ được khi không còn từ nào để ghép và từ đó ≥ 5 chữ cái.
  * opts: idf (Map từ → idf của chỉ mục T1, cũng dùng làm từ vựng), vocab (từ vựng riêng nếu khác idf), unknownIdf (số:
- * thay UNKNOWN_IDF, chỉ để đo).
+ * thay UNKNOWN_IDF, chỉ để đo), strange (vòng 6: null | "x1" | "x2", mặc định STRANGE_MODE; xem strangeWords).
  * Không có từ đáng tin → [].
  */
-export function cleanQuery(input, { vocab = null, idf = null, unknownIdf: unk = null } = {}) {
+export function cleanQuery(input, { vocab = null, idf = null, unknownIdf: unk = null, strange = STRANGE_MODE } = {}) {
+  if (strange !== null && !STRANGE_MODES.includes(strange)) throw new Error(`off-search: strange không hỗ trợ: ${String(strange)}`);
+  const base = cleanTrusted(input, { vocab, idf, unknownIdf: unk });
+  if (!strange) return base;
+  const sw = strangeWords(input, { vocab: vocab || idf });
+  if (!sw.length) return base;
+  const sq = joinCapped(sw);
+  let out;
+  if (strange === "x1") {
+    // X1: từ lạ nối vào cuối câu 1 (vẫn ≤ QUERY_CHARS_MAX ký tự); không có câu 1 → câu từ lạ
+    if (base.length) {
+      const first = base[0].split(" ");
+      out = [joinCapped([...first, ...sw.filter((w) => !first.includes(w))]), ...base.slice(1)];
+    } else out = [sq];
+  } else {
+    // X2: từ lạ thành câu riêng thay câu 2 (vẫn ≤ 2 lượt / ảnh)
+    out = base.length ? [base[0], sq] : [sq];
+  }
+  return [...new Set(out.filter((q) => q && okQuery(q)))].slice(0, QUERY_MAX);
+}
+
+// ---------------------------------------------------------------------------
+// Từ lạ (vòng 6, P2: hàng ngoại tên lạ với danh mục)
+// ---------------------------------------------------------------------------
+
+/** Số từ lạ tối đa mỗi ảnh. */
+export const STRANGE_MAX = 2;
+/** Cách dùng từ lạ trong câu tìm OFF: null = tắt; "x1" = thêm vào câu 1; "x2" = câu riêng thay câu 2. Mặc định chỉ đổi
+ *  theo luật đo chốt trước (test-ocr/chup-mat-do/tu-dong-v42-do.mjs, phần P2). front-merge.js đọc hằng này để bật
+ *  luật "mục OFF chứa từ lạ lấp chỗ trống" (strangeFill). */
+export const STRANGE_MODE = null;
+export const STRANGE_MODES = Object.freeze(["x1", "x2"]);
+
+/**
+ * Từ lạ của chữ OCR: từ Latin ≥ 5 chữ cái, KHÔNG dấu (trong chữ gốc), không có trong từ vựng danh mục, không phải âm
+ * tiết tiếng Việt hợp lệ, không phải cụm chung / từ nhiễu (như cleanQuery); tối đa STRANGE_MAX từ: dài nhất trước, hòa
+ * theo thứ tự dòng (rồi thứ tự trong dòng). Ví dụ: ["IODIZES REFINED SEA SALT"] → ["iodizes", "refined"].
+ * Tên riêng hàng ngoại (vd "Goldbears") thường không có trong danh mục VN nên cleanQuery bỏ; đây là chỗ giữ lại.
+ */
+export function strangeWords(input, { vocab = null, idf = null } = {}) {
+  const vb = vocab || idf;
+  const found = [];
+  const seen = new Set();
+  let k = 0;
+  for (const text of toLines(input)) {
+    const kept = new Set(lineWords(text, vb));
+    for (const tok of String(text ?? "").split(/[^\p{L}\p{N}]+/u)) {
+      if (!/^[A-Za-z]{5,}$/.test(tok)) continue;
+      const w = tok.toLowerCase();
+      if (seen.has(w) || !kept.has(w) || inVocab(vb, w) || isVietSyllable(w)) continue;
+      seen.add(w);
+      found.push({ w, k: k++ });
+    }
+  }
+  return found.sort((a, b) => b.w.length - a.w.length || a.k - b.k).slice(0, STRANGE_MAX).map((x) => x.w);
+}
+
+/** cleanQuery không có từ lạ (luật vòng 2–3). */
+function cleanTrusted(input, { vocab = null, idf = null, unknownIdf: unk = null } = {}) {
   const vb = vocab || idf;
   const hasIdf = !!(idf && typeof idf.get === "function");
   // không có chỉ mục: mọi từ 1 điểm (dòng nhiều từ trước, như vòng 2); có chỉ mục: từ lạ UNKNOWN_IDF (unknownIdf để đo)

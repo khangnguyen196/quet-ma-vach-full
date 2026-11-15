@@ -27,6 +27,7 @@
 //   const off = await offSearch.search(q);                               // { ok, hits: [{ code, name, brand, img, vn, text }] }
 //   mergeFront(t1, rIndex, catalog.products, r, off)                     // [{ code, name, brand, img, source, vn, score }]
 import { frontImageUrl } from "./front-search.js";
+import { STRANGE_MODE, strangeWords } from "./off-search.js";
 
 export const MERGE_K = 5;
 export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
@@ -37,7 +38,7 @@ export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
  * 7Up chữ máy chủ + câu gõ: 8934588752117 vị trí 4, 7Up hương chanh vị trí 1, câu gõ 7Up vị trí 2; bỏ-một-ra 0/0 ở mọi
  * cách (OFF không trả sản phẩm đúng cho ảnh nào). OFF chỉ trả được ~1/2 số câu hôm đo nên số đo còn mỏng.
  */
-export const DEFAULT_GUARD = Object.freeze({ lockTop: 3, offMax: 1, offGap: 1, offTopRule: null });
+export const DEFAULT_GUARD = Object.freeze({ lockTop: 3, offMax: 1, offGap: 1, offTopRule: null, offPromote: null });
 export const RRF_K = 60;
 
 /** Lỗi "giá trị chặn sai" (vòng 5, gợi ý 3 vòng 4): main.js chỉ quay về kết quả T1 với đúng loại lỗi này, lỗi khác
@@ -164,8 +165,10 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
   const {
     method = "f1", k = MERGE_K, offGap = DEFAULT_GUARD.offGap, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH,
     lockTop = DEFAULT_GUARD.lockTop, offMax = DEFAULT_GUARD.offMax, offTopRule = DEFAULT_GUARD.offTopRule,
+    offPromote = DEFAULT_GUARD.offPromote, strangeFill = STRANGE_MODE !== null,
   } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
+  const promote = checkPromote(offPromote);
   // Vòng 4: giá trị chặn sai (null, NaN, Infinity, số âm, số lẻ, chuỗi…) → báo lỗi ngay, kể cả khi OFF lỗi. Trước đây
   // null / NaN làm lớp chặn tự TẮT (lockTop | 0 = 0, offMax null = không giới hạn). Chọn báo lỗi thay vì lặng lẽ dùng
   // mặc định: truyền sai là lỗi lập trình, test phải thấy ngay; app gọi không truyền (undefined = DEFAULT_GUARD).
@@ -220,7 +223,10 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
 
   // f1: chấm chung một thang BM25
   const query = Array.isArray(t1Result?.query) ? t1Result.query : [];
-  const cands = new Map(); // code → { item, score, rankScore, tier, vn, src: 0 T1 / 1 OFF, order }
+  // vòng 6 (P2): từ lạ của ảnh (chỉ khi strangeFill bật)
+  const strange = strangeFill ? strangeWords(Array.isArray(t1Result?.lines) ? t1Result.lines : [], { idf: index.idf }) : [];
+  // code → { item, score, rankScore, tier, vn, src: 0 T1 / 1 OFF, order, matched, extra }
+  const cands = new Map();
   let order = 0;
   for (const it of base) cands.set(it.code, { item: it, score: it.score ?? 0, rankScore: it.score ?? 0, tier: 0, vn: true, src: 0, order: order++ });
   for (const o of offs) {
@@ -233,16 +239,52 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
       cands.set(p.code, { item: catalogItem(p, score), score, rankScore: score, tier: 0, vn: true, src: 0, order: order++ });
     } else {
       if (cands.has(o.h.code)) continue;
-      const { score, matched } = bm25DocScore(index, offDoc(t1, o.h.text || `${o.h.name ?? ""} ${o.h.brand ?? ""}`), query);
-      if (matched < Math.max(1, minMatch)) continue;
+      const extra = o.h.extra === true; // mục kho phụ (src/front-extra.js): không offPromote, không luật từ lạ
+      const doc = offDoc(t1, o.h.text || `${o.h.name ?? ""} ${o.h.brand ?? ""}`);
+      const { score, matched } = bm25DocScore(index, doc, query);
+      if (matched < Math.max(1, minMatch)) {
+        // P2: khớp 0 từ câu tìm T1 nhưng chứa từ lạ → hạng 2 (sau mọi mục danh mục, chỉ lấp chỗ trống, vẫn qua offMax)
+        if (matched === 0 && !extra && strange.some((w) => doc.m.has(w))) {
+          cands.set(o.h.code, { item: offItem(o.h, 0), score: 0, rankScore: 0, tier: 2, vn: o.h.vn === true, src: 1, order: order++, matched: 0, extra });
+        }
+        continue;
+      }
       // offTopRule: không đạt (khớp < minWords) → hạng 1 (sau mọi mục danh mục); đạt → trừ gap rồi xếp chung
       const rule = offTopRule && typeof offTopRule === "object" ? offTopRule : null;
       const tier = rule && matched < (rule.minWords ?? 2) ? 1 : 0;
       const gap = rule ? (Number.isFinite(rule.gap) ? rule.gap : 0) : offGap;
-      cands.set(o.h.code, { item: offItem(o.h, score), score, rankScore: score - gap, tier, vn: o.h.vn === true, src: 1, order: order++ });
+      cands.set(o.h.code, { item: offItem(o.h, score), score, rankScore: score - gap, tier, vn: o.h.vn === true, src: 1, order: order++, matched, extra });
     }
   }
-  return guard([...cands.values()]
-    .sort((a, b) => a.tier - b.tier || b.rankScore - a.rankScore || (b.vn - a.vn) || a.src - b.src || a.order - b.order)
-    .map((x) => ({ ...x.item, score: x.score })));
+  const sorted = [...cands.values()]
+    .sort((a, b) => a.tier - b.tier || b.rankScore - a.rankScore || (b.vn - a.vn) || a.src - b.src || a.order - b.order);
+  const toItem = (x) => ({ ...x.item, score: x.score });
+
+  // vòng 6 (P1, V4-2): offPromote — SAU lớp chặn: ứng viên chỉ có trên OFF (không phải kho phụ) điểm F1 cao nhất trong
+  // những ứng viên khớp ≥ minWords từ khác nhau; điểm ≥ điểm gợi ý 1 của T1 + gap → vị trí 1, phần còn lại = lớp chặn
+  // trên k − 1 chỗ với offMax − 1 (mục được đẩy tính vào offMax), các mục khác lùi giữ thứ tự.
+  if (promote && offMax >= 1 && k >= 1) {
+    const ref = base.length ? (cands.get(base[0].code)?.score ?? 0) : 0;
+    let best = null;
+    for (const c of sorted) if (c.src === 1 && !c.extra && c.matched >= promote.minWords && (!best || c.score > best.score)) best = c;
+    if (best && best.score >= ref + promote.gap) {
+      const rest = applyGuard(sorted.filter((c) => c !== best).map(toItem), base, { k: k - 1, lockTop, offMax: offMax - 1 });
+      return [toItem(best), ...rest].slice(0, k);
+    }
+  }
+  return guard(sorted.map(toItem));
+}
+
+/** offPromote hợp lệ: null, hoặc { gap: số hữu hạn ≥ 0, minWords: số nguyên ≥ 2 }; sai → GuardValueError. */
+function checkPromote(p) {
+  if (p === null) return null;
+  const ok = p && typeof p === "object" && !Array.isArray(p)
+    && typeof p.gap === "number" && Number.isFinite(p.gap) && p.gap >= 0
+    && Number.isInteger(p.minWords) && p.minWords >= 2;
+  if (!ok) {
+    let shown;
+    try { shown = typeof p === "object" && p ? JSON.stringify(p, (_, v) => (typeof v === "number" && !Number.isFinite(v) ? String(v) : v)) : String(p); } catch { shown = String(p); }
+    throw new GuardValueError(`front-merge: offPromote phải là null hoặc { gap: số ≥ 0, minWords: số nguyên ≥ 2 } (nhận ${shown})`);
+  }
+  return { gap: p.gap, minWords: p.minWords };
 }
