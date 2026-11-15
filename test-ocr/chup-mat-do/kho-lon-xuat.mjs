@@ -12,10 +12,12 @@
 //         (countries_tags như GROUPS của tu-dong-kho-lon.mjs), bỏ mã đã có;
 //   (c) = (b) + Mỹ (cùng luật).
 // Một sản phẩm thuộc nhiều nước → nhóm ĐẦU TIÊN theo GROUP_ORDER (th, jp, my, id, kr, cn, us). Mã trùng trong bản xuất
-// → giữ dòng xuất hiện trước trong bản xuất. Dòng: { code, name, brand, img, text, grp } (img "" khi không có ảnh,
+// (vòng 2 sửa comment): trùng mã KHÁC nhóm → nhóm đứng trước trong GROUP_ORDER thắng (dù dòng của nó đứng sau trong bản
+// xuất); trùng mã CÙNG nhóm → giữ dòng xuất hiện trước trong bản xuất. Dòng: { code, name, brand, img, text, grp } (img "" khi không có ảnh,
 // chỉ xảy ra ở mức (a)). File: JSONL nén gzip level 9 (zlib.gzipSync, đầu gzip không có giờ → chạy lại trùng từng byte).
-// Ra: <out>\a.jsonl.gz, b.jsonl.gz, c.jsonl.gz + <out>\kho-lon-xuat.json (số sp mỗi nhóm / mức, cỡ thô / gzip, sha256,
-// có mặt của các mã cần theo dõi). Đọc bản xuất nhiều luồng như tu-dong-kho-lon.mjs (gunzip trong bộ nhớ).
+// Ra: <out>\a.jsonl.gz, b.jsonl.gz, c.jsonl.gz + <out>\kho-lon-xuat.json (số sp mỗi nhóm / mức, cỡ thô / gzip, sha256
+// bản nén + sha256Raw bản chưa nén (vòng 2), có mặt của các mã cần theo dõi). --out không được nằm trong worktree đang
+// chạy hay thư mục chính D:\quet-ma-vach-full (so bằng path.relative, vòng 2). Luồng phụ lỗi → thoát mã 1. Đọc bản xuất nhiều luồng như tu-dong-kho-lon.mjs (gunzip trong bộ nhớ).
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -70,8 +72,8 @@ export function processLines(text) {
 
 /**
  * Ghép các mức từ dòng mức (a) + dòng nước ngoài [{ grp, code, seq, li, s }] (s = chuỗi JSON).
- * Thứ tự: (a) giữ nguyên; nước ngoài theo GROUP_ORDER, trong nhóm mã tăng dần (so chuỗi), mã trùng giữ (seq, li) nhỏ
- * nhất; bỏ mã đã có ở nhóm trước / mức (a). Trả { a: [chuỗi], b: [...], c: [...] } (mảng chuỗi JSON từng dòng).
+ * Thứ tự: (a) giữ nguyên; nước ngoài theo GROUP_ORDER, trong nhóm mã tăng dần (so chuỗi), mã trùng CÙNG nhóm giữ
+ * (seq, li) nhỏ nhất; trùng mã KHÁC nhóm → nhóm đứng trước trong GROUP_ORDER thắng; bỏ mã đã có ở nhóm trước / mức (a). Trả { a: [chuỗi], b: [...], c: [...] } (mảng chuỗi JSON từng dòng).
  */
 export function assembleLevels(aRows, foreign) {
   const seen = new Set();
@@ -104,6 +106,16 @@ export function assembleLevels(aRows, foreign) {
   return { a, b, c: [...b, ...cOnly] };
 }
 
+/** Vòng 2: dir có nằm trong (hoặc trùng) root không, so bằng path.relative (win32: không phân biệt hoa thường; không so
+ *  tiền tố chuỗi nên "D:\\repo-khac" không bị coi là trong "D:\\repo"). */
+export function isInside(dir, root, p = path) {
+  const rel = p.relative(p.resolve(root), p.resolve(dir));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
+}
+
+/** Chỗ không được ghi danh mục: worktree đang chạy + thư mục chính của repo. */
+export const FORBIDDEN_OUT_ROOTS = Object.freeze([ROOT, "D:\\quet-ma-vach-full"]);
+
 /** Chuỗi JSONL của một mức (mỗi dòng một sp, kết thúc bằng "\n"). */
 export function levelText(lines) {
   return lines.length ? `${lines.join("\n")}\n` : "";
@@ -133,6 +145,11 @@ async function scanForeign(gzFile, nW, maxBytes = Infinity) {
   let idle = null;
   for (const w of pool) {
     busy.set(w, 0);
+    // vòng 2: luồng phụ lỗi → báo và thoát mã 1 (không treo chờ khúc không bao giờ xong)
+    w.on("error", (e) => {
+      console.error(`Luồng phụ lỗi: ${e?.stack || e}`);
+      process.exit(1);
+    });
     w.on("message", (m) => {
       if (m.type !== "klx-chunk") return;
       busy.set(w, busy.get(w) - 1);
@@ -200,8 +217,7 @@ if (!isMainThread) {
   const outDir = opt("--out", "D:\\tmp\\kho-lon\\danh-muc");
   const gzFile = opt("--gz", "D:\\tmp\\chup-mat-do\\du-lieu\\openfoodfacts-products.jsonl.gz");
   if (!fs.existsSync(gzFile)) throw new Error(`không có ${gzFile} (không tải lại)`);
-  const resolvedOut = path.resolve(outDir).toLowerCase();
-  if (resolvedOut.startsWith(ROOT.toLowerCase())) throw new Error(`--out không được nằm trong repo (${outDir})`);
+  if (FORBIDDEN_OUT_ROOTS.some((r) => isInside(outDir, r))) throw new Error(`--out không được nằm trong repo (${outDir})`);
   fs.mkdirSync(outDir, { recursive: true });
   const read = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, "public", "chup-mat-do", f), "utf8"));
   const aRows = [...read("danh-muc-vn.json").products.map((p) => rowFromApp(p, "vn")), ...read("kho-phu-893.json").products.map((p) => rowFromApp(p, "893"))];
@@ -212,7 +228,8 @@ if (!isMainThread) {
   const res = { at: new Date().toISOString(), src: gzFile, lines: scan.lines, gbChu: scan.gbChu, minutes: scan.minutes, levels: {} };
   for (const [name, list] of Object.entries(lv)) {
     const text = levelText(list);
-    const buf = zlib.gzipSync(Buffer.from(text, "utf8"), { level: 9 });
+    const rawBuf = Buffer.from(text, "utf8");
+    const buf = zlib.gzipSync(rawBuf, { level: 9 });
     const file = path.join(outDir, `${name}.jsonl.gz`);
     fs.writeFileSync(file, buf);
     const perGrp = {};
@@ -223,7 +240,7 @@ if (!isMainThread) {
       codes.add(r.code);
     }
     const coMat = Object.fromEntries(Object.entries(watch).map(([k, cs]) => [k, { co: cs.filter((c) => codes.has(c)).length, n: cs.length, thieu: cs.filter((c) => !codes.has(c)) }]));
-    res.levels[name] = { file, n: list.length, perGrp, raw: Buffer.byteLength(text), gzip: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"), coMat };
+    res.levels[name] = { file, n: list.length, perGrp, raw: Buffer.byteLength(text), gzip: buf.length, sha256: crypto.createHash("sha256").update(buf).digest("hex"), sha256Raw: crypto.createHash("sha256").update(rawBuf).digest("hex"), coMat };
   }
   // số sp có tên + ảnh mỗi nhóm nước ngoài trước khi bỏ trùng (để đối chiếu kho-lon.json của tu-dong)
   res.foreignRaw = {};

@@ -2,7 +2,8 @@
 // xuất, chọn ca dò theo seed, G3, phán / chọn cách / chọn mức theo luật chốt trước (số giả). Không đọc bản xuất.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assembleLevels, processLines, rowFromApp, levelText, foreignGroupOf, LEVELS, GROUP_ORDER } from "../kho-lon-xuat.mjs";
+import path from "node:path";
+import { assembleLevels, processLines, rowFromApp, levelText, foreignGroupOf, LEVELS, GROUP_ORDER, isInside, FORBIDDEN_OUT_ROOTS } from "../kho-lon-xuat.mjs";
 import {
   pickProbes, g3Merge, judgeMethod, judgeH4, pickMethod, pickLevel, methodGrid, tieRank, mulberry32, quantile,
   GZIP_MAX_BYTES, DOCKER_MAX_BYTES, SERVER_K, PROBE_SEED, PROBE_N, PROBE_GROUPS, mergeByMethod,
@@ -53,6 +54,18 @@ test("processLines: lọc nước (nhóm đầu theo thứ tự), cần tên + �
   assert.deepEqual(o, { code: "111", name: "Pocky Choco", brand: "Glico", img: "front_en.4", text: "Pocky Choco Glico", grp: "th" });
 });
 
+test("isInside (vòng 2): so bằng path.relative, không so tiền tố chuỗi; chặn cả worktree lẫn thư mục chính", () => {
+  const w = path.win32;
+  assert.equal(isInside("D:\\quet-ma-vach-full\\x", "D:\\quet-ma-vach-full", w), true);
+  assert.equal(isInside("d:\\QUET-MA-VACH-FULL\\x\\y", "D:\\quet-ma-vach-full", w), true, "không phân biệt hoa thường");
+  assert.equal(isInside("D:\\quet-ma-vach-full", "D:\\quet-ma-vach-full", w), true);
+  assert.equal(isInside("D:\\quet-ma-vach-full-khac\\x", "D:\\quet-ma-vach-full", w), false, "tiền tố chuỗi trùng nhưng là thư mục khác");
+  assert.equal(isInside("D:\\tmp\\kho-lon\\danh-muc", "D:\\quet-ma-vach-full", w), false);
+  assert.equal(isInside("C:\\quet-ma-vach-full\\x", "D:\\quet-ma-vach-full", w), false, "khác ổ");
+  assert.equal(isInside("D:\\quet-ma-vach-full\\..\\tmp", "D:\\quet-ma-vach-full", w), false);
+  assert.ok(FORBIDDEN_OUT_ROOTS.includes("D:\\quet-ma-vach-full") && FORBIDDEN_OUT_ROOTS.length === 2);
+});
+
 // ---------------- kho-lon-do.mjs ----------------
 test("hằng luật chốt trước", () => {
   assert.equal(SERVER_K, 10);
@@ -72,7 +85,9 @@ test("pickProbes: cố định theo seed, đúng n mỗi nhóm, chỉ dòng ≥ 
   assert.deepEqual(a, b);
   assert.equal(a.length, 30);
   for (const g of ["th", "jp", "us"]) assert.equal(a.filter((p) => p.grp === g).length, 10);
-  assert.ok(a.every((p) => !p.code.endsWith("000") && !p.code.endsWith("005")), "dòng 1 từ bị loại");
+  // vòng 2 (gợi ý reviewer): mọi dòng i % 5 === 0 (tên "x", 1 từ) bị loại, không chỉ 000 / 005
+  assert.ok(a.every((p) => Number(p.code.slice(2)) % 5 !== 0), "dòng 1 từ (i % 5 === 0) bị loại");
+  assert.equal(a.filter((p) => Number(p.code.slice(2)) % 5 === 0).length, 0);
   assert.ok(a.every((p) => p.lines.length === 2));
   const c = pickProbes(rows, { tokens, groups: ["th", "jp", "us"], n: 10, seed: 8 });
   assert.notDeepEqual(a.map((p) => p.code), c.map((p) => p.code), "seed khác → mẫu khác");
