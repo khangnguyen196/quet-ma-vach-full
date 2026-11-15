@@ -42,14 +42,34 @@ describe("luật i: ghép số + từ ngắn theo từ vựng", () => {
 });
 
 describe("luật ii: dòng 2 chữ cái theo từ vựng", () => {
-  test("dòng 'Up' giữ khi 'up' có trong từ vựng; không có từ vựng / từ lạ / độ tin thấp thì bỏ như cũ", () => {
+  // Vòng 3 thu hẹp (code-reviewer vòng 2 mục 4): chỉ giữ khi từ là BÍ DANH có ở ≥ SHORT_ALIAS_MIN_DF tài liệu
+  // (aliasDf của chỉ mục, tham số thứ 3); kiểu cũ "mọi từ có trong từ vựng" giữ cả "Ca", "Ga", "Gi".
+  const aliasDf = rIndex.index.aliasDf;
+  test("dòng 'Up' giữ khi 'up' là bí danh (7up) ở ≥ 2 tài liệu; không có từ vựng / từ lạ / độ tin thấp thì bỏ như cũ", () => {
     for (const m of [t1, node]) {
-      assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.95 }, { text: "Soda chanh", conf: 0.95 }], vocab), ["up", "soda", "chanh"]);
+      assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.95 }, { text: "Soda chanh", conf: 0.95 }], vocab, aliasDf), ["up", "soda", "chanh"]);
       assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.95 }, { text: "Soda chanh", conf: 0.95 }]), ["soda", "chanh"]);
-      assert.deepEqual(m.t1QueryFromLines([{ text: "Qx", conf: 0.95 }], new Set(["up"])), []);
-      assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.3 }], new Set(["up"])), []);
-      assert.deepEqual(m.t1QueryFromLines([{ text: "U", conf: 0.95 }], new Set(["u"])), []);
+      assert.deepEqual(m.t1QueryFromLines([{ text: "Qx", conf: 0.95 }], new Set(["up"]), new Map([["up", 2]])), []);
+      assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.3 }], new Set(["up"]), new Map([["up", 2]])), []);
+      assert.deepEqual(m.t1QueryFromLines([{ text: "U", conf: 0.95 }], new Set(["u"]), new Map([["u", 2]])), []);
     }
+  });
+
+  test("vòng 3: dòng 'Ca', 'Ga', 'Gi' KHÔNG giữ (có trong từ vựng nhưng không phải bí danh ≥ 2 tài liệu); 'Up' vẫn giữ", () => {
+    assert.equal(t1.SHORT_ALIAS_MIN_DF, 2);
+    assert.equal(node.SHORT_ALIAS_MIN_DF, 2);
+    for (const w of ["ca", "ga", "gi"]) assert.ok(vocab.has(w), `${w} có trong từ vựng (điều kiện của test)`);
+    assert.equal(aliasDf.get("gi"), 1, "'gi' là bí danh của '32Gi' ở 1 tài liệu");
+    assert.equal(aliasDf.get("up"), 2);
+    for (const m of [t1, node]) {
+      for (const text of ["Ca", "Ga", "Gi", "CA", "gi."]) {
+        assert.deepEqual(m.t1QueryFromLines([{ text, conf: 0.95 }, { text: "Soda chanh", conf: 0.95 }], vocab, aliasDf), ["soda", "chanh"], text);
+      }
+      assert.deepEqual(m.t1QueryFromLines([{ text: "Up", conf: 0.95 }], vocab, aliasDf), ["up"]);
+    }
+    // qua front-rank (app): dòng "Ga" của khung chữ máy chủ không vào câu tìm
+    const r = fr.rankFromItems(t1, rIndex, itemsOf(["Ga", "Soda chanh"]));
+    assert.deepEqual(r.query, ["soda", "chanh"]);
   });
 });
 
