@@ -569,6 +569,10 @@ Kiểm qua app (vòng 4, Playwright Chromium + WebKit, máy chủ OCR trên máy
 - Điểm tin cậy: `node test-ocr/chup-mat-do/nang-t1-tin-cay.mjs` (đọc `v2-moc-A.json` + `v2-moc-B.json`, ghi `v3-tin-cay.json`: bảng mọi ngưỡng ứng viên, điểm chọn, nhóm giữ riêng, ca muối).
 - Test: `npm test` trong `test-ocr/chup-mat-do` (đặt `TEMP` hoặc `NANG_T1_TMP` ở ổ D để file tạm không vào ổ C); test app `npm test` ở thư mục gốc (`tests/front-rank.test.js`, `tests/front-render.test.js`).
 
+## Đợt `dong-noi-bat` (15–16/11/2026): ảnh chụp mặt trước có nhiều chữ thừa
+
+Đo bỏ dòng rác (a), dòng nổi bật tìm riêng rồi gộp RRF (b), trọng số dòng chữ to (c) trên 2 đường (máy chủ / đường lùi), luật chốt trước ở đầu khung đo; kết quả 0/89 cách cải thiện ca ruaypuan, không đổi app (số đo ở PLAN.md, mục đợt `dong-noi-bat`). Chạy trong thư mục gốc repo: `node --max-old-space-size=4096 test-ocr/chup-mat-do/dong-noi-bat-do.mjs [--chi-nen]` (thêm được `--out`, `--cache`, `--ocr`, `--danh-muc`, `--ban`, `--ghi-de`: xem đầu file). Dữ liệu vào ở `D:\tmp` (chữ OCR bộ A / B `D:\tmp\tu-dong\ocr`, cache OFF `D:\tmp\tu-dong\cache-off`, chữ OCR 2 ảnh chụp màn hình `D:\tmp\dong-noi-bat\ocr`), file ra `D:\tmp\dong-noi-bat\ket-qua\` (không commit; đã có file ra thì dừng, trừ `--ghi-de`).
+
 ---
 
 # Phần F – Thử nhiều model OCR cho "chụp mặt trước" (đợt `ocr-mat`)
