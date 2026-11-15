@@ -98,6 +98,25 @@ test("makeDiskFetch: đếm vào khóa vòng (vong3), dừng ở trần vòng v�
   await assert.rejects(disk2.fetch("https://x/a?q=9"), /trần 2 lượt vong3/);
 });
 
+test("makeDiskFetch stopOnTrip (vòng 6, cầu dao của prompt): 3 lỗi liền → ngừng hẳn đợt, không nghỉ, không thử lại", async () => {
+  const d = tmp();
+  const luotFile = path.join(d, "luot.json");
+  let n = 0;
+  let slept = 0;
+  const disk = makeDiskFetch({
+    cacheDir: d, chiCache: false, luotFile, cap: 50, roundKey: "vong6", gapMs: 0, usage: false, stopOnTrip: true,
+    sleep: async (ms) => { slept += ms; },
+    netFetch: async () => { n++; return { status: 503, text: "" }; },
+  });
+  for (const q of [1, 2, 3]) await disk.fetch(`https://x/a?q=${q}`);
+  await assert.rejects(disk.fetch("https://x/a?q=4"), /cầu dao/);
+  assert.equal(n, 3);
+  assert.equal(disk.stats.breakerOpen, true);
+  assert.equal(disk.stats.breakerPauses, 0);
+  assert.equal(slept, 0);
+  assert.equal(readLuot(luotFile).vong6, 3);
+});
+
 test("coverage: ảnh có ≥ 1 câu trả được / đủ câu / có kết quả khác 0", () => {
   const rows = [
     { offPer: [{ ok: true }, { ok: false }], offCount: 3 },
