@@ -7,6 +7,7 @@ import fs from "node:fs";
 import * as t1 from "../public/chup-mat-do/t1.mjs";
 import * as fr from "../src/front-rank.js";
 import * as mod from "../src/front-merge.js"; // import lỗi thì cả file đỏ
+import { parseSearch } from "../src/off-search.js";
 
 const catalog = JSON.parse(fs.readFileSync(new URL("../public/chup-mat-do/danh-muc-vn.json", import.meta.url), "utf8"));
 const products = catalog.products;
@@ -193,7 +194,9 @@ describe("lớp chặn: OFF giả xấu nhất (3 ảnh fixture + ca muối)", (
     assert.ok(firstOff === -1 || got.slice(firstOff).every((x) => x.source === "off"), got.map((x) => x.source).join(","));
   });
 
-  test("offMax chỉ giới hạn khi có mục danh mục để giữ: T1 rỗng thì mục OFF lấp đủ chỗ trống", () => {
+  // Vòng 4 (NÊN SỬA 3 vòng 3, phần câu chữ): đổi tên cho đúng hành vi hiện tại; KHÔNG đổi hành vi (hàng ngoại tên lạ:
+  // vòng 6).
+  test("T1 rỗng: f1 không lấy mục OFF nào (câu tìm T1 rỗng → mục OFF khớp 0 từ bị bỏ, để vòng 6); f2 / f3 lấp đủ chỗ trống bằng mục OFF (offMax chỉ giới hạn khi có mục danh mục để giữ)", () => {
     const empty = fr.rankFromItems(t1, rIndex, []);
     const hits = Array.from({ length: 7 }, (_, j) => FOREIGN(j));
     for (const method of mod.MERGE_METHODS) {
@@ -246,13 +249,8 @@ describe("lớp chặn: giá trị sai → báo lỗi (không tự tắt)", () =
 
 describe("lớp chặn mặc định: ca 7Up", () => {
   const ngoai = JSON.parse(fs.readFileSync(new URL("./fixtures/off-7up-ngoai.json", import.meta.url), "utf8"));
-  const parse = (ps) => ps.map((p) => {
-    const names = Object.entries(p).filter(([k, v]) => /^product_name/.test(k) && typeof v === "string" && v.trim()).map(([, v]) => v.trim());
-    const generic = Object.entries(p).filter(([k, v]) => /^generic_name/.test(k) && typeof v === "string" && v.trim()).map(([, v]) => v.trim());
-    const brand = typeof p.brands === "string" ? p.brands : "";
-    return { code: p.code, name: names[0] || "", brand, img: "", vn: (p.countries_tags || []).includes("en:vietnam"), text: [...names, brand, ...generic].join(" ") };
-  });
-  const offReal = { ok: true, hits: parse(ngoai.products) };
+  // Vòng 4 (gợi ý 1 của reviewer vòng 3): đọc fixture bằng parseSearch THẬT của src/off-search.js (đúng đường app).
+  const offReal = { ok: true, hits: parseSearch(ngoai) };
 
   test("fixture: 19 sản phẩm thật của câu 'soda diet 7up', có 8934588752117, hàng ngoại 7UP chưa có trong danh mục", () => {
     assert.equal(offReal.hits.length, 19);
