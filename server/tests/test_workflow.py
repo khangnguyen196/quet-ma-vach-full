@@ -37,7 +37,8 @@ def test_moi_khoi_run_chay_bang_bash_co_pipefail():
 # người sửa workflow quyết định. Bước "if: failure()" / "always()" (in log, dọn dẹp) thì mọi ống đều được phép hỏng.
 PIPES = {
     "docker push": False,       # đẩy ảnh: hỏng thì bước phải đỏ (tee không được che lỗi)
-    "got=$(curl": False,        # so commit của /health: hỏng thì bước phải đỏ
+    "got=$(curl": False,        # so commit / catalog của /health: hỏng thì bước phải đỏ
+    "n_want=$(gzip": False,     # số dòng danh mục trong repo (kho-lon vòng 3): hỏng thì bước phải đỏ
     "digest=$(grep": True,      # không tìm thấy digest thì vẫn xanh (ảnh đã đẩy xong)
 }
 _PIPE = re.compile(r"(?<!\|)\|(?!\|)")
@@ -136,3 +137,42 @@ def test_buoc_so_commit_cua_health_truoc_khi_day_anh():
     build = next(k for k, s in enumerate(steps) if "docker build" in s.get("run", ""))
     push = next(k for k, s in enumerate(steps) if "docker push" in s.get("run", ""))
     assert build < i < push
+
+
+# --- danh mục ứng viên (đợt kho-lon vòng 3) -------------------------------------------------------------------------
+def test_buoc_kiem_catalog_sau_health_truoc_khi_day():
+    i, check = _step(lambda s: "catalog" in s.get("run", "") and "/health" in s.get("run", "")
+                     and "n_want" in s.get("run", ""))
+    run = check["run"]
+    assert "if" not in check, "bước kiểm catalog phải chạy trên MỌI nhánh"
+    assert "gzip -dc server/catalog/*.jsonl.gz | grep -c ." in run
+    assert '"True $n_want"' in run and "exit 1" in run and "CATALOG_N=" in run
+    steps = _steps()
+    health = next(k for k, s in enumerate(steps) if "STARTUP_SECONDS" in s.get("run", "") and "docker run -d" in s.get("run", ""))
+    push = next(k for k, s in enumerate(steps) if "docker push" in s.get("run", ""))
+    assert health < i < push
+
+
+def test_chu_png_phai_co_candidates_la_danh_sach():
+    _, step = _step(lambda s: "chu.png" in s.get("run", "") and "/ocr" in s.get("run", ""))
+    assert 'j.get("candidates")' in step["run"] and "isinstance(cands, list)" in step["run"]
+
+
+def test_anh_nang_40mp_sinh_trong_container_rieng_truoc_do_ram():
+    i, step = _step(lambda s: "nang.jpg" in s.get("run", ""))
+    run = step["run"]
+    assert "docker run --rm" in run and "8000, 5000" in run and 'convert("CMYK")' in run and "progressive=True" in run
+    assert "0x0112] = 6" in run and '[ "$code" = "200" ]' in run
+    assert "secrets" not in run and "if" not in step
+    ram = next(k for k, s in enumerate(_steps()) if "memory.peak" in s.get("run", ""))
+    assert i < ram, "ảnh nặng phải gửi trước bước đọc memory.peak"
+
+
+def test_summary_co_catalog_n_va_day_chi_tren_main():
+    _, step = _step(lambda s: "memory.peak" in s.get("run", ""))
+    for must in ("Cỡ ảnh", "memory.peak", "STARTUP_SECONDS", "CATALOG_N"):
+        assert must in step["run"], must
+    for s in _steps():
+        if "docker push" in s.get("run", "") or "docker/login-action" in str(s.get("uses", "")):
+            assert s.get("if") == "github.ref == 'refs/heads/main'", s.get("name")
+    assert "secrets." not in WORKFLOW.read_text(encoding="utf-8").replace("secrets.GITHUB_TOKEN", "")

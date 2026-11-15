@@ -86,6 +86,19 @@ jobs:
             exit 1
           fi
 
+      # Đợt kho-lon vòng 3: ảnh có danh mục ứng viên dựng lúc build (CATALOG_PATH=/app/catalog-index mặc định);
+      # /health phải báo catalog.loaded true và n = số dòng của danh mục trong repo. Hỏng thì bước đỏ (không "|| true").
+      - name: /health có danh mục (catalog.loaded, n đúng)
+        run: |
+          n_want=$(gzip -dc server/catalog/*.jsonl.gz | grep -c .)
+          got=$(curl -sf http://127.0.0.1:8080/health | python3 -c 'import json, sys; c = json.load(sys.stdin).get("catalog") or {}; print(c.get("loaded"), c.get("n"))')
+          echo "/health catalog: $got (cần: True $n_want)"
+          if [ "$got" != "True $n_want" ]; then
+            echo "::error::/health catalog \"$got\", cần \"True $n_want\""
+            exit 1
+          fi
+          echo "CATALOG_N=$n_want" >> "$GITHUB_ENV"
+
       - name: Gửi ảnh thử chu.png (PNG) và xoay6.heic (HEIC, kiểm libheif trên Linux)
         run: |
           code=$(curl -s -o png.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png http://127.0.0.1:8080/ocr)
@@ -95,14 +108,32 @@ jobs:
           import json, sys
           sys.path.insert(0, "server/tests/fixtures")
           from tao_chu import CHU_PNG_WORDS  # cùng danh sách chữ với test real_model
-          text = " ".join(it["text"] for it in json.load(open("png.json", encoding="utf-8"))["items"]).upper()
+          j = json.load(open("png.json", encoding="utf-8"))
+          text = " ".join(it["text"] for it in j["items"]).upper()
           missing = [w for w in CHU_PNG_WORDS if w not in text]
           print("chữ OCR:", text)
-          sys.exit(f"thiếu chữ: {missing}" if missing else 0)
+          if missing:
+              sys.exit(f"thiếu chữ: {missing}")
+          # kho-lon vòng 3: có danh mục thì /ocr luôn có khóa "candidates" là danh sách (rỗng được)
+          cands = j.get("candidates")
+          print("candidates:", None if cands is None else len(cands))
+          sys.exit(0 if isinstance(cands, list) else "thiếu khóa candidates (danh sách)")
           PY
           code=$(curl -s -o heic.json -w '%{http_code}' -F image=@server/tests/fixtures/xoay6.heic http://127.0.0.1:8080/ocr)
           echo "xoay6.heic: HTTP $code"; cat heic.json; echo
           [ "$code" = "200" ] || { echo "::error::xoay6.heic không trả 200"; exit 1; }
+
+      # Ảnh nặng nhất được nhận (JPEG nhiều lượt quét CMYK 40 MP, orientation 6, như server/do-anh-lon.py): sinh bằng Pillow
+      # có sẵn trong ảnh, ở MỘT container riêng (không tính vào RAM của container ocr), không thêm file lớn vào repo.
+      # Gửi trước bước đo RAM để memory.peak gồm ca nặng nhất.
+      - name: Gửi ảnh nặng 40 MP (JPEG CMYK nhiều lượt quét)
+        run: |
+          mkdir -p anh-nang
+          docker run --rm -u 0 -v "$PWD/anh-nang:/out" "$LOCAL" python -c 'from PIL import Image; g = Image.linear_gradient("L"); w, h = 8000, 5000; im = Image.merge("RGB", (g.resize((w, h)), g.rotate(90).resize((w, h)), Image.new("L", (w, h), 90))).convert("CMYK"); ex = Image.Exif(); ex[0x0112] = 6; im.save("/out/nang.jpg", "JPEG", quality=90, progressive=True, exif=ex.tobytes())'
+          ls -l anh-nang/nang.jpg
+          code=$(curl -s --max-time 300 -o nang.json -w '%{http_code}' -F image=@anh-nang/nang.jpg http://127.0.0.1:8080/ocr)
+          echo "nang.jpg: HTTP $code"; head -c 300 nang.json; echo
+          [ "$code" = "200" ] || { echo "::error::ảnh nặng 40 MP không trả 200"; exit 1; }
 
       - name: Đo cỡ ảnh, RAM
         run: |
@@ -115,9 +146,10 @@ jobs:
           {
             echo "### Ảnh Docker máy chủ OCR (commit ${GITHUB_SHA::7})"
             echo "- Cỡ ảnh (docker image inspect): $mb MB ($size byte)"
-            echo "- RAM lúc này (docker stats, sau 2 ảnh OCR): $stats"
-            echo "- RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR): $peak_mb MB"
+            echo "- RAM lúc này (docker stats, sau 2 ảnh OCR + ảnh nặng 40 MP): $stats"
+            echo "- RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR + ảnh nặng 40 MP): $peak_mb MB"
             echo "- Khởi động tới /health 200: ${STARTUP_SECONDS} giây"
+            echo "- Danh mục ứng viên (/health catalog.n): ${CATALOG_N} sản phẩm"
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"
 

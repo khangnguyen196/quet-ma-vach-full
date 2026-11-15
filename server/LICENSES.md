@@ -17,6 +17,16 @@ và đọc tay các file `LICENSE*` / `MODEL_LICENSES.md` / `LICENSES_bundled.tx
 
 `MODEL_LICENSES.md` của RapidOCR: mã RapidOCR thuộc RapidOCR Authors, trọng số model thuộc Baidu / PaddleOCR, cả hai phát hành theo Apache-2.0; phân phối lại thì kèm bản Apache-2.0 và giữ ghi chú nguồn. Model cls (`ch_ppocr_mobile_v2.0_cls_mobile.onnx`, Apache-2.0) có trong wheel nhưng máy chủ KHÔNG dùng (`Global.use_cls=False`).
 
+## Dữ liệu: danh mục sản phẩm (đợt kho-lon)
+
+| Dữ liệu | File | sha256 | Giấy phép | Nguồn |
+|---|---|---|---|---|
+| Danh mục ứng viên mức (c): 532.732 sản phẩm (VN + mã 893 + Thái Lan, Nhật, Malaysia, Indonesia, Hàn Quốc, Trung Quốc, Mỹ), chỉ trường mã / tên / hãng / khóa ảnh / chữ tìm / nhóm | `catalog/c.jsonl.gz` (14.206.378 byte; ảnh Docker dựng chỉ mục ở `/app/catalog-index`, xóa file .gz) | `370a9ab314b3f6fc88ad7cf1fdd67011ab0a8cd57e9557d5362f8136a7bcd164` | Open Database License (ODbL) 1.0 (cơ sở dữ liệu); nội dung từng mục: Database Contents License (DbCL) 1.0 | Open Food Facts (https://world.openfoodfacts.org), bản xuất `openfoodfacts-products.jsonl.gz` ngày 08/11/2026, dựng bằng `test-ocr/chup-mat-do/kho-lon-xuat.mjs` |
+
+Phân phối lại danh mục (kể cả trong ảnh Docker công khai) phải ghi nguồn "Open Food Facts" và giữ giấy phép ODbL; cơ sở dữ
+liệu dẫn xuất (danh mục này) cũng theo ODbL. Ảnh sản phẩm KHÔNG nằm trong danh mục (chỉ khóa ảnh; app tải ảnh từ
+images.openfoodfacts.org, giấy phép CC BY-SA của Open Food Facts).
+
 ## Gói Python chạy máy chủ (`requirements.txt`)
 
 | Gói | Phiên bản | Giấy phép (metadata) | Ghi chú |

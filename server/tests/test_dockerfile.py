@@ -3,6 +3,7 @@ build + chạy thật nằm ở workflow .github/workflows/server-image.yml (CI)
 from __future__ import annotations
 
 import ast
+import fnmatch
 import json
 import re
 
@@ -124,6 +125,37 @@ def test_local_imports_doc_ca_import_luoi(tmp_path, monkeypatch):
     f = tmp_path / "x.py"
     f.write_text("import os\ndef f():\n    from catalog_search import CatalogIndex\n    import auth\n", encoding="utf-8")
     assert _local_imports(f) == {"catalog_search", "auth"}
+
+
+def test_chi_muc_dung_luc_build_va_catalog_path_mac_dinh():
+    """Đợt kho-lon vòng 3: COPY danh mục mức đã chọn, RUN build + verify chỉ mục, ENV CATALOG_PATH = thư mục chỉ mục,
+    người dùng ocr nạp thử; mọi bước trước ARG GIT_SHA (test_git_sha_arg_env_dat_sau_cac_buoc_nang)."""
+    src = _dockerfile()
+    flat = re.sub(r"\\\n", " ", src)
+    copy = [ln for ln in flat.splitlines() if ln.startswith("COPY ") and "catalog/" in ln]
+    assert len(copy) == 1, copy
+    m = re.search(r"COPY (catalog/[a-c]\.jsonl\.gz) (\S+)", copy[0])
+    assert m, copy[0]
+    gz = SERVER / m.group(1)
+    assert gz.is_file() and gz.stat().st_size <= 25 * 1024 * 1024, "danh mục phải có trong repo, <= 25 MiB"
+    assert len(list((SERVER / "catalog").glob("*.jsonl.gz"))) == 1, "chỉ commit danh mục của mức đã chọn"
+    run = next(ln for ln in flat.splitlines() if ln.startswith("RUN ") and "catalog_search.py build" in ln)
+    assert f"catalog_search.py build {m.group(2)} /app/catalog-index" in run
+    assert f"catalog_search.py verify /app/catalog-index {m.group(2)}" in run
+    assert "rm -rf" in run and "chmod -R a+rX /app/catalog-index" in run
+    assert _env(src)["CATALOG_PATH"] == "/app/catalog-index"
+    lines = src.splitlines()
+    user = next(i for i, ln in enumerate(lines) if ln.strip() == "USER ocr")
+    assert any("load_dir('/app/catalog-index')" in ln for ln in lines[user:]), "người dùng ocr phải nạp thử chỉ mục"
+
+
+def test_dockerignore_khong_loai_danh_muc():
+    pats = [ln.strip() for ln in (SERVER / ".dockerignore").read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")]
+    for p in pats:
+        assert not fnmatch.fnmatch("catalog/c.jsonl.gz", p.rstrip("/")) and not p.startswith("catalog"), p
+    for must in ("do_khop_t1.py", "do_h2h3.py"):
+        assert must in pats
 
 
 def test_dockerignore_khong_lot_tests_env():

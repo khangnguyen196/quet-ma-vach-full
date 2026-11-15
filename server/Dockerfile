@@ -27,6 +27,17 @@ COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py 
 # site-packages/rapidocr/models. Kiểm sha256 (trùng server/README.md và MODEL_SHA256 của ocr_engine.py): sai thì build hỏng.
 RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); assert not p, p; print('sha256 model OK:', e.MODEL_SHA256)"
 
+# Danh mục ứng viên (đợt kho-lon vòng 3): mức (c) = VN + 893 + th / jp / my / id / kr / cn + us, 532.732 sản phẩm Open
+# Food Facts (ODbL, bản xuất 08/11/2026; LICENSES.md). Chỉ mục dựng LÚC BUILD (catalog_search.py build: mảng .npy + meta +
+# dòng thô), lúc chạy nạp bằng mmap (không dựng lại: máy chủ scale về 0 thức dậy vẫn có ứng viên ngay lượt đầu).
+# Kiểm sau khi dựng (catalog_search.py verify): load_dir được, N == số dòng nguồn, sha256 nguồn trong meta trùng; sai
+# thì build hỏng. Xóa .gz sau khi dựng (lớp COPY vẫn giữ ~14 MB trong ảnh). Thư mục đọc được bởi người dùng ocr (a+rX).
+COPY catalog/c.jsonl.gz /tmp/catalog-src/c.jsonl.gz
+RUN python catalog_search.py build /tmp/catalog-src/c.jsonl.gz /app/catalog-index \
+ && python catalog_search.py verify /app/catalog-index /tmp/catalog-src/c.jsonl.gz \
+ && rm -rf /tmp/catalog-src \
+ && chmod -R a+rX /app/catalog-index
+
 # Chạy thật: không tải model, CORS chỉ theo ALLOWED_ORIGINS (không localhost), BẮT BUỘC đăng nhập.
 # AUTH_MODE=supabase là mặc định của ảnh: quên đặt SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY trên Azure thì máy chủ KHÔNG
 # khởi động (an toàn hơn âm thầm cho qua). Chạy thử không đăng nhập (CI) phải tự đặt -e AUTH_MODE=off.
@@ -34,7 +45,9 @@ RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); ass
 # MAX_PIXELS=50 MP; JPEG nhiều lượt quét (progressive, hoặc lượt quét đầu ít màu hơn ảnh) MAX_PIXELS_PROGRESSIVE=40 MP.
 # Ca nặng nhất được nhận: JPEG nhiều lượt quét 40 MP, đo bằng CMYK progressive peak_wset 629 / riêng 822 MB (MiB, Windows 10;
 # server/README.md mục "RAM ảnh lớn"), dưới 2 GiB của Container App. RAM thật trên Linux: workflow ghi memory.peak.
+# CATALOG_PATH: thư mục chỉ mục dựng ở trên (đặt rỗng "-e CATALOG_PATH=" để tắt ứng viên: /ocr y hệt trước).
 ENV PORT=8080 \
+    CATALOG_PATH=/app/catalog-index \
     OCR_OFFLINE=1 \
     CORS_ALLOW_LOCALHOST=0 \
     AUTH_MODE=supabase \
@@ -50,6 +63,8 @@ USER ocr
 # Nạp thử RapidOCR 1 lần BẰNG người dùng ocr (OCR_OFFLINE=1): chứng minh người dùng chạy thật đọc được model; thiếu / sai
 # model hoặc thiếu thư viện hệ thống thì build hỏng ngay, lúc chạy không tải gì.
 RUN python -c "import ocr_engine as e; o = e.OcrEngine(1, True); print('nạp thử OK', round(o.load_seconds, 2), 'giây')"
+# Người dùng ocr nạp được chỉ mục (mmap) và tìm được: thiếu quyền đọc thì build hỏng.
+RUN python -c "import catalog_search as c; x = c.CatalogIndex.load_dir('/app/catalog-index'); assert x.N > 0 and x.search_text('soda chanh 7up'), x.N; print('chỉ mục OK', x.N, 'sản phẩm')"
 
 # Mã commit của ảnh (7 ký tự, workflow truyền --build-arg GIT_SHA=${GITHUB_SHA::7}); /health trả ở trường "commit"
 # (sai dạng / không truyền -> "unknown"). Đặt SAU mọi RUN / COPY nặng: mỗi commit một giá trị, không làm mất cache các lớp trên.
