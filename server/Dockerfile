@@ -21,7 +21,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py LICENSES.md ./
+COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py catalog_search.py LICENSES.md ./
 
 # Model lúc build: wheel rapidocr==3.10.0 đã kèm PP-OCRv6_det_small.onnx + PP-OCRv6_rec_small.onnx trong
 # site-packages/rapidocr/models. Kiểm sha256 (trùng server/README.md và MODEL_SHA256 của ocr_engine.py): sai thì build hỏng.

@@ -156,6 +156,8 @@ Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/oc
   `t1-golden.json`, sinh bằng `test-ocr/chup-mat-do/kho-lon-vang.mjs`) và `do_khop_t1.py` (3 mức thật ngoài repo,
   `D:\tmp\kho-lon\vang\{a,b,c}.json`): vòng 2 trùng 139 / 139 câu ở mỗi mức (a), (b), (c), 0 lệch. Sửa luật T1 thì sửa
   JS trước, sinh lại file vàng, rồi sửa Python cho khớp.
+- Nguồn fixture `tests/fixtures/catalog-mini.jsonl.gz` (2.092 dòng trích từ danh mục mức (c)) và chữ / mã trong
+  `t1-golden.json`: dữ liệu Open Food Facts (https://world.openfoodfacts.org), giấy phép ODbL 1.0, bản xuất 08/11/2026.
 - RSS (chỉ báo, vòng 2, Windows, Python 3.12, chưa nạp model OCR): sau nạp mức (a) 32 MiB, (b) 44 MiB, (c) 170 MiB
   (nạp + dựng (c) 16,8 giây); H2 (RAM đỉnh cả tiến trình) đo chính thức ở vòng 3.
 
