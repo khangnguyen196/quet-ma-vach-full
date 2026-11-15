@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -132,6 +133,75 @@ def test_nap_loi_ocr_van_chay(monkeypatch, caplog, tmp_path):
     assert r.status_code == 200 and set(r.json()) == OLD_KEYS
     assert "KHÔNG nạp được danh mục" in caplog.text
     assert app.state.catalog is None
+
+
+HEALTH_OLD = {"ok", "modelLoaded", "engine", "version", "commit"}
+
+
+def test_health_catalog_khong_co_bien(monkeypatch):
+    monkeypatch.delenv("CATALOG_PATH", raising=False)
+    app = app_module.create_app(make_settings(), engine=_fake_engine())
+    with TestClient(app) as c:
+        j = c.get("/health").json()
+    assert set(j) == HEALTH_OLD | {"catalog"} and j["ok"] is True and j["commit"] == "unknown"
+    assert j["catalog"] == {"loaded": False, "n": 0}
+
+
+def test_health_catalog_co_fixture_file_va_thu_muc(monkeypatch, tmp_path):
+    out = tmp_path / "chi-muc"
+    catalog_search.build_index_dir(MINI, out)
+    for path in (MINI, out):
+        monkeypatch.setenv("CATALOG_PATH", str(path))
+        app = app_module.create_app(make_settings(), engine=_fake_engine())
+        try:
+            with TestClient(app) as c:
+                j = c.get("/health").json()
+            assert set(j) == HEALTH_OLD | {"catalog"} and j["ok"] is True
+            assert j["catalog"] == {"loaded": True, "n": GOLD["meta"]["n"]}
+            assert str(tmp_path) not in str(j) and "catalog-mini" not in str(j), "không lộ đường dẫn"
+        finally:
+            if app.state.catalog is not None:
+                app.state.catalog.close()
+
+
+def test_health_catalog_nap_loi(monkeypatch, tmp_path):
+    bad = tmp_path / "hong.jsonl.gz"
+    bad.write_bytes(b"\x1f\x8bkhong-phai-gzip")
+    monkeypatch.setenv("CATALOG_PATH", str(bad))
+    app = app_module.create_app(make_settings(), engine=_fake_engine())
+    with TestClient(app) as c:
+        j = c.get("/health").json()
+    assert j["ok"] is True and j["catalog"] == {"loaded": False, "n": 0}
+
+
+def test_log_ocr_co_ms_tim_khong_co_chu(monkeypatch, caplog):
+    monkeypatch.setenv("CATALOG_PATH", str(MINI))
+    q = _gold("7up-may")
+    app = app_module.create_app(make_settings(), engine=ItemsEngine(q["items"]))
+    with caplog.at_level(logging.INFO, logger="ocr_server"), TestClient(app) as c:
+        assert _post(c).status_code == 200
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("POST /ocr 200"))
+    assert re.search(r" khung tìm \d+\.\dms \d+\.\d{3}s$", line), line
+    for it in q["items"]:
+        assert it["text"] not in caplog.text, "log không có chữ OCR"
+
+
+def test_log_ocr_khong_danh_muc_tim_gach(monkeypatch, caplog):
+    monkeypatch.delenv("CATALOG_PATH", raising=False)
+    app = app_module.create_app(make_settings(), engine=_fake_engine())
+    with caplog.at_level(logging.INFO, logger="ocr_server"), TestClient(app) as c:
+        _post(c)
+        c.get("/health")
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("POST /ocr 200") and " khung tìm - " in m for m in msgs)
+    assert any(m.startswith("GET /health 200") and " khung tìm - " in m for m in msgs)
+
+
+def test_attach_candidates_ghi_ms():
+    cat = catalog_search.CatalogIndex.load(MINI)
+    timing = {}
+    res = app_module.attach_candidates(cat, {"items": _gold("7up-may")["items"]}, timing)
+    assert res["candidates"] and isinstance(timing["searchMs"], float) and timing["searchMs"] >= 0
 
 
 def test_attach_candidates_thuan():

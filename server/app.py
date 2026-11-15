@@ -76,13 +76,17 @@ def load_catalog(path: str):
     return cat
 
 
-def attach_candidates(catalog, result: dict) -> dict:
+def attach_candidates(catalog, result: dict, timing: dict | None = None) -> dict:
     """Thêm "candidates" (<= 10 mục {code, name, brand, img, text, grp, score}) tính từ chính items OCR. Tìm lỗi -> bỏ
-    khóa candidates, log chỉ tên lỗi (không chữ OCR), trả result như cũ."""
+    khóa candidates, log chỉ tên lỗi (không chữ OCR), trả result như cũ.
+    timing (dict, tùy chọn): ghi "searchMs" = số ms CHỈ của catalog.search (H3 vòng 3 đọc từ dòng log /ocr)."""
     if catalog is None:
         return result
+    t = time.perf_counter()
     try:
         cands = catalog.search(result.get("items") or [], CANDIDATES_K)
+        if timing is not None:
+            timing["searchMs"] = (time.perf_counter() - t) * 1000
         result["candidates"] = [
             {"code": str(c["code"]), "name": str(c["name"]), "brand": str(c["brand"]), "img": str(c["img"]),
              "text": str(c["text"]), "grp": str(c["grp"]), "score": float(c["score"])}
@@ -148,10 +152,14 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
         t = time.perf_counter()
         request.state.nbytes = 0
         request.state.nboxes = 0
+        request.state.search_ms = None
         response = await call_next(request)
-        # KHÔNG ghi IP, tên file, chữ OCR, query string: chỉ đường dẫn, mã, byte, số khung, giây
-        log.info("%s %s %d %dB %d khung %.3fs", request.method, request.url.path, response.status_code,
-                 request.state.nbytes, request.state.nboxes, time.perf_counter() - t)
+        # KHÔNG ghi IP, tên file, chữ OCR, query string: chỉ đường dẫn, mã, byte, số khung, ms tìm ứng viên, giây
+        # ("tìm -" = không tìm: không có danh mục / không tới bước tìm / tìm lỗi)
+        sms = request.state.search_ms
+        log.info("%s %s %d %dB %d khung tìm %s %.3fs", request.method, request.url.path, response.status_code,
+                 request.state.nbytes, request.state.nboxes, "-" if sms is None else f"{sms:.1f}ms",
+                 time.perf_counter() - t)
         return response
 
     @app.exception_handler(StarletteHTTPException)
@@ -173,8 +181,12 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
         eng = request.app.state.engine
         loaded = bool(eng is not None and getattr(eng, "loaded", False))
         # commit: 7 ký tự mã commit của ảnh Docker (biến GIT_SHA), sai dạng / không có -> "unknown"
+        # catalog (vòng 3): đã nạp danh mục ứng viên chưa + số sản phẩm (không lộ đường dẫn CATALOG_PATH)
+        cat = request.app.state.catalog
+        n = getattr(cat, "N", 0) if cat is not None else 0
         return {"ok": loaded, "modelLoaded": loaded, "engine": dict(ENGINE_INFO), "version": SERVER_VERSION,
-                "commit": request.app.state.settings.commit}
+                "commit": request.app.state.settings.commit,
+                "catalog": {"loaded": cat is not None, "n": n if isinstance(n, int) and not isinstance(n, bool) else 0}}
 
     @app.post("/ocr")
     async def ocr(request: Request):
@@ -231,7 +243,9 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
             await slot.acquire()  # chờ khóa OCR (ảnh đã nằm trong RAM, đã tính vào chỗ đã giành)
             result = await run_in_threadpool(process, eng, data, st.max_pixels, st.max_pixels_progressive)
             if request.app.state.catalog is not None:  # vẫn giữ chỗ hàng đợi: tìm ứng viên tính vào lượt này
-                result = await run_in_threadpool(attach_candidates, request.app.state.catalog, result)
+                timing = {}
+                result = await run_in_threadpool(attach_candidates, request.app.state.catalog, result, timing)
+                request.state.search_ms = timing.get("searchMs")
         except imaging.ImageError as e:
             return error(e.status, e.message)
         except Exception as e:  # noqa: BLE001 - lỗi lạ (engine…): trả 500 NGAY ở đây để có header CORS
