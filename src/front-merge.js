@@ -12,6 +12,15 @@
 //   f3: T1 trước, OFF chỉ lấp chỗ trống (VN trước, giữ thứ tự OFF).
 // OFF lỗi / rỗng / bị hủy (offResult không ok) → kết quả GIỐNG HỆT T1 (cùng thứ tự, cùng mã).
 //
+// LỚP CHẶN (vòng 3, mọi cách gộp; luật "không làm hại" của chủ dự án được code bảo đảm, không chỉ dựa vào số đo):
+//   lockTop L : L gợi ý đầu của T1 giữ nguyên vị trí 1..L, không ứng viên nào chen lên trên;
+//   offMax M  : trong k chỗ, ứng viên CHỈ CÓ trên OFF (mã không có trong danh mục) chiếm tối đa M chỗ; chỉ được quá M
+//               để lấp chỗ TRỐNG (T1 + mã OFF có trong danh mục không đủ k). Mã OFF có trong danh mục dùng bản danh
+//               mục, không bị M giới hạn;
+//   offTopRule { gap, minWords } (chỉ f1): ứng viên chỉ có trên OFF chỉ được xếp trên mục danh mục khi điểm ≥ điểm mục
+//               đó + gap VÀ khớp ≥ minWords từ khác nhau của câu tìm T1; không đạt thì xếp sau mọi mục danh mục.
+//   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k } = không chặn.
+//
 // Ví dụ:
 //   const r = rankFromItems(t1, rIndex, items);                         // T1 (src/front-rank.js)
 //   const off = await offSearch.search(q);                               // { ok, hits: [{ code, name, brand, img, vn, text }] }
@@ -20,6 +29,8 @@ import { frontImageUrl } from "./front-search.js";
 
 export const MERGE_K = 5;
 export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
+/** Lớp chặn mặc định (vòng 3). */
+export const DEFAULT_GUARD = Object.freeze({ lockTop: 1, offMax: 2, offTopRule: null });
 export const RRF_K = 60;
 /** Số kết quả đầu của mỗi nguồn đưa vào RRF (f2). */
 export const RRF_DEPTH = 5;
@@ -75,17 +86,49 @@ function t1Items(products, t1Result, k) {
 }
 
 /**
+ * Lớp chặn trên danh sách đã xếp ĐỦ (chưa cắt k): lockTop mục đầu của T1 (base) đứng đầu, giữ thứ tự; rồi theo thứ tự
+ * đã xếp, mục chỉ có trên OFF (source "off") tối đa offMax; còn chỗ trống thì lấp bằng mục OFF bị gạt (thứ tự cũ).
+ */
+function applyGuard(ranked, base, { k, lockTop, offMax }) {
+  const lock = base.slice(0, Math.max(0, Math.min(lockTop | 0, base.length)));
+  const out = [...lock];
+  const have = new Set(lock.map((x) => x.code));
+  const spare = [];
+  let offs = 0;
+  for (const it of ranked) {
+    if (out.length >= k) break;
+    if (have.has(it.code)) continue;
+    if (it.source === "off" && offs >= offMax) { spare.push(it); continue; }
+    if (it.source === "off") offs++;
+    have.add(it.code);
+    out.push(it);
+  }
+  for (const it of spare) {
+    if (out.length >= k) break;
+    if (have.has(it.code)) continue;
+    have.add(it.code);
+    out.push(it);
+  }
+  return out.slice(0, k);
+}
+
+/**
  * Gộp T1 + OFF → tối đa k mục { code, name, brand, img, source: "catalog" | "off", vn, score }.
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
- * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth }.
+ * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule }
+ * (lockTop / offMax / offTopRule thiếu thì lấy DEFAULT_GUARD).
  */
 export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {}) {
-  const { method = "f1", k = MERGE_K, offGap = 0, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH } = opts;
+  const {
+    method = "f1", k = MERGE_K, offGap = 0, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH,
+    lockTop = DEFAULT_GUARD.lockTop, offMax = DEFAULT_GUARD.offMax, offTopRule = DEFAULT_GUARD.offTopRule,
+  } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
   const list = Array.isArray(products) ? products : [];
   const base = t1Items(list, t1Result, k);
   if (!okOff(offResult)) return base;
+  const guard = (ranked) => applyGuard(ranked, base, { k, lockTop, offMax: Number.isFinite(offMax) ? offMax : k });
 
   const index = rIndex.index;
   const byCode = new Map();
@@ -104,13 +147,12 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
     const have = new Set(out.map((x) => x.code));
     const fill = [...offs.filter((o) => (o.inCatalog || o.h.vn === true)), ...offs.filter((o) => !(o.inCatalog || o.h.vn === true))];
     for (const o of fill) {
-      if (out.length >= k) break;
       const item = o.inCatalog ? catalogItem(list[o.i]) : offItem(o.h);
       if (have.has(item.code)) continue;
       have.add(item.code);
       out.push(item);
     }
-    return out;
+    return guard(out);
   }
 
   if (method === "f2") {
@@ -124,17 +166,16 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
     };
     base.slice(0, rrfDepth).forEach((it, r) => add(it, r + 1, true));
     offs.slice(0, rrfDepth).forEach((o, r) => add(o.inCatalog ? catalogItem(list[o.i]) : offItem(o.h), r + 1, false));
-    return [...score.values()]
+    return guard([...score.values()]
       .sort((a, b) => b.s - a.s || (b.fromT1 - a.fromT1) || a.order - b.order)
-      .slice(0, k)
-      .map((x) => ({ ...x.item, score: x.s }));
+      .map((x) => ({ ...x.item, score: x.s })));
   }
 
   // f1: chấm chung một thang BM25
   const query = Array.isArray(t1Result?.query) ? t1Result.query : [];
-  const cands = new Map(); // code → { item, score, rankScore, vn, src: 0 T1 / 1 OFF, order }
+  const cands = new Map(); // code → { item, score, rankScore, tier, vn, src: 0 T1 / 1 OFF, order }
   let order = 0;
-  for (const it of base) cands.set(it.code, { item: it, score: it.score ?? 0, rankScore: it.score ?? 0, vn: true, src: 0, order: order++ });
+  for (const it of base) cands.set(it.code, { item: it, score: it.score ?? 0, rankScore: it.score ?? 0, tier: 0, vn: true, src: 0, order: order++ });
   for (const o of offs) {
     if (o.inCatalog) {
       const p = list[o.i];
@@ -142,16 +183,19 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
       const doc = index.tf[o.i];
       const { score, matched } = doc && doc.code === p.code ? bm25DocScore(index, doc, query) : { score: 0, matched: 0 };
       if (matched < Math.max(1, minMatch)) continue;
-      cands.set(p.code, { item: catalogItem(p, score), score, rankScore: score, vn: true, src: 0, order: order++ });
+      cands.set(p.code, { item: catalogItem(p, score), score, rankScore: score, tier: 0, vn: true, src: 0, order: order++ });
     } else {
       if (cands.has(o.h.code)) continue;
       const { score, matched } = bm25DocScore(index, offDoc(t1, o.h.text || `${o.h.name ?? ""} ${o.h.brand ?? ""}`), query);
       if (matched < Math.max(1, minMatch)) continue;
-      cands.set(o.h.code, { item: offItem(o.h, score), score, rankScore: score - offGap, vn: o.h.vn === true, src: 1, order: order++ });
+      // offTopRule: không đạt (khớp < minWords) → hạng 1 (sau mọi mục danh mục); đạt → trừ gap rồi xếp chung
+      const rule = offTopRule && typeof offTopRule === "object" ? offTopRule : null;
+      const tier = rule && matched < (rule.minWords ?? 2) ? 1 : 0;
+      const gap = rule ? (Number.isFinite(rule.gap) ? rule.gap : 0) : offGap;
+      cands.set(o.h.code, { item: offItem(o.h, score), score, rankScore: score - gap, tier, vn: o.h.vn === true, src: 1, order: order++ });
     }
   }
-  return [...cands.values()]
-    .sort((a, b) => b.rankScore - a.rankScore || (b.vn - a.vn) || a.src - b.src || a.order - b.order)
-    .slice(0, k)
-    .map((x) => ({ ...x.item, score: x.score }));
+  return guard([...cands.values()]
+    .sort((a, b) => a.tier - b.tier || b.rankScore - a.rankScore || (b.vn - a.vn) || a.src - b.src || a.order - b.order)
+    .map((x) => ({ ...x.item, score: x.score })));
 }
