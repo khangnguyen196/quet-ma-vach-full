@@ -1,10 +1,11 @@
 // P5 vòng 5: so bản trình duyệt public/chup-mat-do/t1.mjs với bản Node (lib.mjs + vn-data.mjs) – như regex-parity.mjs.
 //
-//   node chup-mat-do/trang-thu-parity.mjs
+//   node chup-mat-do/trang-thu-parity.mjs [--out D:\tmp\tu-dong\ket-qua]
 //
 // 30 ảnh 1a PaddleOCR.js Chromium đã lưu (D:\tmp\chup-mat-do\ocr\paddlejs-rows-chromium\<mã>__front.json, dòng kèm độ
 // tin): câu tìm + top5 + điểm của t1.mjs (trên public/chup-mat-do/danh-muc-vn.json) phải trùng bản Node (trên
-// D:\tmp\chup-mat-do\chi-muc\danh-muc-vn.json). Bản Node là chuẩn. Ra: ket-qua\trang-thu-parity.json.
+// D:\tmp\chup-mat-do\chi-muc\danh-muc-vn.json). Bản Node là chuẩn. Ra: <--out>\trang-thu-parity.json (mặc định
+// D:\tmp\tu-dong\ket-qua; trước đợt tu-dong vòng 3 ghi đè D:\tmp\chup-mat-do\ket-qua).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,10 +16,11 @@ import * as page from "../../public/chup-mat-do/t1.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** So một câu: trả { same, query, nodeTop, pageTop }. Điểm so tới 1e-9 (cùng phép tính, cùng thứ tự). */
-// withVocab (đợt tu-dong): truyền từ vựng chỉ mục (index.idf) như src/front-rank.js → so cả luật tách chữ i + ii.
+// withVocab (đợt tu-dong): truyền từ vựng + bí danh của chỉ mục (index.idf, index.aliasDf) như src/front-rank.js → so cả
+// luật tách chữ i + ii.
 export function compareOne(lines, nodeIndex, pageIndex, withVocab = false) {
-  const qn = node.t1QueryFromLines(lines, withVocab ? nodeIndex.idf : null);
-  const qp = page.t1QueryFromLines(lines, withVocab ? pageIndex.idf : null);
+  const qn = node.t1QueryFromLines(lines, withVocab ? nodeIndex.idf : null, withVocab ? nodeIndex.aliasDf : null);
+  const qp = page.t1QueryFromLines(lines, withVocab ? pageIndex.idf : null, withVocab ? pageIndex.aliasDf : null);
   const hn = node.bm25Search(nodeIndex, qn, 5).map((h) => ({ code: h.code, score: h.score }));
   const hp = page.bm25Search(pageIndex, qp, 5).map((h) => ({ code: h.code, score: h.score }));
   const same = qn.join(" ") === qp.join(" ") && hn.length === hp.length &&
@@ -44,7 +46,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const same = rows.filter((r) => r.same).length;
   const out = { at: new Date().toISOString(), catalogSame: nodeDocs.length === pageDocs.length && nodeDocs.every((d, i) => d.code === pageDocs[i].code && d.text === pageDocs[i].text), n: rows.length, same, rows };
-  fs.writeFileSync("D:\\tmp\\chup-mat-do\\ket-qua\\trang-thu-parity.json", JSON.stringify(out, null, 1), "utf8");
+  const argv = process.argv.slice(2);
+  const outDir = argv.includes("--out") ? argv[argv.indexOf("--out") + 1] : "D:\\tmp\\tu-dong\\ket-qua";
+  fs.mkdirSync(outDir, { recursive: true });
+  const outFile = path.join(outDir, "trang-thu-parity.json");
+  fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
+  console.log(`Ghi: ${outFile}`);
   console.log(`Danh mục trùng (mã + text, cùng thứ tự): ${out.catalogSame}. Câu tìm + top5 + điểm trùng (không / có từ vựng chỉ mục): ${same}/${rows.length}.`);
   for (const r of rows.filter((x) => !x.same)) console.log(`LỆCH ${r.code}: ${r.query} | ${r.pageQuery}`);
 }
