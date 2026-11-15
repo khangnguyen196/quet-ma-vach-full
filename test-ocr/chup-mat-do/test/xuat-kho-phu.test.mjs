@@ -24,6 +24,10 @@ test("buildKhoPhu: chỉ mã 13 số đầu 893 có tên, chưa có trong danh m
   assert.equal(body.meta.nguon, NGUON_VN_893);
   assert.equal(body.meta.soSanPham, 1);
   assert.equal(body.meta.ngayXuat, mod.KHO_PHU_DATE);
+  // vòng 7 (gợi ý 1 reviewer vòng 6): ngày bản xuất nguồn riêng (ngayXuat = ngày dựng kho phụ)
+  assert.equal(mod.BAN_XUAT, "2026-11-08");
+  assert.equal(body.meta.banXuat, "2026-11-08");
+  assert.deepEqual(Object.keys(body.meta).slice(-1), ["banXuat"]);
   assert.deepEqual(body.products, products);
   assert.ok(json.endsWith("\n]}\n"));
 });
