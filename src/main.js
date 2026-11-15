@@ -14,8 +14,10 @@ import {
 } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
-import { mergeFront, joinOffResults, isGuardError } from "./front-merge.js";
-import { createOffSearch, cleanQuery } from "./off-search.js";
+import { joinOffResults } from "./front-merge.js";
+import { loadExtra, buildExtraIndex, photoMerge } from "./front-extra.js";
+import { createOffSearch, cleanQuery, SEARCH_TIMEOUT_MS } from "./off-search.js";
+import { raceTimeout } from "./barcode.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
 import {
   getHistory, addHistory, getPantry, addToPantry, updatePantryItem, removeFromPantry,
@@ -910,6 +912,7 @@ window.addEventListener("pageshow", (e) => {
 // Đợt tu-dong vòng 4: sau T1, TỰ tìm thêm trên Open Food Facts (search.pl, src/off-search.js, một bộ cho cả phiên: cache
 // + ≤ 10 lượt / phút), gộp (mergeFront mặc định, lớp chặn DEFAULT_GUARD), rồi TỰ MỞ mục 1 kèm khung xác nhận
 // (showPhotoResult). OFF lỗi / hết giờ / bị giới hạn → kết quả danh mục.
+// Vòng 7: thêm kho phụ 893 (loadFrontExtra, src/front-extra.js) và gộp qua photoMerge (hàm thuần dùng chung với khung đo).
 let offSearchOne = null;
 /** MỘT bộ tìm OFF cho cả phiên (tạo ở lần tìm đầu: mở app không đụng tới localStorage / mạng). */
 function offSearch() {
@@ -1025,6 +1028,33 @@ function loadFrontSearch() {
   return frontSearchPromise;
 }
 
+// Kho phụ 893 (đợt tu-dong vòng 7, src/front-extra.js): sản phẩm OFF mã 893 có tên chưa có trong danh mục, file riêng
+// chup-mat-do/kho-phu-893.json (~830 KB, ngoài danh sách lưu sẵn). Tải lười ĐÚNG chỗ tải T1 + danh mục (lần chọn ảnh
+// đầu được gửi đi; "Không gửi" thì không tải; mở app không tải) hoặc khi bấm "Tìm lại". Lỗi tải chỉ ghi console, không
+// hiện câu lỗi, không làm lỗi loadFrontSearch: kết quả khi đó GIỐNG HỆT khi chưa có kho phụ.
+let frontExtra = null; // chỉ mục kho phụ (buildExtraIndex), dựng MỘT lần
+let frontExtraPromise = null;
+
+/** Tải kho phụ + dựng chỉ mục (cần t1: chờ loadFrontSearch). Giữ promise; lỗi thì xóa để lần sau thử lại. */
+function loadFrontExtra() {
+  if (frontExtra) return Promise.resolve(frontExtra);
+  if (!frontExtraPromise) {
+    const p = Promise.all([loadFrontSearch(), loadExtra()]).then(([s, store]) => {
+      const t0 = performance.now();
+      frontExtra = buildExtraIndex(s.t1, store.products);
+      // một dòng console để đo thời gian dựng trên máy thật (không hiện cho người dùng)
+      console.info(`Kho phụ: dựng chỉ mục ${frontExtra.length} sản phẩm trong ${Math.round(performance.now() - t0)} ms`);
+      return frontExtra;
+    });
+    frontExtraPromise = p;
+    p.catch((e) => {
+      console.error(e);
+      if (frontExtraPromise === p) frontExtraPromise = null;
+    });
+  }
+  return frontExtraPromise;
+}
+
 /** Ảnh sản phẩm (class front-img) trong el tải lỗi thì thay bằng "chưa có ảnh" (phần tử ngay sau ảnh). */
 function bindFrontImages(el) {
   el.querySelectorAll("img.front-img").forEach((img) => img.addEventListener("error", () => {
@@ -1048,6 +1078,13 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   }
   // Câu tìm làm sạch như khung đo vòng 3 (≤ 2 câu = ≤ 2 lượt, chạy song song, mỗi lượt hết giờ SEARCH_TIMEOUT_MS).
   const queries = cleanQuery(found.lines, { idf: s.rIndex.index.idf });
+  // Vòng 7: kho phụ chờ SONG SONG với OFF, tối đa SEARCH_TIMEOUT_MS (bằng hết giờ một lượt OFF; không có câu OFF cũng vậy).
+  // Đã có thì dùng ngay; chưa tải thì bắt đầu tải ("Tìm lại"). Hết giờ / lỗi → xi = null → kết quả GIỐNG HỆT khi chưa có
+  // kho phụ; lần tải dở vẫn chạy tiếp, lần sau dùng được.
+  const extraReady = frontExtra
+    ? Promise.resolve(frontExtra)
+    : raceTimeout(loadFrontExtra(), SEARCH_TIMEOUT_MS, () => new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua."))
+      .catch((e) => { console.warn(e?.message || e); return null; });
   let off = { ok: false, kind: "none" };
   if (queries.length) {
     const ctrl = new AbortController(); // chọn ảnh khác / đăng xuất thì hủy (frontAbort)
@@ -1057,25 +1094,20 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     off = joinOffResults(await Promise.all(queries.map((q) => os.search(q, { signal: ctrl.signal }))));
     if (frontAbort === ctrl) frontAbort = null;
   }
+  const xi = await extraReady;
   if (stale()) {
     if (id === frontTurn) sayFront(); // bỏ vì đã tra mã khác: xóa câu "Đang tìm…"
     return;
   }
-  let merged;
-  try {
-    merged = mergeFront(s.t1, s.rIndex, s.products, found, off); // lớp chặn mặc định (không truyền lockTop / offMax)
-  } catch (e) {
-    // Chỉ lỗi "giá trị chặn sai" mới quay về kết quả T1 (vòng 5, gợi ý 3 vòng 4); lỗi khác ném tiếp cho nơi gọi.
-    if (!isGuardError(e)) throw e;
-    console.error(e);
-    merged = mergeFront(s.t1, s.rIndex, s.products, found, null); // = đúng kết quả T1
-  }
+  // Gộp bằng hàm thuần dùng chung với khung đo (src/front-extra.js): lớp chặn mặc định, kho phụ nếu có; lỗi giá trị chặn
+  // → kết quả T1 (lỗi khác ném tiếp cho nơi gọi). offFailed tính trên kết quả OFF gốc (không tính kho phụ).
+  const { merged, offFailed } = photoMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products, xi }, found, off, { called: queries.length > 0 });
   const outcome = photoOutcome(merged);
   if (!fromRetry) {
     frontBox.innerHTML = renderFrontEdit({ lines: found.lines, reencoded });
     frontBox.hidden = false;
   }
-  const note = photoMessage({ kind: outcome.kind, offFailed: queries.length > 0 && !off.ok });
+  const note = photoMessage({ kind: outcome.kind, offFailed });
   sayFront(note.text, note.warn, true);
   if (outcome.kind === "open") {
     lookup(outcome.top.code, { photo: outcome }); // vẽ khung NGAY (trước khi gọi mạng), trang sản phẩm vẽ sau
@@ -1227,6 +1259,8 @@ frontFile.addEventListener("change", async (ev) => {
   // người dùng bấm "Không gửi" ở trên).
   const searchReady = loadFrontSearch();
   searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
+  // Vòng 7: kho phụ tải cùng lúc (cùng điều kiện như T1 + danh mục); lỗi chỉ ghi console (trong loadFrontExtra).
+  loadFrontExtra().catch(() => {});
 
   // Token lấy NGAY lúc gửi (thư viện tự làm mới), chỉ giữ trong lượt này, không ghi ra console.
   let token = "";

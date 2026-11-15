@@ -1,4 +1,5 @@
-// "Chụp mặt trước" (đợt tu-dong vòng 6, P5): KHO PHỤ 893 cách C1 — phần thuần, CHƯA nối vào app (nối ở vòng 7).
+// "Chụp mặt trước" (đợt tu-dong vòng 6, P5): KHO PHỤ 893 cách C1 — phần thuần. ĐÃ NỐI vào app ở vòng 7: main.js tải lười
+// (loadFrontExtra) và gộp qua photoMerge (dưới), cùng hàm khung đo cuối test-ocr/chup-mat-do/tu-dong-cuoi-do.mjs dùng.
 // Kho phụ = sản phẩm Open Food Facts mã 13 số đầu 893 có tên nhưng CHƯA có trong danh mục chính (danh-muc-vn.json),
 // file riêng public/chup-mat-do/kho-phu-893.json (sinh bằng test-ocr/chup-mat-do/xuat-kho-phu.mjs, dữ liệu ODbL), tải
 // lười, không vào danh sách lưu sẵn của service worker. Danh mục chính + chỉ mục T1 giữ nguyên.
@@ -7,11 +8,11 @@
 // OFF, không vào lockTop vị trí đầu, không bao giờ được offPromote đẩy lên vị trí 1 (cờ extra: true).
 // Không DOM ở cấp module, không import thư viện, không gọi mạng lúc nạp.
 //
-// Ví dụ (vòng 7 nối):
+// Ví dụ (như main.js vòng 7):
 //   const store = await loadExtra();                                    // { meta, products }
 //   const xi = buildExtraIndex(t1, store.products);                      // một lần
-//   const ex = searchExtra(rIndex.index, xi, found);                     // found = rankFromItems / rankFromText
-//   mergeFront(t1, rIndex, products, found, joinExtra(off, ex));         // off = joinOffResults(…) hoặc lỗi
+//   const { merged, offFailed } = photoMerge({ t1, rIndex, products, xi }, found, off, { called: true });
+//   // bên trong: mergeFront(t1, rIndex, products, found, joinExtra(off, searchExtra(rIndex.index, xi, found)))
 import { bm25DocScore, offDoc, mergeFront, isGuardError } from "./front-merge.js";
 import { frontImageUrl } from "./front-search.js";
 
