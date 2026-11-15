@@ -10,7 +10,8 @@ import {
 } from "./render.js";
 import {
   ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
-  photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, confirmAction, OFF_WAIT_TEXT
+  photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, confirmAction, OFF_WAIT_TEXT,
+  extraWaitMessage
 } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
@@ -1082,10 +1083,14 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   // extraP = lần tải của CHÍNH lượt này (bắt đầu ở sự kiện chọn ảnh / "Tìm lại"): mỗi lượt thử tải nhiều nhất 1 lần, lỗi
   // thì lượt sau thử lại. Đã có thì dùng ngay. Hết giờ / lỗi → xi = null → kết quả GIỐNG HỆT khi chưa có kho phụ; lần tải
   // dở vẫn chạy tiếp, lần sau dùng được.
+  // Vòng 8 (gợi ý 5 vòng 7): lỗi tải đã ghi console MỘT lần trong loadFrontExtra, ở đây chỉ ghi khi hết giờ.
+  const extraTimeout = new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua.");
+  let extraDone = !!frontExtra; // cho câu chờ kho phụ (vòng 8)
   const extraReady = frontExtra
     ? Promise.resolve(frontExtra)
-    : raceTimeout(Promise.resolve(extraP), SEARCH_TIMEOUT_MS, () => new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua."))
-      .catch((e) => { console.warn(e?.message || e); return null; });
+    : raceTimeout(Promise.resolve(extraP), SEARCH_TIMEOUT_MS, () => extraTimeout)
+      .catch((e) => { if (e === extraTimeout) console.warn(e.message); return null; });
+  extraReady.then(() => { extraDone = true; });
   let off = { ok: false, kind: "none" };
   if (queries.length) {
     const ctrl = new AbortController(); // chọn ảnh khác / đăng xuất thì hủy (frontAbort)
@@ -1095,6 +1100,10 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     off = joinOffResults(await Promise.all(queries.map((q) => os.search(q, { signal: ctrl.signal }))));
     if (frontAbort === ctrl) frontAbort = null;
   }
+  // Vòng 8 (gợi ý 1 vòng 7): OFF đã xong (hoặc không có câu OFF) mà kho phụ chưa xong, lượt chưa cũ → câu chờ riêng thay
+  // "Đang tìm thêm…". Không đổi thời gian chờ, thứ tự hay kết quả; kho phụ xong trước OFF thì không có câu này.
+  const extraWait = extraWaitMessage({ extraDone, stale: stale() });
+  if (extraWait) sayFront(extraWait);
   const xi = await extraReady;
   if (stale()) {
     if (id === frontTurn) sayFront(); // bỏ vì đã tra mã khác: xóa câu "Đang tìm…"

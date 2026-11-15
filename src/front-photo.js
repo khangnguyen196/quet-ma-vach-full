@@ -218,6 +218,18 @@ export function afterResultScroll({ hits, kind, fromRetry = false } = {}) {
 export const OFF_WAIT_TEXT = "Đang tìm thêm trên Open Food Facts…";
 /** Câu #frontMsg khi Open Food Facts lỗi / hết giờ / bị giới hạn (không cảnh báo đỏ: app vẫn có kết quả danh mục). */
 export const OFF_FAIL_TEXT = "Không tìm thêm được trên Open Food Facts, đang dùng danh mục trong app.";
+/** Câu #frontMsg khi OFF đã xong mà kho phụ (kho-phu-893.json, đợt tu-dong vòng 7) vẫn đang tải (vòng 8). */
+export const EXTRA_WAIT_TEXT = "Đang tải thêm dữ liệu sản phẩm, lần đầu có thể lâu hơn…";
+
+/**
+ * Câu chờ kho phụ (vòng 8, gợi ý 1 vòng 7): chỉ khi kho phụ CHƯA xong và lượt CHƯA cũ (đều đúng kiểu boolean false);
+ * còn lại (kho phụ đã xong, kể cả xong trước OFF; lượt đã cũ; giá trị lạ) → null = không đổi câu.
+ * Ví dụ: extraWaitMessage({ extraDone: false, stale: false }) → EXTRA_WAIT_TEXT
+ */
+export function extraWaitMessage(state) {
+  return state?.extraDone === false && state?.stale === false ? EXTRA_WAIT_TEXT : null;
+}
+
 /** Số gợi ý khác tối đa (ngoài mục 1 được tự mở). */
 export const PHOTO_OTHERS_MAX = 4;
 
