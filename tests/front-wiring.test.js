@@ -164,7 +164,15 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   test("(7) lookup: tự mở từ ảnh (chưa xác nhận) KHÔNG lưu lịch sử: addHistory( nằm sau một điều kiện có 'photo'", () => {
-    const [start, end] = functionBody("lookup");
+    // Thân hàm tính SAU danh sách tham số (lookup có tham số dạng { photo = null } = {}: dấu { đầu tiên không phải thân).
+    const m = /\bfunction\s+lookup\s*\(/.exec(CODE);
+    assert.ok(m, "main.js phải có function lookup(…)");
+    let depth = 0, close = -1;
+    for (let i = m.index + m[0].length - 1; i < CODE.length; i++) {
+      if (CODE[i] === "(") depth++;
+      else if (CODE[i] === ")" && --depth === 0) { close = i; break; }
+    }
+    const [start, end] = blockAt(CODE, close);
     const body = CODE.slice(start, end);
     const add = /\baddHistory\s*\(/.exec(body);
     assert.ok(add, "lookup phải còn lưu lịch sử (tra bình thường)");
