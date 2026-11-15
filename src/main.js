@@ -17,6 +17,7 @@ import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
 import { joinOffResults } from "./front-merge.js";
 import { loadExtra, buildExtraIndex, photoMerge } from "./front-extra.js";
+import { serverMerge } from "./front-server.js";
 import { createOffSearch, cleanQuery, SEARCH_TIMEOUT_MS } from "./off-search.js";
 import { raceTimeout } from "./barcode.js";
 import { authConfig, redirectUrl, cleanAuthParams, hasAuthParams, authErrorFromUrl, authView, authMessage, authErrorAfterSession } from "./auth.js";
@@ -914,6 +915,10 @@ window.addEventListener("pageshow", (e) => {
 // + ≤ 10 lượt / phút), gộp (mergeFront mặc định, lớp chặn DEFAULT_GUARD), rồi TỰ MỞ mục 1 kèm khung xác nhận
 // (showPhotoResult). OFF lỗi / hết giờ / bị giới hạn → kết quả danh mục.
 // Vòng 7: thêm kho phụ 893 (loadFrontExtra, src/front-extra.js) và gộp qua photoMerge (hàm thuần dùng chung với khung đo).
+// Đợt kho-lon vòng 4: máy chủ OCR trả thêm ứng viên (r.candidates, danh mục lớn trên máy chủ) = NGUỒN CHÍNH: có ứng viên
+// thì gộp T1 + ứng viên + OFF bằng serverMerge (src/front-server.js, cách G2-g3-w3), KHÔNG tải kho phụ; không có ứng
+// viên (máy chủ cũ / danh mục không nạp / tìm lỗi) thì đường cũ (photoMerge + kho phụ 893 + OFF), kho phụ bắt đầu tải
+// SAU khi máy chủ trả. "Tìm lại" luôn đi đường cũ (chưa tìm theo chữ trên máy chủ).
 let offSearchOne = null;
 /** MỘT bộ tìm OFF cho cả phiên (tạo ở lần tìm đầu: mở app không đụng tới localStorage / mạng). */
 function offSearch() {
@@ -1030,9 +1035,9 @@ function loadFrontSearch() {
 }
 
 // Kho phụ 893 (đợt tu-dong vòng 7, src/front-extra.js): sản phẩm OFF mã 893 có tên chưa có trong danh mục, file riêng
-// chup-mat-do/kho-phu-893.json (~830 KB, ngoài danh sách lưu sẵn). Tải lười ĐÚNG chỗ tải T1 + danh mục (lần chọn ảnh
-// đầu được gửi đi; "Không gửi" thì không tải; mở app không tải) hoặc khi bấm "Tìm lại". Lỗi tải chỉ ghi console, không
-// hiện câu lỗi, không làm lỗi loadFrontSearch: kết quả khi đó GIỐNG HỆT khi chưa có kho phụ.
+// chup-mat-do/kho-phu-893.json (~830 KB, ngoài danh sách lưu sẵn). Tải lười: kho-lon vòng 4 chỉ khi máy chủ OCR đã trả
+// về mà KHÔNG có ứng viên (đường cũ; "Không gửi" / mở app / máy chủ lỗi thì không tải) hoặc khi bấm "Tìm lại". Lỗi tải
+// chỉ ghi console, không hiện câu lỗi, không làm lỗi loadFrontSearch: kết quả khi đó GIỐNG HỆT khi chưa có kho phụ.
 let frontExtra = null; // chỉ mục kho phụ (buildExtraIndex), dựng MỘT lần
 let frontExtraPromise = null;
 
@@ -1069,9 +1074,12 @@ function bindFrontImages(el) {
  * xác nhận) hoặc "Chưa tìm thấy…". Luôn hiện khung "có thể nhầm" (CONFIDENCE_RULE của front-rank.js = luôn không chắc).
  * id: lượt frontTurn; lookupMark: số lượt lookup lúc bắt đầu (quét / nhập mã / bấm lịch sử trong lúc chờ → bỏ, không tự
  * mở); fromRetry: "Tìm lại" (không cuộn, không vẽ lại ô sửa chữ).
+ * server (kho-lon vòng 4): ứng viên máy chủ (r.candidates của sendOcr). Có phần tử → gộp bằng serverMerge, không chờ /
+ * không dùng kho phụ (extraP null), không câu chờ kho phụ. Không có / rỗng → đường cũ (photoMerge + kho phụ extraP).
  */
-async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded, extraP = null }) {
+async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded, extraP = null, server = null }) {
   const stale = () => id !== frontTurn || current !== lookupMark;
+  const useServer = Array.isArray(server) && server.length > 0;
   // Vòng 5 (gợi ý 1 vòng 4): đã chọn ảnh khác / tra mã khác trong lúc chờ máy chủ OCR → thôi, KHÔNG gọi Open Food Facts.
   if (stale()) {
     if (id === frontTurn) sayFront();
@@ -1084,12 +1092,15 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   // thì lượt sau thử lại. Đã có thì dùng ngay. Hết giờ / lỗi → xi = null → kết quả GIỐNG HỆT khi chưa có kho phụ; lần tải
   // dở vẫn chạy tiếp, lần sau dùng được.
   // Vòng 8 (gợi ý 5 vòng 7): lỗi tải đã ghi console MỘT lần trong loadFrontExtra, ở đây chỉ ghi khi hết giờ.
+  // Kho-lon vòng 4: đường máy chủ không dùng kho phụ (xi = null ngay, extraDone = true nên không có câu chờ kho phụ).
   const extraTimeout = new Error("Kho sản phẩm phụ tải quá lâu, lần này bỏ qua.");
-  let extraDone = !!frontExtra; // cho câu chờ kho phụ (vòng 8)
-  const extraReady = frontExtra
-    ? Promise.resolve(frontExtra)
-    : raceTimeout(Promise.resolve(extraP), SEARCH_TIMEOUT_MS, () => extraTimeout)
-      .catch((e) => { if (e === extraTimeout) console.warn(e.message); return null; });
+  let extraDone = useServer || !!frontExtra; // cho câu chờ kho phụ (vòng 8)
+  const extraReady = useServer
+    ? Promise.resolve(null)
+    : frontExtra
+      ? Promise.resolve(frontExtra)
+      : raceTimeout(Promise.resolve(extraP), SEARCH_TIMEOUT_MS, () => extraTimeout)
+        .catch((e) => { if (e === extraTimeout) console.warn(e.message); return null; });
   extraReady.then(() => { extraDone = true; });
   let off = { ok: false, kind: "none" };
   if (queries.length) {
@@ -1109,9 +1120,12 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     if (id === frontTurn) sayFront(); // bỏ vì đã tra mã khác: xóa câu "Đang tìm…"
     return;
   }
-  // Gộp bằng hàm thuần dùng chung với khung đo (src/front-extra.js): lớp chặn mặc định, kho phụ nếu có; lỗi giá trị chặn
-  // → kết quả T1 (lỗi khác ném tiếp cho nơi gọi). offFailed tính trên kết quả OFF gốc (không tính kho phụ).
-  const { merged, offFailed } = photoMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products, xi }, found, off, { called: queries.length > 0 });
+  // Gộp bằng hàm thuần dùng chung với khung đo: có ứng viên máy chủ → serverMerge (src/front-server.js, G2-g3-w3, trùng
+  // mergeByMethod của kho-lon-do.mjs); không → photoMerge (src/front-extra.js: lớp chặn mặc định, kho phụ nếu có). Lỗi
+  // giá trị chặn → kết quả T1 (lỗi khác ném tiếp cho nơi gọi). offFailed tính trên kết quả OFF gốc.
+  const { merged, offFailed } = useServer
+    ? serverMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products }, found, off, server, { called: queries.length > 0 })
+    : photoMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products, xi }, found, off, { called: queries.length > 0 });
   const outcome = photoOutcome(merged);
   if (!fromRetry) {
     frontBox.innerHTML = renderFrontEdit({ lines: found.lines, reencoded });
@@ -1272,9 +1286,7 @@ frontFile.addEventListener("change", async (ev) => {
   // người dùng bấm "Không gửi" ở trên).
   const searchReady = loadFrontSearch();
   searchReady.catch(() => {}); // lỗi xử lý ở dưới (tránh cảnh báo promise bị bỏ)
-  // Vòng 7: kho phụ tải cùng lúc (cùng điều kiện như T1 + danh mục); lỗi chỉ ghi console (trong loadFrontExtra).
-  const extraP = loadFrontExtra();
-  extraP.catch(() => {});
+  // Kho-lon vòng 4: KHÔNG tải kho phụ ở đây nữa (vòng 7 tải song song); chỉ tải khi máy chủ trả về mà không có ứng viên.
 
   // Token lấy NGAY lúc gửi (thư viện tự làm mới), chỉ giữ trong lượt này, không ghi ra console.
   let token = "";
@@ -1336,6 +1348,16 @@ frontFile.addEventListener("change", async (ev) => {
     return;
   }
 
+  // Kho-lon vòng 4: ứng viên máy chủ (đã kiểm dạng trong sendOcr, luôn là mảng). Có → nguồn chính, không tải kho phụ.
+  // Rỗng (máy chủ cũ / danh mục không nạp / tìm lỗi) → đường cũ: lúc này mới bắt đầu tải kho phụ (một lần mỗi lượt; lỗi
+  // chỉ ghi console trong loadFrontExtra). Đánh đổi: mạng chậm thì kho phụ có thể hết giờ ở lượt này (lần sau dùng được).
+  const serverCands = Array.isArray(r.candidates) ? r.candidates : [];
+  let extraP = null;
+  if (!serverCands.length) {
+    extraP = loadFrontExtra();
+    extraP.catch(() => {});
+  }
+
   sayFront("Đang tìm sản phẩm khớp…");
   let s;
   try {
@@ -1351,7 +1373,7 @@ frontFile.addEventListener("change", async (ev) => {
   // "nearest"; không đổi focus.)
   // Vòng 5 (NÊN SỬA 2 vòng 4): lỗi bất ngờ khi tìm / gộp / vẽ không để dòng trạng thái kẹt ở "Đang tìm thêm…".
   try {
-    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded, extraP });
+    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded, extraP, server: serverCands });
   } catch (e) {
     console.error(e);
     if (id === frontTurn) sayFront("Có lỗi khi tìm sản phẩm. Chọn ảnh lại.", true);

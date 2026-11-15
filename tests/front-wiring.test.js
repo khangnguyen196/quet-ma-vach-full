@@ -5,7 +5,7 @@
 // Chạy: npm test
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 const SRC = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
 
@@ -48,6 +48,10 @@ function stripComments(src) {
 const CODE = stripComments(SRC);
 // Vòng 7: phần gộp của showPhotoResult chuyển sang photoMerge (src/front-extra.js, thuần, dùng chung với khung đo).
 const FX = stripComments(readFileSync(new URL("../src/front-extra.js", import.meta.url), "utf8"));
+// Kho-lon vòng 4: gộp đường máy chủ ở src/front-server.js; luật (5) quét MỌI file src/*.js (đã bỏ comment).
+const FS = stripComments(readFileSync(new URL("../src/front-server.js", import.meta.url), "utf8"));
+const SRC_ALL = Object.fromEntries(readdirSync(new URL("../src/", import.meta.url)).filter((f) => f.endsWith(".js"))
+  .map((f) => [f, stripComments(readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8"))]));
 
 /** Từ vị trí `from`, tìm "{" đầu tiên và trả [vị trí "{", vị trí "}" khớp]. Bỏ qua ngoặc trong chuỗi. */
 function blockAt(code, from) {
@@ -144,13 +148,43 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   // Đợt tu-dong vòng 4: nối "tự mở sản phẩm".
-  test("(5) mọi lệnh gọi mergeFront(…) dùng lớp chặn mặc định: đúng 5 tham số, KHÔNG có tham số tùy chọn (kể cả qua biến)", () => {
-    // Vòng 7: main.js gộp qua photoMerge (luật 14), nên main.js có thể không còn mergeFront( nào; nếu có thì vẫn 5 tham số.
-    assert.deepEqual(rule5(CODE, { allowNone: true }), []);
+  test("(5) mọi lệnh gọi mergeFront(…) trong src/ đúng 5 tham số (lớp chặn mặc định), TRỪ đúng MỘT chỗ ở front-server.js truyền tham số 6 = SERVER_MERGE_OPTS; main.js không gọi mergeFront(", () => {
+    // Kho-lon vòng 4: quét mọi file src/*.js; chỗ duy nhất có tùy chọn là serverMerge (G2-g3-w3, hằng đóng băng).
+    assert.ok(Object.keys(SRC_ALL).includes("main.js") && Object.keys(SRC_ALL).includes("front-server.js"));
+    assert.deepEqual(rule5all(SRC_ALL), []);
     // photoMerge (front-extra.js): merge mặc định = mergeFront, mọi lời gọi merge(…) đúng 5 tham số
     assert.deepEqual(rule5fx(FX), []);
-    // main.js gọi photoMerge(ctx, found, off, { called: … }): không truyền merge / tùy chọn khác
+    // main.js gọi photoMerge(ctx, found, off, { called: … }) / serverMerge(ctx, found, off, server, { called: … }): không
+    // truyền merge / tùy chọn khác
     assert.deepEqual(rule5main(CODE), []);
+    assert.deepEqual(rule5server(CODE), []);
+  });
+  test("(5) kho-lon vòng 4: luật mergeFront toàn src/ + serverMerge bắt được chuỗi mẫu sai", () => {
+    const fs1 = "export const SERVER_MERGE_OPTS = Object.freeze({ offPromote: Object.freeze({ gap: 3, minWords: 3 }) });\n"
+      + "export function serverMerge(c, f, o, S) { try { m = mergeFront(a, b, c, f, j, SERVER_MERGE_OPTS); } catch (e) { m = mergeFront(a, b, c, f, null); } }";
+    const good = { "main.js": "const x = photoMerge(ctx, f, o, { called: true });", "front-server.js": fs1, "front-merge.js": "export function mergeFront(t1, r, p, f, o, opts = {}) {}" };
+    assert.deepEqual(rule5all(good), []);
+    for (const [label, files] of [
+      ["main.js gọi mergeFront( 5 tham số", { ...good, "main.js": "mergeFront(a, b, c, d, e);" }],
+      ["main.js gọi mergeFront( có offPromote", { ...good, "main.js": "mergeFront(a, b, c, d, e, { offPromote: { gap: 3, minWords: 3 } });" }],
+      ["main.js gọi mergeFront( với SERVER_MERGE_OPTS", { ...good, "main.js": "mergeFront(a, b, c, d, e, SERVER_MERGE_OPTS);" }],
+      ["front-server.js truyền object thay hằng", { ...good, "front-server.js": fs1.replace("j, SERVER_MERGE_OPTS)", "j, { offPromote: { gap: 3, minWords: 3 } })") }],
+      ["front-server.js 2 chỗ có tùy chọn", { ...good, "front-server.js": fs1.replace("f, null)", "f, null, SERVER_MERGE_OPTS)") }],
+      ["front-server.js không có chỗ nào", { ...good, "front-server.js": fs1.replace("j, SERVER_MERGE_OPTS)", "j)") }],
+      ["file khác dùng SERVER_MERGE_OPTS", { ...good, "front-extra.js": "m = mergeFront(a, b, c, d, e, SERVER_MERGE_OPTS);" }],
+      ["file khác 6 tham số", { ...good, "front-extra.js": "m = mergeFront(a, b, c, d, e, opts);" }],
+      ["SERVER_MERGE_OPTS không đóng băng", { ...good, "front-server.js": fs1.replace("Object.freeze({ offPromote", "({ offPromote") }],
+    ]) assert.notDeepEqual(rule5all(files), [], label);
+    const main = (call) => `async function showPhotoResult({ id }) {\n  const r = ${call};\n}`;
+    assert.deepEqual(rule5server(main("serverMerge(ctx, found, off, server, { called: queries.length > 0 })")), []);
+    for (const bad of [
+      "serverMerge(ctx, found, off, server)",
+      "serverMerge(ctx, found, off, server, { called: true, merge: f })",
+      "serverMerge(ctx, found, off, server, opts)",
+      "serverMerge(ctx, found, off, { called: true })",
+      "serverMerge(ctx, found, off, server, { called: true }, SERVER_MERGE_OPTS)",
+    ]) assert.notDeepEqual(rule5server(main(bad)), [], bad);
+    assert.notDeepEqual(rule5server("function x() {}"), [], "không gọi serverMerge");
   });
   test("(5) vòng 7: luật photoMerge bắt được chuỗi mẫu sai", () => {
     const fx = (body, params = "{ called, merge = mergeFront } = {}") => `export function photoMerge(ctx, found, off, ${params}) {\n${body}\n}`;
@@ -237,6 +271,8 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
 
   test("(10) photoMerge (front-extra.js, vòng 7 thay showPhotoResult): catch quanh merge chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
     assert.deepEqual(rule10(FX, "photoMerge", "merge"), []);
+    // kho-lon vòng 4: serverMerge (front-server.js) cũng vậy
+    assert.deepEqual(rule10(FS, "serverMerge", "mergeFront"), []);
   });
   test("(10) luật bắt được chuỗi mẫu sai (vòng 6, gợi ý 3 vòng 5)", () => {
     const wrap = (cat) => `async function showPhotoResult({ id }) {\n  let merged;\n  try { merged = mergeFront(a, b, c, d, e); } catch (e) {\n${cat}\n  }\n}`;
@@ -297,32 +333,41 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   // Vòng 7 (P3): nối kho phụ
-  test("(14) showPhotoResult gộp qua photoMerge, KHÔNG gọi mergeFront trực tiếp; main.js không import mergeFront", () => {
+  test("(14) showPhotoResult gộp qua photoMerge( (đường cũ) hoặc serverMerge( (đường máy chủ), KHÔNG gọi mergeFront trực tiếp; main.js không import mergeFront", () => {
     assert.deepEqual(rule14(CODE), []);
   });
   test("(14) luật bắt được chuỗi mẫu sai", () => {
     const fn = (body) => `async function showPhotoResult({ id }) {\n${body}\n}`;
-    assert.deepEqual(rule14(fn("const { merged, offFailed } = photoMerge(ctx, found, off, { called: true });")), []);
+    const both = "const { merged, offFailed } = useServer ? serverMerge(ctx, found, off, server, { called: true }) : photoMerge(ctx, found, off, { called: true });";
+    assert.deepEqual(rule14(fn(both)), []);
     for (const bad of [
       fn("let merged = mergeFront(a, b, c, d, e);"),
       fn("const r = photoMerge(ctx, found, off, { called: true });\nmerged = mergeFront(a, b, c, d, null);"),
       fn("const r = 1;"),
-      "import { mergeFront } from \"./front-merge.js\";\n" + fn("const r = photoMerge(ctx, found, off, { called: true });"),
+      "import { mergeFront } from \"./front-merge.js\";\n" + fn(both),
+      // kho-lon vòng 4: bỏ mất đường cũ (photoMerge) hoặc đường máy chủ (serverMerge)
+      fn("const r = serverMerge(ctx, found, off, server, { called: true });"),
+      fn("const r = photoMerge(ctx, found, off, { called: true });"),
+      fn(both + "\nmerged = mergeFront(a, b, c, d, e, SERVER_MERGE_OPTS);"),
+      "import { mergeFront, joinOffResults } from \"./front-merge.js\";\n" + fn(both),
     ]) assert.notDeepEqual(rule14(bad), [], bad);
   });
 
-  test("(15) kho phụ chỉ tải trong luồng chọn ảnh / Tìm lại: loadExtra( / loadFrontExtra( không ở cấp module hay lúc khởi động", () => {
+  test("(15) kho phụ chỉ tải trong luồng chọn ảnh (SAU await sendOcr(, nhánh không có ứng viên máy chủ) / Tìm lại: loadExtra( / loadFrontExtra( không ở cấp module hay lúc khởi động", () => {
     assert.deepEqual(rule15(CODE), []);
   });
   test("(15) luật bắt được chuỗi mẫu sai", () => {
-    const pickOk = "const s = loadFrontSearch();\nconst extraP = loadFrontExtra();\nextraP.catch(() => {});";
-    const base = (extra = "", pick = pickOk) => [
+    // Kho-lon vòng 4: trong handler chọn ảnh, loadFrontExtra( chỉ SAU await sendOcr( và trong nhánh KHÔNG có ứng viên
+    // máy chủ (if (!S.length) { … } với S lấy từ r.candidates).
+    const before = "const s = loadFrontSearch();";
+    const afterOk = "const S = Array.isArray(r.candidates) ? r.candidates : [];\nlet extraP = null;\nif (!S.length) {\nextraP = loadFrontExtra();\nextraP.catch(() => {});\n}";
+    const base = (extra = "", pick = before, after = afterOk) => [
       "// ghi chú nhắc tên loadFrontExtra trong comment không tính",
       "function loadFrontExtra() { return loadExtra().then((x) => x); }",
       "async function showPhotoResult({ id, extraP }) { const xi = await extraP; }",
       "function onFrontClick(ev) { const extraP = loadFrontExtra(); }",
       "function updateFrontButton() { }",
-      `frontFile.addEventListener("change", async (ev) => {\nif (!confirm("x")) return;\n${pick}\nconst r = await sendOcr({});\n});`,
+      `frontFile.addEventListener("change", async (ev) => {\nif (!confirm("x")) return;\n${pick}\nconst r = await sendOcr({});\nif (!r.ok) return;\n${after}\n});`,
       extra,
     ].join("\n");
     assert.deepEqual(rule15(base()), []);
@@ -331,14 +376,25 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
       base("updateFrontButton(); loadExtra();"),
       base().replace("function updateFrontButton() { }", "function updateFrontButton() { loadFrontExtra(); }"),
       base("initAuth().then(() => loadFrontExtra());"),
-      base("", "loadFrontExtra().catch(() => {});\nconst s = loadFrontSearch();"), // trước loadFrontSearch
-      base("", "const s = loadFrontSearch();"), // chọn ảnh không bắt đầu tải
+      base("", "loadFrontExtra().catch(() => {});\nconst s = loadFrontSearch();", "const S = r.candidates;"), // trước loadFrontSearch
+      base("", before, "const S = r.candidates;"), // chọn ảnh không bắt đầu tải (kể cả khi S rỗng)
       // Vòng 8 (NÊN SỬA 2 vòng 7): showPhotoResult tự tải kho phụ = lỗi "tải 2 lần mỗi lượt" (sửa ở 5b9cefe) quay lại
       base().replace("const xi = await extraP;", "const xi = await (extraP || loadFrontExtra());"),
       // Vòng 8 (gợi ý 2 vòng 7): tên hàm dùng làm tham chiếu, kể cả trong chỗ được phép
-      base("", pickOk + "\ns.then(loadFrontExtra);"),
+      base("", before + "\ns.then(loadFrontExtra);"),
       base().replace("const extraP = loadFrontExtra(); }", "const f = loadFrontExtra; f(); }"),
       base("const f = loadFrontExtra;"),
+      // Kho-lon vòng 4: tải song song như vòng 7 (trước await sendOcr()
+      base("", before + "\nconst extraP0 = loadFrontExtra();"),
+      // sau sendOcr nhưng không theo điều kiện (tải cả khi có ứng viên máy chủ)
+      base("", before, "const S = r.candidates;\nconst extraP = loadFrontExtra();"),
+      base("", before, afterOk + "\nloadFrontExtra();"),
+      // điều kiện ngược (tải khi CÓ ứng viên)
+      base("", before, afterOk.replace("if (!S.length)", "if (S.length)")),
+      // không lấy ứng viên máy chủ
+      base("", before, "const S = [];\nlet extraP = null;\nif (!S.length) {\nextraP = loadFrontExtra();\n}"),
+      // sendOcr không await (bắt đầu tải trước khi máy chủ trả)
+      base().replace("const r = await sendOcr({});", "const rp = sendOcr({}); const r = {};"),
     ]) assert.notDeepEqual(rule15(bad), [], bad);
   });
 
@@ -358,6 +414,32 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
       fn("const xi0 = await extraReady;\n" + ok), // sau khi đã chờ kho phụ
       fn(ok, { off: "off = 1;" }), // không có bước chờ OFF
     ]) assert.notDeepEqual(rule16(bad), [], bad);
+  });
+
+  // Kho-lon vòng 4: ứng viên máy chủ
+  test("(17) chọn ảnh dùng r.candidates TRƯỚC mọi loadFrontExtra( và truyền server: cho showPhotoResult; showPhotoResult gọi serverMerge( chỉ khi server có phần tử", () => {
+    assert.deepEqual(rule17(CODE), []);
+  });
+  test("(17) luật bắt được chuỗi mẫu sai", () => {
+    const sp = (guard = "const useServer = Array.isArray(server) && server.length > 0;", merge = "useServer ? serverMerge(ctx, found, off, server, { called: true }) : photoMerge(ctx, found, off, { called: true })") =>
+      `async function showPhotoResult({ id, extraP = null, server = null }) {\n${guard}\nconst { merged } = ${merge};\n}`;
+    const pick = (after = "const S = Array.isArray(r.candidates) ? r.candidates : [];\nlet extraP = null;\nif (!S.length) { extraP = loadFrontExtra(); }\nawait showPhotoResult({ id, extraP, server: S });") =>
+      `frontFile.addEventListener("change", async (ev) => {\nconst r = await sendOcr({});\n${after}\n});`;
+    const good = sp() + "\n" + pick();
+    assert.deepEqual(rule17(good), []);
+    assert.deepEqual(rule17(sp("const useServer = Array.isArray(server) && server.length > 0;", "photoMerge(ctx, found, off, { called: true });\nif (useServer) { merged = serverMerge(ctx, found, off, server, { called: true }); }") + "\n" + pick()), []);
+    for (const [label, code] of [
+      ["serverMerge( khi S rỗng (không điều kiện)", sp(undefined, "serverMerge(ctx, found, off, server, { called: true })") + "\n" + pick()],
+      ["điều kiện không xét số phần tử", sp("const useServer = Array.isArray(server);") + "\n" + pick()],
+      ["điều kiện >= 0 (S rỗng vẫn qua)", sp("const useServer = Array.isArray(server) && server.length >= 0;") + "\n" + pick()],
+      ["ternary ngược", sp(undefined, "!useServer ? photoMerge(ctx, found, off, { called: true }) : serverMerge(ctx, found, off, server, { called: true })") + "\n" + pick()],
+      ["if ngược", sp(undefined, "photoMerge(ctx, found, off, { called: true });\nif (!useServer) { merged = serverMerge(ctx, found, off, server, { called: true }); }") + "\n" + pick()],
+      ["không gọi serverMerge", sp(undefined, "photoMerge(ctx, found, off, { called: true })") + "\n" + pick()],
+      ["serverMerge ngoài showPhotoResult", good + "\nfunction x() { serverMerge(a, b, c, d, { called: true }); }"],
+      ["loadFrontExtra( trước r.candidates", sp() + "\n" + pick("let extraP = loadFrontExtra();\nconst S = r.candidates;\nawait showPhotoResult({ id, extraP, server: S });")],
+      ["không dùng r.candidates", sp() + "\n" + pick("const S = [];\nawait showPhotoResult({ id, server: S });")],
+      ["không truyền server: cho showPhotoResult", sp() + "\n" + pick("const S = r.candidates;\nawait showPhotoResult({ id });")],
+    ]) assert.notDeepEqual(rule17(code), [], label);
   });
 
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
@@ -448,12 +530,89 @@ function rule5main(code) {
   return out;
 }
 
-/** Luật (14): showPhotoResult có photoMerge( và KHÔNG có mergeFront(; main.js không import mergeFront. */
+/** Luật (5) kho-lon vòng 4: files = { tên file: mã đã bỏ comment } (mọi src/*.js). Mọi lời gọi mergeFront( (trừ dòng
+ *  khai báo function) đúng 5 tham số, TRỪ đúng MỘT lời gọi trong front-server.js có tham số 6 đúng tên hằng
+ *  SERVER_MERGE_OPTS (khai báo export const … = Object.freeze(…)); main.js không gọi mergeFront( nào. */
+function rule5all(files) {
+  const out = [];
+  let six = 0;
+  for (const [name, code] of Object.entries(files)) {
+    for (const m of code.matchAll(/\bmergeFront\s*\(/g)) {
+      if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 20), m.index))) continue; // khai báo
+      if (name === "main.js") { out.push(`main.js dòng ${lineOf(code, m.index)}: main.js không được gọi mergeFront( (gộp qua photoMerge / serverMerge)`); continue; }
+      const args = topArgs(code, m.index + m[0].length - 1);
+      if (args.length === 5) continue;
+      if (name === "front-server.js" && args.length === 6 && args[5] === "SERVER_MERGE_OPTS") { six++; continue; }
+      out.push(`${name} dòng ${lineOf(code, m.index)}: ${args.length} tham số (${args.join(" | ")})`);
+    }
+  }
+  if (six !== 1) out.push(`front-server.js phải có đúng 1 lời gọi mergeFront(…, SERVER_MERGE_OPTS) (có ${six})`);
+  if (!/\bexport\s+const\s+SERVER_MERGE_OPTS\s*=\s*Object\.freeze\s*\(/.test(files["front-server.js"] || "")) {
+    out.push("front-server.js phải khai báo export const SERVER_MERGE_OPTS = Object.freeze(…)");
+  }
+  return out;
+}
+
+/** Luật (5) phần serverMerge của main.js (kho-lon vòng 4): có ≥ 1 lời gọi serverMerge(…); mọi lời gọi đúng 5 tham số,
+ *  tham số 5 đúng dạng { called: … } (không truyền merge / tùy chọn gộp khác). */
+function rule5server(code) {
+  const calls = [...code.matchAll(/\bserverMerge\s*\(/g)];
+  if (!calls.length) return ["main.js không gọi serverMerge("];
+  const out = [];
+  for (const c of calls) {
+    const args = topArgs(code, c.index + c[0].length - 1);
+    if (args.length !== 5) { out.push(`dòng ${lineOf(code, c.index)}: serverMerge ${args.length} tham số`); continue; }
+    if (!/^\{\s*called\s*:[^,{}]+\}$/.test(args[4])) out.push(`dòng ${lineOf(code, c.index)}: tham số 5 phải là { called: … } (nhận ${args[4]})`);
+  }
+  return out;
+}
+
+/** Luật (17) kho-lon vòng 4: handler chọn ảnh dùng <r>.candidates TRƯỚC mọi loadFrontExtra( và truyền server: cho
+ *  showPhotoResult; trong showPhotoResult có const <v> = Array.isArray(server) && server.length > 0; và MỌI serverMerge(
+ *  nằm trong nhánh đúng của <v> (<v> ? serverMerge(…) hoặc if (<v>) { … serverMerge(… }); ngoài showPhotoResult không có
+ *  serverMerge(. */
+function rule17(code) {
+  code = stripComments(code);
+  const out = [];
+  const pick = pickBody(code);
+  if (!pick) out.push("không tìm thấy handler chọn ảnh");
+  else {
+    const body = code.slice(pick[0], pick[1]);
+    const cand = /\b\w+\.candidates\b/.exec(body);
+    if (!cand) out.push("handler chọn ảnh phải dùng ứng viên máy chủ (r.candidates)");
+    else for (const m of body.matchAll(/\bloadFrontExtra\s*\(/g)) if (m.index < cand.index) out.push("loadFrontExtra( đứng trước r.candidates");
+    const call = /\bshowPhotoResult\s*\(/.exec(body);
+    if (!call || !/\bserver\s*:/.test(topArgs(body, call.index + call[0].length - 1).join(","))) out.push("handler chọn ảnh phải truyền server: <ứng viên> cho showPhotoResult");
+  }
+  const sp = bodyAfterParams(code, "showPhotoResult");
+  if (!sp) return [...out, "không có function showPhotoResult(…)"];
+  const g = /\bconst\s+(\w+)\s*=\s*Array\.isArray\(\s*server\s*\)\s*&&\s*server\.length\s*>\s*0\s*;/.exec(sp);
+  if (!g) out.push("showPhotoResult phải có const <v> = Array.isArray(server) && server.length > 0;");
+  const calls = [...sp.matchAll(/\bserverMerge\s*\(/g)];
+  if (!calls.length) out.push("showPhotoResult phải gọi serverMerge(");
+  if (g) {
+    const ifs = [...sp.matchAll(new RegExp(`\\bif\\s*\\(\\s*${g[1]}\\s*\\)\\s*\\{`, "g"))].map((m) => blockAt(sp, m.index + m[0].length - 1));
+    for (const c of calls) {
+      if (c.index < g.index) { out.push("serverMerge( đứng trước điều kiện có ứng viên"); continue; }
+      const tern = new RegExp(`(?<![!\\w.])${g[1]}\\s*\\?\\s*$`).test(sp.slice(0, c.index));
+      if (!tern && !ifs.some(([o, e]) => c.index > o && c.index < e)) out.push(`serverMerge( ngoài nhánh ${g[1]} (có ứng viên máy chủ)`);
+    }
+  }
+  const at = code.indexOf(sp);
+  for (const m of code.matchAll(/\bserverMerge\s*\(/g)) {
+    if (m.index < at || m.index > at + sp.length) out.push(`dòng ${lineOf(code, m.index)}: serverMerge( ngoài showPhotoResult`);
+  }
+  return out;
+}
+
+/** Luật (14): showPhotoResult có photoMerge( (đường cũ) VÀ serverMerge( (đường máy chủ, kho-lon vòng 4), KHÔNG có
+ *  mergeFront(; main.js không import mergeFront. */
 function rule14(code) {
   const body = bodyAfterParams(code, "showPhotoResult");
   if (!body) return ["không có function showPhotoResult(…)"];
   const out = [];
-  if (!/\bphotoMerge\s*\(/.test(body)) out.push("showPhotoResult phải gộp qua photoMerge(");
+  if (!/\bphotoMerge\s*\(/.test(body)) out.push("showPhotoResult phải gộp qua photoMerge( (đường cũ)");
+  if (!/\bserverMerge\s*\(/.test(body)) out.push("showPhotoResult phải gộp qua serverMerge( (đường máy chủ)");
   if (/\bmergeFront\s*\(/.test(body)) out.push("showPhotoResult gọi mergeFront( trực tiếp");
   if (/\bimport\s*\{[^}]*\bmergeFront\b[^}]*\}/.test(code)) out.push("main.js import mergeFront");
   return out;
@@ -507,13 +666,22 @@ function rule15(code) {
   }
   if (pick) {
     const body = code.slice(pick[0], pick[1]);
-    const lx = /\bloadFrontExtra\s*\(/.exec(body);
+    const lxs = [...body.matchAll(/\bloadFrontExtra\s*\(/g)];
     const ls = /\bloadFrontSearch\s*\(/.exec(body);
     const cf = /\bconfirm\s*\(/.exec(body);
-    if (!lx) out.push("handler chọn ảnh phải bắt đầu tải kho phụ (loadFrontExtra()");
-    else {
+    const send = /\bawait\s+sendOcr\s*\(/.exec(body);
+    if (!lxs.length) out.push("handler chọn ảnh phải bắt đầu tải kho phụ (loadFrontExtra() ở nhánh không có ứng viên máy chủ");
+    // Kho-lon vòng 4: chỉ tải SAU khi máy chủ trả (await sendOcr() và trong nhánh if (!<S>.length) { … }, S = …r.candidates…
+    const sv = /\bconst\s+(\w+)\s*=[^;]*\b\w+\.candidates\b[^;]*;/.exec(body);
+    const guard = sv ? new RegExp(`\\bif\\s*\\(\\s*!\\s*${sv[1]}\\.length\\s*\\)\\s*\\{`).exec(body) : null;
+    const span = guard ? blockAt(body, guard.index + guard[0].length - 1) : null;
+    if (!sv) out.push("handler chọn ảnh phải lấy ứng viên máy chủ (const S = … r.candidates …)");
+    else if (!guard) out.push(`handler chọn ảnh thiếu nhánh if (!${sv[1]}.length) { … } (không có ứng viên máy chủ)`);
+    for (const lx of lxs) {
       if (!ls || lx.index < ls.index) out.push("loadFrontExtra( phải đứng sau loadFrontSearch( trong handler chọn ảnh");
       if (!cf || lx.index < cf.index) out.push("loadFrontExtra( phải đứng sau câu hỏi gửi nguyên bản (confirm()");
+      if (!send || lx.index < send.index) out.push("loadFrontExtra( phải đứng sau await sendOcr( (máy chủ đã trả)");
+      if (span && !(lx.index > span[0] && lx.index < span[1])) out.push("loadFrontExtra( ngoài nhánh không có ứng viên máy chủ");
     }
   }
   return out;
