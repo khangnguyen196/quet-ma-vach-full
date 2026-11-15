@@ -119,6 +119,21 @@ describe("confirmStatusText: câu sau khi bấm 'Đúng' theo kết quả lưu l
   });
 });
 
+describe("confirmAction: bấm 'Đúng' (vòng 6, NÊN SỬA 3 vòng 5)", () => {
+  test("lượt 'Tìm lại' còn chạy → hủy lượt đó + ghi câu đã xác nhận", () => {
+    assert.deepEqual(fp.confirmAction({ retryRunning: true, msgIsResult: false }), { cancelRetry: true, setMsg: true });
+    assert.deepEqual(fp.confirmAction({ retryRunning: true, msgIsResult: true }), { cancelRetry: true, setMsg: true });
+  });
+  test("không có lượt 'Tìm lại': chỉ đổi #frontMsg khi đang là câu KẾT QUẢ (không xóa câu tiến độ của lượt ảnh mới)", () => {
+    assert.deepEqual(fp.confirmAction({ retryRunning: false, msgIsResult: true }), { cancelRetry: false, setMsg: true });
+    assert.deepEqual(fp.confirmAction({ retryRunning: false, msgIsResult: false }), { cancelRetry: false, setMsg: false });
+  });
+  test("thiếu / sai kiểu → không hủy, không đổi câu (chỉ true mới tính)", () => {
+    assert.deepEqual(fp.confirmAction(), { cancelRetry: false, setMsg: false });
+    assert.deepEqual(fp.confirmAction({ retryRunning: 1, msgIsResult: "x" }), { cancelRetry: false, setMsg: false });
+  });
+});
+
 describe("afterResultScroll: thêm kind của luồng tự mở (vòng 4)", () => {
   test("lần chọn ảnh: open → 'confirm' (khung xác nhận), none → 'none' (câu Chưa tìm thấy)", () => {
     assert.equal(fp.afterResultScroll({ kind: "open", fromRetry: false }), "confirm");

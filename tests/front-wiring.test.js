@@ -208,18 +208,51 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
 
   test("(10) showPhotoResult: catch quanh mergeFront chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
-    const body = bodyAfterParams(CODE, "showPhotoResult");
-    assert.ok(body, "main.js phải có function showPhotoResult(…)");
-    const mf = /\bmergeFront\s*\(/.exec(body);
-    assert.ok(mf);
-    const cm = /\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g;
-    cm.lastIndex = mf.index;
-    const m = cm.exec(body);
-    assert.ok(m, "phải có catch sau mergeFront(");
-    const [o, c] = blockAt(body, m.index + m[0].length - 1);
-    const cat = body.slice(o, c);
-    assert.match(cat, new RegExp(`\\bisGuardError\\s*\\(\\s*${m[1]}\\s*\\)`), "catch phải hỏi isGuardError(lỗi)");
-    assert.match(cat, new RegExp(`\\bthrow\\s+${m[1]}\\b`), "lỗi khác phải ném tiếp");
+    assert.deepEqual(rule10(CODE), []);
+  });
+  test("(10) luật bắt được chuỗi mẫu sai (vòng 6, gợi ý 3 vòng 5)", () => {
+    const wrap = (cat) => `async function showPhotoResult({ id }) {\n  let merged;\n  try { merged = mergeFront(a, b, c, d, e); } catch (e) {\n${cat}\n  }\n}`;
+    for (const bad of [
+      "if (isGuardError(e)) throw e;\nconsole.error(e);",
+      "console.error(e);",
+      "if (!isGuardError(e)) console.log(e);\nthrow e;",
+      "if (!isGuardError(e)) { console.error(e); }",
+    ]) assert.notDeepEqual(rule10(wrap(bad)), [], bad);
+    for (const ok of ["if (!isGuardError(e)) throw e;\nconsole.error(e);", "if (!isGuardError(e)) { throw e; }\nconsole.error(e);"]) {
+      assert.deepEqual(rule10(wrap(ok)), [], ok);
+    }
+  });
+
+  // Vòng 6: NÊN SỬA 3 + gợi ý 4 của reviewer vòng 5.
+  test("(12) confirmPhoto: hỏi confirmAction; cancelRetry → frontAbort?.abort() + ++frontTurn; câu 'confirmed' chỉ khi setMsg; 'Tìm lại' nhớ retryTurn", () => {
+    assert.deepEqual(rule12(CODE), []);
+  });
+  test("(12) luật bắt được chuỗi mẫu sai", () => {
+    const fn = (body) => `function confirmPhoto() {\n  const p = photoPending;\n  if (!p) return;\n${body}\n}\nfunction onFrontClick(ev) {\n  frontAbort?.abort();\n  const id = ++frontTurn;\n  retryTurn = id;\n}`;
+    const good = "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\n"
+      + "if (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; }\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }";
+    assert.deepEqual(rule12(fn(good)), []);
+    for (const bad of [
+      // câu "confirmed" ghi không điều kiện (xóa câu tiến độ của lượt ảnh mới)
+      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; }\nconst m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn);",
+      // không hủy lượt "Tìm lại"
+      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }",
+      // hủy mà không tăng frontTurn
+      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.cancelRetry) { frontAbort?.abort(); }\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }",
+      // không hỏi confirmAction
+      "const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn);",
+    ]) assert.notDeepEqual(rule12(fn(bad)), [], bad);
+    assert.notDeepEqual(rule12(fn(good).replace("retryTurn = id;", "")), [], "'Tìm lại' phải nhớ retryTurn");
+  });
+
+  test("(13) showPhotoResult nhánh 'Chưa tìm thấy' (renderPhotoNone) đặt shownLookupId = 0 như clearPhotoResult", () => {
+    assert.deepEqual(rule13(CODE), []);
+  });
+  test("(13) luật bắt được chuỗi mẫu sai", () => {
+    const fn = (els) => `async function showPhotoResult({ id }) {\n  if (x) { lookup(1); } else {\n${els}\n  }\n}`;
+    assert.deepEqual(rule13(fn("shownProduct = null;\nshownLookupId = 0;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
+    assert.notDeepEqual(rule13(fn("shownProduct = null;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
+    assert.notDeepEqual(rule13(fn("shownProduct = null;\nshownLookupId === 0;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
   });
 
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
@@ -275,6 +308,76 @@ function rule5(code) {
     if (args.length !== 5) out.push(`dòng ${lineOf(code, m.index)}: ${args.length} tham số (${args.join(" | ")})`);
   }
   return out;
+}
+
+/** Luật (10): trong showPhotoResult, catch đầu tiên sau mergeFront( có `if (!isGuardError(<lỗi>)) throw <lỗi>` (ném tiếp
+ *  lỗi KHÁC lỗi giá trị chặn). Trả danh sách vi phạm. */
+function rule10(code) {
+  const body = bodyAfterParams(code, "showPhotoResult");
+  if (!body) return ["không có function showPhotoResult(…)"];
+  const mf = /\bmergeFront\s*\(/.exec(body);
+  if (!mf) return ["showPhotoResult không gọi mergeFront("];
+  const cm = /\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g;
+  cm.lastIndex = mf.index;
+  const m = cm.exec(body);
+  if (!m) return ["không có catch sau mergeFront("];
+  const [o, c] = blockAt(body, m.index + m[0].length - 1);
+  const cat = body.slice(o, c + 1);
+  const e = m[1];
+  const ok = new RegExp(`\\bisGuardError\\s*\\(\\s*${e}\\s*\\)`).test(cat) && new RegExp(`\\bthrow\\s+${e}\\b`).test(cat);
+  return ok ? [] : [`catch phải hỏi isGuardError(${e}) và ném tiếp ${e}`];
+}
+
+/** Luật (12): confirmPhoto hỏi confirmAction(…); trong khối if (….cancelRetry) có frontAbort?.abort() và ++frontTurn;
+ *  photoFollowMessage("confirmed") chỉ nằm trong khối if (….setMsg); handler "Tìm lại" (onFrontClick) gán retryTurn. */
+function rule12(code) {
+  const out = [];
+  const m = /\bfunction\s+confirmPhoto\s*\(/.exec(code);
+  if (!m) return ["không có function confirmPhoto(…)"];
+  const [s, e] = blockAt(code, m.index + m[0].length);
+  const body = code.slice(s, e + 1);
+  const ca = /\b(\w+)\s*=\s*confirmAction\s*\(/.exec(body);
+  if (!ca) return ["confirmPhoto phải gọi confirmAction(…) và giữ kết quả"];
+  const v = ca[1];
+  const ifBlock = (field) => {
+    const r = new RegExp(`\\bif\\s*\\(\\s*${v}\\.${field}\\s*\\)\\s*\\{`).exec(body);
+    return r ? body.slice(...blockAt(body, r.index + r[0].length - 1)) : null;
+  };
+  const cancel = ifBlock("cancelRetry");
+  if (!cancel) out.push(`thiếu if (${v}.cancelRetry) { … }`);
+  else {
+    if (!/\bfrontAbort\s*\?\.\s*abort\s*\(\s*\)/.test(cancel)) out.push("khối cancelRetry phải gọi frontAbort?.abort()");
+    if (!/\+\+\s*frontTurn\b|\bfrontTurn\s*\+\+|\bfrontTurn\s*\+=\s*1\b/.test(cancel)) out.push("khối cancelRetry phải tăng frontTurn");
+  }
+  const msg = ifBlock("setMsg");
+  const confirmed = [...body.matchAll(/\bphotoFollowMessage\s*\(\s*["']confirmed["']\s*\)/g)];
+  if (!confirmed.length) out.push("confirmPhoto phải dùng photoFollowMessage(\"confirmed\")");
+  if (!msg) out.push(`thiếu if (${v}.setMsg) { … }`);
+  else {
+    const [mo] = [body.indexOf(msg)];
+    for (const c of confirmed) if (c.index < mo || c.index > mo + msg.length) out.push("photoFollowMessage(\"confirmed\") nằm ngoài khối setMsg");
+  }
+  const click = /\bfunction\s+onFrontClick\s*\(/.exec(code);
+  const cb = click ? code.slice(...blockAt(code, click.index + click[0].length)) : "";
+  if (!/\bretryTurn\s*=(?!=)/.test(cb)) out.push("onFrontClick (\"Tìm lại\") phải gán retryTurn = lượt mới");
+  return out;
+}
+
+/** Luật (13): trong showPhotoResult, khối có renderPhotoNone( cũng gán shownLookupId = 0. */
+function rule13(code) {
+  const body = bodyAfterParams(code, "showPhotoResult");
+  if (!body) return ["không có function showPhotoResult(…)"];
+  const none = /\brenderPhotoNone\s*\(/.exec(body);
+  if (!none) return ["showPhotoResult không gọi renderPhotoNone("];
+  // khối { … } nhỏ nhất chứa renderPhotoNone(
+  let best = null;
+  for (const b of body.matchAll(/\{/g)) {
+    let blk;
+    try { blk = blockAt(body, b.index); } catch { continue; }
+    if (blk[0] < none.index && blk[1] > none.index && (!best || blk[1] - blk[0] < best[1] - best[0])) best = blk;
+  }
+  const blk = best ? body.slice(best[0], best[1]) : "";
+  return /\bshownLookupId\s*=(?!=)\s*0\b/.test(blk) ? [] : ["nhánh renderPhotoNone phải đặt shownLookupId = 0"];
 }
 
 /** Luật (7): trong thân lookup, mọi addHistory( nằm trong khối then của if (!photo) { … } (điều kiện đúng "!photo").

@@ -17,6 +17,16 @@ function fakeClock() {
 const madeDirs = [];
 // Windows: thư mục tạm ở ổ D (luật đợt tu-dong: không ghi ổ C; TEMP của máy nằm ở ổ C), như tu-dong-do.test.mjs.
 const TMP_BASE = process.platform === "win32" ? "D:\\tmp\\tu-dong\\test-tmp" : os.tmpdir();
+
+// Vòng 6 (gợi ý 5 reviewer vòng 5): thư mục tạm lấy từ biến môi trường QMV_TEST_TMP; không có thì D:\tmp\tu-dong\test-tmp
+// nếu máy có ổ D, không thì os.tmpdir().
+test("tmpBase: QMV_TEST_TMP trước; không có → D:\\tmp\\tu-dong\\test-tmp nếu có ổ D; không thì os.tmpdir()", () => {
+  assert.equal(typeof tmpBase, "function");
+  assert.equal(tmpBase({ QMV_TEST_TMP: "E:\\x\\y" }, () => true), "E:\\x\\y");
+  assert.equal(tmpBase({ QMV_TEST_TMP: "  " }, () => true), "D:\\tmp\\tu-dong\\test-tmp");
+  assert.equal(tmpBase({}, () => true), "D:\\tmp\\tu-dong\\test-tmp");
+  assert.equal(tmpBase({}, () => false), os.tmpdir());
+});
 function tmpDir() {
   fs.mkdirSync(TMP_BASE, { recursive: true });
   const d = fs.mkdtempSync(path.join(TMP_BASE, "off-test-"));
