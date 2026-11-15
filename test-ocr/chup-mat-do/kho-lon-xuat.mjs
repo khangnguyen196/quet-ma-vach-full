@@ -134,6 +134,11 @@ async function watchCodes() {
   return { anh30: ALL_CODES, diet7up: ["8934588752117"], caDung6: foreign.map((f) => f.code), muoiGia: [SALT_CODE] };
 }
 
+/** Luồng phụ thoát với mã code: có phải lỗi (thoát mã 1) không? Sau khi đã xong (finished: terminate) thì không. */
+export function workerExitFails(code, finished) {
+  return !finished && code !== 0;
+}
+
 async function scanForeign(gzFile, nW, maxBytes = Infinity) {
   const t0 = Date.now();
   const foreign = [];
@@ -143,12 +148,20 @@ async function scanForeign(gzFile, nW, maxBytes = Infinity) {
   const waiters = [];
   let pending = 0;
   let idle = null;
+  let finished = false;
   for (const w of pool) {
     busy.set(w, 0);
     // vòng 2: luồng phụ lỗi → báo và thoát mã 1 (không treo chờ khúc không bao giờ xong)
     w.on("error", (e) => {
       console.error(`Luồng phụ lỗi: ${e?.stack || e}`);
       process.exit(1);
+    });
+    // vòng 3: luồng phụ thoát mã ≠ 0 (vd hết bộ nhớ, không phát "error") khi chưa xong → thoát mã 1, không treo
+    w.on("exit", (code) => {
+      if (workerExitFails(code, finished)) {
+        console.error(`Luồng phụ thoát mã ${code} khi chưa xong`);
+        process.exit(1);
+      }
     });
     w.on("message", (m) => {
       if (m.type !== "klx-chunk") return;
@@ -196,6 +209,7 @@ async function scanForeign(gzFile, nW, maxBytes = Infinity) {
   }
   if (accLen) await send(Buffer.concat(acc, accLen));
   if (pending > 0) await new Promise((r) => { idle = r; });
+  finished = true;  // terminate() làm luồng thoát mã 1: không coi là lỗi
   for (const w of pool) await w.terminate();
   return { foreign, lines, gbChu: +(bytes / 1e9).toFixed(2), minutes: +((Date.now() - t0) / 60000).toFixed(1) };
 }

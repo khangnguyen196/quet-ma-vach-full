@@ -221,3 +221,43 @@ test("quantile (nearest rank)", () => {
   assert.equal(quantile(Array.from({ length: 30 }, (_, i) => i + 1), 0.95), 29);
   assert.equal(quantile([], 0.95), null);
 });
+
+// ---------------- vòng 3: không ghi đè số đã có, luồng phụ thoát mã ≠ 0 ----------------
+test("kho-lon-do --ban: file ra đã có thì chặn, trừ khi có --ghi-de", async () => {
+  const { outFiles, overwriteBlocked, parseArgs } = await import("../kho-lon-do.mjs");
+  const files = outFiles("ket-qua", "v3", ["a", "b", "c"]);
+  assert.deepEqual(files, [path.join("ket-qua", "v3-do-abc.json"), path.join("ket-qua", "v3-tung-ca-abc.json")]);
+  const has = (f) => f.endsWith("v3-do-abc.json");
+  assert.deepEqual(overwriteBlocked(files, { exists: has }), [files[0]]);
+  assert.deepEqual(overwriteBlocked(files, { exists: has, overwrite: true }), []);
+  assert.deepEqual(overwriteBlocked(files, { exists: () => false }), []);
+  const p = parseArgs(["--ban", "v3", "--ghi-de", "--muc", "c"]);
+  assert.equal(p.ban, "v3");
+  assert.equal(p.overwrite, true);
+  assert.deepEqual(p.levelNames, ["c"]);
+  assert.equal(parseArgs([]).overwrite, false);
+  assert.equal(parseArgs([]).ban, "v2");
+});
+
+test("kho-lon-do chạy thật với --ban trùng file đã có: dừng mã 2, không ghi", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kld-"));
+  const f = path.join(dir, "v9-do-a.json");
+  fs.writeFileSync(f, "cu");
+  const script = path.resolve(import.meta.dirname, "..", "kho-lon-do.mjs");
+  const r = spawnSync(process.execPath, [script, "--ban", "v9", "--muc", "a", "--out", dir], { encoding: "utf8" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /--ghi-de/);
+  assert.equal(fs.readFileSync(f, "utf8"), "cu");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("kho-lon-xuat: luồng phụ thoát mã ≠ 0 khi chưa xong → lỗi; sau terminate thì không", async () => {
+  const { workerExitFails } = await import("../kho-lon-xuat.mjs");
+  assert.equal(workerExitFails(1, false), true);
+  assert.equal(workerExitFails(134, false), true);
+  assert.equal(workerExitFails(0, false), false);
+  assert.equal(workerExitFails(1, true), false);
+});

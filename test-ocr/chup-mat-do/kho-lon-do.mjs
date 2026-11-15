@@ -254,18 +254,51 @@ export function quantile(xs, p) {
   return s[Math.min(s.length - 1, Math.max(0, Math.ceil(p * s.length) - 1))];
 }
 
+// ---- đọc tham số / ghi file (KHÔNG thuộc khối luật; vòng 3: không ghi đè số đã có) ----
+/** Hai file ra của một lượt đo: <ban>-do-<mức>.json và <ban>-tung-ca-<mức>.json. */
+export function outFiles(outDir, ban, levelNames) {
+  const tag = levelNames.join("");
+  return [path.join(outDir, `${ban}-do-${tag}.json`), path.join(outDir, `${ban}-tung-ca-${tag}.json`)];
+}
+
+/** File ra đã có mà không có cờ --ghi-de → danh sách file chặn (rỗng = được ghi). */
+export function overwriteBlocked(files, { overwrite = false, exists = fs.existsSync } = {}) {
+  return overwrite ? [] : files.filter((f) => exists(f));
+}
+
+/** Đọc tham số dòng lệnh: --ghi-de là cờ (không nhận giá trị). */
+export function parseArgs(argv) {
+  const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
+  return {
+    levelNames: arg("--muc", LEVEL_NAMES.join(",")).split(",").filter(Boolean),
+    dmDir: arg("--danh-muc", "D:\\tmp\\kho-lon\\danh-muc"),
+    cacheDir: arg("--cache", "D:\\tmp\\tu-dong\\cache-off"),
+    outDir: arg("--out", "D:\\tmp\\kho-lon\\ket-qua"),
+    ban: arg("--ban", "v2"),
+    overwrite: argv.includes("--ghi-de"),
+    arg,
+  };
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const argv = process.argv.slice(2);
-  const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
-  const levelNames = arg("--muc", LEVEL_NAMES.join(",")).split(",").filter(Boolean);
-  const dmDir = arg("--danh-muc", "D:\\tmp\\kho-lon\\danh-muc");
-  const cacheDir = arg("--cache", "D:\\tmp\\tu-dong\\cache-off");
-  const outDir = arg("--out", "D:\\tmp\\kho-lon\\ket-qua");
+  const { levelNames, dmDir, cacheDir, outDir, ban, overwrite, arg } = parseArgs(argv);
   // vòng 2: nhãn tên file ra (v1 = số vòng 1, không ghi đè); ghi kèm mã commit khung đo
-  const ban = arg("--ban", "v2");
   if (!/^v\d{1,2}$/.test(ban)) throw new Error(`--ban phải dạng vN (nhận ${ban})`);
+  // vòng 3: file ra đã có → dừng mã 2, trừ khi có cờ --ghi-de rõ ràng
+  const [outFile, caseFile] = outFiles(outDir, ban, levelNames);
+  const blocked = overwriteBlocked([outFile, caseFile], { overwrite });
+  if (blocked.length) {
+    console.error(`Đã có file ra: ${blocked.join(", ")}. Đổi --ban hoặc thêm --ghi-de nếu thật sự muốn ghi đè.`);
+    process.exit(2);
+  }
   let khungDoSha = null;
-  try { khungDoSha = (await import("node:child_process")).execSync("git rev-parse HEAD", { cwd: ROOT }).toString().trim(); } catch { khungDoSha = null; }
+  let dirty = null;  // vòng 3: true = worktree có thay đổi chưa commit lúc đo (git status --porcelain khác rỗng)
+  try {
+    const cp = await import("node:child_process");
+    khungDoSha = cp.execSync("git rev-parse HEAD", { cwd: ROOT }).toString().trim();
+    dirty = cp.execSync("git status --porcelain", { cwd: ROOT }).toString().trim() !== "";
+  } catch { /* không có git */ }
   fs.mkdirSync(outDir, { recursive: true });
   const app = await loadApp();
   const { t1, fr, catalog, rIndex } = app;
@@ -445,14 +478,13 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     return [s, { n: rs.length, coCau: rs.filter((c) => c.queries.length).length, duCau: rs.filter((c) => c.queries.length && c.allOk).length }];
   }));
   const out = {
-    at: new Date().toISOString(), ban, khungDoSha, cacheOnly: true, offNetCalls: disk.stats.calls, azureCalls: 0, ocrRerun: false,
+    at: new Date().toISOString(), ban, khungDoSha, dirty, cacheOnly: true, offNetCalls: disk.stats.calls, azureCalls: 0, ocrRerun: false,
     guard: { ...fm.DEFAULT_GUARD }, serverK: SERVER_K, probeSeed: PROBE_SEED, probeLevel, probes, foreign,
     mCheck, coverage, levels, pick, conclusion, cacheStats: disk.stats,
     mSalt: Object.fromEntries(CONDS.map((cond) => [cond, (cases.find((x) => x.set === "muoi")?.M?.[cond] || []).map((x) => `${x.code}(${x.source}) ${x.name}`)])),
   };
-  const outFile = path.join(outDir, `${ban}-do-${levelNames.join("")}.json`);
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
-  fs.writeFileSync(path.join(outDir, `${ban}-tung-ca-${levelNames.join("")}.json`), JSON.stringify({ mCases: Object.fromEntries(cases.map((c) => [`${c.set}|${c.code ?? c.kind}|${c.kind}`, Object.fromEntries(CONDS.map((cond) => [cond, codesOf(c.M[cond])]))])), perCase }, null, 0), "utf8");
+  fs.writeFileSync(caseFile, JSON.stringify({ mCases: Object.fromEntries(cases.map((c) => [`${c.set}|${c.code ?? c.kind}|${c.kind}`, Object.fromEntries(CONDS.map((cond) => [cond, codesOf(c.M[cond])]))])), perCase }, null, 0), "utf8");
 
   // ---- in bảng ----
   const f = (v) => (v == null ? "-" : v);
