@@ -46,6 +46,8 @@ function stripComments(src) {
 }
 
 const CODE = stripComments(SRC);
+// Vòng 7: phần gộp của showPhotoResult chuyển sang photoMerge (src/front-extra.js, thuần, dùng chung với khung đo).
+const FX = stripComments(readFileSync(new URL("../src/front-extra.js", import.meta.url), "utf8"));
 
 /** Từ vị trí `from`, tìm "{" đầu tiên và trả [vị trí "{", vị trí "}" khớp]. Bỏ qua ngoặc trong chuỗi. */
 function blockAt(code, from) {
@@ -143,7 +145,33 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
 
   // Đợt tu-dong vòng 4: nối "tự mở sản phẩm".
   test("(5) mọi lệnh gọi mergeFront(…) dùng lớp chặn mặc định: đúng 5 tham số, KHÔNG có tham số tùy chọn (kể cả qua biến)", () => {
-    assert.deepEqual(rule5(CODE), []);
+    // Vòng 7: main.js gộp qua photoMerge (luật 14), nên main.js có thể không còn mergeFront( nào; nếu có thì vẫn 5 tham số.
+    assert.deepEqual(rule5(CODE, { allowNone: true }), []);
+    // photoMerge (front-extra.js): merge mặc định = mergeFront, mọi lời gọi merge(…) đúng 5 tham số
+    assert.deepEqual(rule5fx(FX), []);
+    // main.js gọi photoMerge(ctx, found, off, { called: … }): không truyền merge / tùy chọn khác
+    assert.deepEqual(rule5main(CODE), []);
+  });
+  test("(5) vòng 7: luật photoMerge bắt được chuỗi mẫu sai", () => {
+    const fx = (body, params = "{ called, merge = mergeFront } = {}") => `export function photoMerge(ctx, found, off, ${params}) {\n${body}\n}`;
+    assert.deepEqual(rule5fx(fx("try { m = merge(a, b, c, d, e); } catch (x) { m = merge(a, b, c, d, null); }")), []);
+    for (const bad of [
+      fx("m = merge(a, b, c, d, e, opts);"),
+      fx("m = merge(a, b, c, d, e, { lockTop: 0 });"),
+      fx("m = merge(a, b, c, d, e);", "{ called, merge = (...x) => mergeFront(...x, o) } = {}"),
+      fx("m = mergeFront(a, b, c, d, e, {});"),
+      fx("m = x;"),
+    ]) assert.notDeepEqual(rule5fx(bad), [], bad);
+    const main = (call) => `async function showPhotoResult({ id }) {\n  const r = ${call};\n}`;
+    assert.deepEqual(rule5main(main("photoMerge(ctx, found, off, { called: queries.length > 0 })")), []);
+    for (const bad of [
+      "photoMerge(ctx, found, off)",
+      "photoMerge(ctx, found, off, { called: true, merge: f })",
+      "photoMerge(ctx, found, off, opts)",
+      "photoMerge(ctx, found, off, { called: true }, x)",
+      "photoMerge(ctx, found, off, { merge })",
+    ]) assert.notDeepEqual(rule5main(main(bad)), [], bad);
+    assert.notDeepEqual(rule5main("function x() {}"), [], "không gọi photoMerge");
   });
   test("(5) luật bắt được chuỗi mẫu sai (vòng 5, gợi ý 4)", () => {
     for (const bad of [
@@ -207,8 +235,8 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.ok(check && check.index < search.index, "phải có if (stale()) trước .search(");
   });
 
-  test("(10) showPhotoResult: catch quanh mergeFront chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
-    assert.deepEqual(rule10(CODE), []);
+  test("(10) photoMerge (front-extra.js, vòng 7 thay showPhotoResult): catch quanh merge chỉ nuốt lỗi giá trị chặn (isGuardError), lỗi khác ném tiếp", () => {
+    assert.deepEqual(rule10(FX, "photoMerge", "merge"), []);
   });
   test("(10) luật bắt được chuỗi mẫu sai (vòng 6, gợi ý 3 vòng 5)", () => {
     const wrap = (cat) => `async function showPhotoResult({ id }) {\n  let merged;\n  try { merged = mergeFront(a, b, c, d, e); } catch (e) {\n${cat}\n  }\n}`;
@@ -229,18 +257,31 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
   });
   test("(12) luật bắt được chuỗi mẫu sai", () => {
     const fn = (body) => `function confirmPhoto() {\n  const p = photoPending;\n  if (!p) return;\n${body}\n}\nfunction onFrontClick(ev) {\n  frontAbort?.abort();\n  const id = ++frontTurn;\n  retryTurn = id;\n}`;
-    const good = "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\n"
-      + "if (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; }\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }";
+    // Vòng 7 (NÊN SỬA 1 vòng 6): khối cancelRetry gọi sayFront() (xóa câu tiến độ của lượt "Tìm lại" vừa hủy) và đứng
+    // trước MỌI return của confirmPhoto (trừ if (!p) return;), để nhánh trả sớm lookup(p.code) không để #frontMsg kẹt.
+    const ask = "const act = confirmAction({ retryRunning: retryTurn !== 0 && retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\n";
+    const cancel = "if (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; retryTurn = 0; sayFront(); }\n";
+    const early = "if (!shownProduct) { lookup(p.code); return; }\n";
+    const setMsg = "if (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }";
+    const good = ask + cancel + early + setMsg;
     assert.deepEqual(rule12(fn(good)), []);
     for (const bad of [
       // câu "confirmed" ghi không điều kiện (xóa câu tiến độ của lượt ảnh mới)
-      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; }\nconst m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn);",
+      ask + cancel + early + "const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn);",
       // không hủy lượt "Tìm lại"
-      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }",
+      ask + early + setMsg,
       // hủy mà không tăng frontTurn
-      "const act = confirmAction({ retryRunning: retryTurn === frontTurn, msgIsResult: frontMsgIsResult });\nif (act.cancelRetry) { frontAbort?.abort(); }\nif (act.setMsg) { const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn); }",
+      ask + "if (act.cancelRetry) { frontAbort?.abort(); sayFront(); }\n" + early + setMsg,
       // không hỏi confirmAction
       "const m = photoFollowMessage(\"confirmed\"); sayFront(m.text, m.warn);",
+      // vòng 7: khối cancelRetry không xóa câu tiến độ
+      ask + "if (act.cancelRetry) { frontAbort?.abort(); ++frontTurn; }\n" + early + setMsg,
+      // vòng 7: khối cancelRetry đứng SAU nhánh trả sớm
+      ask + early + cancel + setMsg,
+      // vòng 7: return khác trước khối cancelRetry
+      ask + "if (x) return;\n" + cancel + early + setMsg,
+      // vòng 7: retryRunning không so retryTurn === frontTurn
+      "const act = confirmAction({ retryRunning: retryTurn !== 0, msgIsResult: frontMsgIsResult });\n" + cancel + early + setMsg,
     ]) assert.notDeepEqual(rule12(fn(bad)), [], bad);
     assert.notDeepEqual(rule12(fn(good).replace("retryTurn = id;", "")), [], "'Tìm lại' phải nhớ retryTurn");
   });
@@ -253,6 +294,44 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.deepEqual(rule13(fn("shownProduct = null;\nshownLookupId = 0;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
     assert.notDeepEqual(rule13(fn("shownProduct = null;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
     assert.notDeepEqual(rule13(fn("shownProduct = null;\nshownLookupId === 0;\nresult.innerHTML = renderPhotoNone({ lines });")), []);
+  });
+
+  // Vòng 7 (P3): nối kho phụ
+  test("(14) showPhotoResult gộp qua photoMerge, KHÔNG gọi mergeFront trực tiếp; main.js không import mergeFront", () => {
+    assert.deepEqual(rule14(CODE), []);
+  });
+  test("(14) luật bắt được chuỗi mẫu sai", () => {
+    const fn = (body) => `async function showPhotoResult({ id }) {\n${body}\n}`;
+    assert.deepEqual(rule14(fn("const { merged, offFailed } = photoMerge(ctx, found, off, { called: true });")), []);
+    for (const bad of [
+      fn("let merged = mergeFront(a, b, c, d, e);"),
+      fn("const r = photoMerge(ctx, found, off, { called: true });\nmerged = mergeFront(a, b, c, d, null);"),
+      fn("const r = 1;"),
+      "import { mergeFront } from \"./front-merge.js\";\n" + fn("const r = photoMerge(ctx, found, off, { called: true });"),
+    ]) assert.notDeepEqual(rule14(bad), [], bad);
+  });
+
+  test("(15) kho phụ chỉ tải trong luồng chọn ảnh / Tìm lại: loadExtra( / loadFrontExtra( không ở cấp module hay lúc khởi động", () => {
+    assert.deepEqual(rule15(CODE), []);
+  });
+  test("(15) luật bắt được chuỗi mẫu sai", () => {
+    const base = (extra = "", pick = "const s = loadFrontSearch();\nloadFrontExtra().catch(() => {});") => [
+      "function loadFrontExtra() { return loadExtra().then((x) => x); }",
+      "async function showPhotoResult({ id }) { const x = loadFrontExtra(); }",
+      "function onFrontClick(ev) { loadFrontExtra(); }",
+      "function updateFrontButton() { }",
+      `frontFile.addEventListener("change", async (ev) => {\nif (!confirm("x")) return;\n${pick}\nconst r = await sendOcr({});\n});`,
+      extra,
+    ].join("\n");
+    assert.deepEqual(rule15(base()), []);
+    for (const bad of [
+      base("loadFrontExtra();"),
+      base("updateFrontButton(); loadExtra();"),
+      base().replace("function updateFrontButton() { }", "function updateFrontButton() { loadFrontExtra(); }"),
+      base("initAuth().then(() => loadFrontExtra());"),
+      base("", "loadFrontExtra().catch(() => {});\nconst s = loadFrontSearch();"), // trước loadFrontSearch
+      base("", "const s = loadFrontSearch();"), // chọn ảnh không bắt đầu tải
+    ]) assert.notDeepEqual(rule15(bad), [], bad);
   });
 
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
@@ -298,11 +377,12 @@ function topArgs(code, open) {
   throw new Error("lời gọi không đóng ngoặc");
 }
 
-/** Luật (5): mọi mergeFront( có đúng 5 tham số (t1, chỉ mục, danh mục, kết quả T1, kết quả OFF). Trả danh sách vi phạm. */
-function rule5(code) {
+/** Luật (5): mọi mergeFront( có đúng 5 tham số (t1, chỉ mục, danh mục, kết quả T1, kết quả OFF). Trả danh sách vi phạm.
+ *  allowNone (vòng 7): main.js gộp qua photoMerge nên được phép không còn lời gọi nào. */
+function rule5(code, { allowNone = false } = {}) {
   const out = [];
   const calls = [...code.matchAll(/\bmergeFront\s*\(/g)];
-  if (!calls.length) return ["không gọi mergeFront("];
+  if (!calls.length) return allowNone ? [] : ["không gọi mergeFront("];
   for (const m of calls) {
     const args = topArgs(code, m.index + m[0].length - 1);
     if (args.length !== 5) out.push(`dòng ${lineOf(code, m.index)}: ${args.length} tham số (${args.join(" | ")})`);
@@ -310,13 +390,106 @@ function rule5(code) {
   return out;
 }
 
-/** Luật (10): trong showPhotoResult, catch đầu tiên sau mergeFront( có `if (!isGuardError(<lỗi>)) throw <lỗi>` (ném tiếp
- *  lỗi KHÁC lỗi giá trị chặn). Trả danh sách vi phạm. */
-function rule10(code) {
+/** Luật (5) phần photoMerge (vòng 7, front-extra.js): tham số merge mặc định = mergeFront (không bọc thêm tùy chọn);
+ *  thân hàm có ≥ 1 lời gọi merge(…), mọi lời gọi merge( / mergeFront( đúng 5 tham số. */
+function rule5fx(code) {
+  const m = /\bfunction\s+photoMerge\s*\(/.exec(code);
+  if (!m) return ["front-extra.js không có function photoMerge(…)"];
+  const params = topArgs(code, m.index + m[0].length - 1).join(",");
+  const out = [];
+  if (!/\bmerge\s*=\s*mergeFront\s*\}/.test(params)) out.push("tham số merge phải mặc định đúng = mergeFront");
+  const body = bodyAfterParams(code, "photoMerge");
+  const calls = [...body.matchAll(/\b(?:merge|mergeFront)\s*\(/g)];
+  if (!calls.some((c) => /^merge\b/.test(c[0]))) out.push("photoMerge phải gọi merge(…)");
+  for (const c of calls) {
+    const args = topArgs(body, c.index + c[0].length - 1);
+    if (args.length !== 5) out.push(`${c[0]} ${args.length} tham số (${args.join(" | ")})`);
+  }
+  return out;
+}
+
+/** Luật (5) phần main.js (vòng 7): có ≥ 1 lời gọi photoMerge(…); mọi lời gọi đúng 4 tham số, tham số 4 đúng dạng
+ *  { called: … } (không truyền merge hay tùy chọn khác). */
+function rule5main(code) {
+  const calls = [...code.matchAll(/\bphotoMerge\s*\(/g)];
+  if (!calls.length) return ["main.js không gọi photoMerge("];
+  const out = [];
+  for (const c of calls) {
+    const args = topArgs(code, c.index + c[0].length - 1);
+    if (args.length !== 4) { out.push(`dòng ${lineOf(code, c.index)}: ${args.length} tham số`); continue; }
+    if (!/^\{\s*called\s*:[^,{}]+\}$/.test(args[3])) out.push(`dòng ${lineOf(code, c.index)}: tham số 4 phải là { called: … } (nhận ${args[3]})`);
+  }
+  return out;
+}
+
+/** Luật (14): showPhotoResult có photoMerge( và KHÔNG có mergeFront(; main.js không import mergeFront. */
+function rule14(code) {
   const body = bodyAfterParams(code, "showPhotoResult");
   if (!body) return ["không có function showPhotoResult(…)"];
-  const mf = /\bmergeFront\s*\(/.exec(body);
-  if (!mf) return ["showPhotoResult không gọi mergeFront("];
+  const out = [];
+  if (!/\bphotoMerge\s*\(/.test(body)) out.push("showPhotoResult phải gộp qua photoMerge(");
+  if (/\bmergeFront\s*\(/.test(body)) out.push("showPhotoResult gọi mergeFront( trực tiếp");
+  if (/\bimport\s*\{[^}]*\bmergeFront\b[^}]*\}/.test(code)) out.push("main.js import mergeFront");
+  return out;
+}
+
+/** Thân handler "change" (ô chọn ảnh) = handler "change" có lời gọi sendOcr( trong code; không có → null. */
+function pickBody(code) {
+  const send = /\bsendOcr\s*\(/.exec(code);
+  if (!send) return null;
+  const h = [...code.matchAll(/addEventListener\(\s*["']change["']\s*,/g)].filter((m) => m.index < send.index).at(-1);
+  if (!h) return null;
+  return blockAt(code, h.index + h[0].length);
+}
+
+/** Luật (15): mọi lời gọi loadExtra( / loadFrontExtra( (không tính dòng khai báo function) nằm trong thân loadFrontExtra
+ *  (chỉ loadExtra), handler chọn ảnh, onFrontClick ("Tìm lại") hoặc showPhotoResult; handler chọn ảnh có loadFrontExtra(
+ *  SAU loadFrontSearch( và sau câu hỏi gửi nguyên bản (confirm(). */
+function rule15(code) {
+  const out = [];
+  const spans = {};
+  for (const name of ["loadFrontExtra", "onFrontClick", "showPhotoResult"]) {
+    const m = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(code);
+    if (!m) continue;
+    let depth = 0, close = -1;
+    for (let i = m.index + m[0].length - 1; i < code.length; i++) {
+      if (code[i] === "(") depth++;
+      else if (code[i] === ")" && --depth === 0) { close = i; break; }
+    }
+    spans[name] = blockAt(code, close);
+  }
+  const pick = pickBody(code);
+  if (!pick) out.push("không tìm thấy handler chọn ảnh");
+  else spans.pick = pick;
+  const inside = (i, names) => names.some((n) => spans[n] && i > spans[n][0] && i < spans[n][1]);
+  for (const m of code.matchAll(/\b(loadExtra|loadFrontExtra)\s*\(/g)) {
+    const before = code.slice(Math.max(0, m.index - 20), m.index);
+    if (/\bfunction\s+$/.test(before)) continue; // khai báo
+    const allowed = m[1] === "loadExtra" ? ["loadFrontExtra"] : ["pick", "onFrontClick", "showPhotoResult"];
+    if (!inside(m.index, allowed)) out.push(`dòng ${lineOf(code, m.index)}: ${m[1]}( ngoài luồng chọn ảnh / Tìm lại`);
+  }
+  if (pick) {
+    const body = code.slice(pick[0], pick[1]);
+    const lx = /\bloadFrontExtra\s*\(/.exec(body);
+    const ls = /\bloadFrontSearch\s*\(/.exec(body);
+    const cf = /\bconfirm\s*\(/.exec(body);
+    if (!lx) out.push("handler chọn ảnh phải bắt đầu tải kho phụ (loadFrontExtra()");
+    else {
+      if (!ls || lx.index < ls.index) out.push("loadFrontExtra( phải đứng sau loadFrontSearch( trong handler chọn ảnh");
+      if (!cf || lx.index < cf.index) out.push("loadFrontExtra( phải đứng sau câu hỏi gửi nguyên bản (confirm()");
+    }
+  }
+  return out;
+}
+
+/** Luật (10): trong hàm fn, catch đầu tiên sau callee( có `if (!isGuardError(<lỗi>)) throw <lỗi>` (ném tiếp lỗi KHÁC lỗi
+ *  giá trị chặn). Mặc định showPhotoResult / mergeFront (mẫu sai); vòng 7: photoMerge / merge của front-extra.js.
+ *  Trả danh sách vi phạm. */
+function rule10(code, fn = "showPhotoResult", callee = "mergeFront") {
+  const body = bodyAfterParams(code, fn);
+  if (!body) return [`không có function ${fn}(…)`];
+  const mf = new RegExp(`\\b${callee}\\s*\\(`).exec(body);
+  if (!mf) return [`${fn} không gọi ${callee}(`];
   const cm = /\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g;
   cm.lastIndex = mf.index;
   const m = cm.exec(body);
@@ -350,7 +523,17 @@ function rule12(code) {
   else {
     if (!/\bfrontAbort\s*\?\.\s*abort\s*\(\s*\)/.test(cancel)) out.push("khối cancelRetry phải gọi frontAbort?.abort()");
     if (!/\+\+\s*frontTurn\b|\bfrontTurn\s*\+\+|\bfrontTurn\s*\+=\s*1\b/.test(cancel)) out.push("khối cancelRetry phải tăng frontTurn");
+    // Vòng 7 (NÊN SỬA 1 vòng 6): xóa câu tiến độ của lượt "Tìm lại" vừa hủy, và đứng trước MỌI return (trừ if (!p) return;)
+    if (!/\bsayFront\s*\(\s*\)/.test(cancel)) out.push("khối cancelRetry phải gọi sayFront() (xóa câu tiến độ của lượt Tìm lại bị hủy)");
+    const at = body.indexOf(cancel);
+    const guard = /\bif\s*\(\s*!\s*\w+\s*\)\s*return\s*;/.exec(body);
+    for (const r of body.matchAll(/\breturn\b/g)) {
+      if (guard && r.index >= guard.index && r.index < guard.index + guard[0].length) continue;
+      if (r.index < at) out.push(`return đứng trước khối cancelRetry (dòng ${lineOf(body, r.index)} của confirmPhoto)`);
+    }
   }
+  const caCall = topArgs(body, ca.index + ca[0].length - 1).join(",");
+  if (!/\bretryRunning\s*:[^,]*\bretryTurn\s*===\s*frontTurn\b/.test(caCall)) out.push("confirmAction phải nhận retryRunning có retryTurn === frontTurn");
   const msg = ifBlock("setMsg");
   const confirmed = [...body.matchAll(/\bphotoFollowMessage\s*\(\s*["']confirmed["']\s*\)/g)];
   if (!confirmed.length) out.push("confirmPhoto phải dùng photoFollowMessage(\"confirmed\")");
