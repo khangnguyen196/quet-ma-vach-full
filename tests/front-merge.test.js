@@ -205,6 +205,45 @@ describe("lớp chặn: OFF giả xấu nhất (3 ảnh fixture + ca muối)", (
   });
 });
 
+// ---------------------------------------------------------------------------
+// Vòng 4 (P1, NÊN SỬA 1 của reviewer vòng 3): giá trị chặn sai KHÔNG được tự tắt lớp chặn → báo lỗi rõ
+// ---------------------------------------------------------------------------
+
+describe("lớp chặn: giá trị sai → báo lỗi (không tự tắt)", () => {
+  const r = fr.rankFromItems(t1, rIndex, fixture.anh[0].items);
+  const off = worstOff(r);
+  const BAD = [null, NaN, Infinity, -Infinity, -1, 1.5, "3", true, {}, []];
+
+  for (const key of ["lockTop", "offMax", "offGap"]) {
+    for (const method of mod.MERGE_METHODS) {
+      test(`${method}: ${key} sai (null, NaN, Infinity, -1, 1.5, "3"…) → báo lỗi nêu tên ${key}`, () => {
+        for (const bad of BAD) {
+          assert.throws(() => mod.mergeFront(t1, rIndex, products, r, off, { method, [key]: bad }),
+            (e) => e instanceof Error && e.message.includes(key), `${key} = ${String(bad)}`);
+        }
+      });
+    }
+    test(`${key} sai cũng báo lỗi khi OFF lỗi (không đợi có kết quả OFF mới phát hiện)`, () => {
+      assert.throws(() => mod.mergeFront(t1, rIndex, products, r, { ok: false, kind: "network" }, { [key]: null }), new RegExp(key));
+    });
+  }
+
+  test("undefined (không truyền) vẫn = DEFAULT_GUARD", () => {
+    const a = mod.mergeFront(t1, rIndex, products, r, off, { lockTop: undefined, offMax: undefined, offGap: undefined });
+    const b = mod.mergeFront(t1, rIndex, products, r, off, { ...mod.DEFAULT_GUARD });
+    const c = mod.mergeFront(t1, rIndex, products, r, off);
+    assert.deepEqual(a, b);
+    assert.deepEqual(a, c);
+  });
+
+  test("'không chặn' tường minh { lockTop: 0, offMax: k, offGap: 0 } vẫn dùng được", () => {
+    const got = mod.mergeFront(t1, rIndex, products, r, off, { lockTop: 0, offMax: mod.MERGE_K, offGap: 0 });
+    assert.equal(got.length, mod.MERGE_K);
+    // OFF giả xấu nhất: không chặn thì mục chỉ có trên OFF chiếm nhiều hơn offMax mặc định
+    assert.ok(offOnly(got) > mod.DEFAULT_GUARD.offMax, `${offOnly(got)} mục OFF`);
+  });
+});
+
 describe("lớp chặn mặc định: ca 7Up", () => {
   const ngoai = JSON.parse(fs.readFileSync(new URL("./fixtures/off-7up-ngoai.json", import.meta.url), "utf8"));
   const parse = (ps) => ps.map((p) => {
