@@ -82,7 +82,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `DAILY_LIMIT_PER_USER` | 200 | ảnh mỗi người dùng mỗi **ngày UTC** (đổi ngày lúc 00:00 UTC = 7 giờ sáng giờ Việt Nam), chỉ khi `AUTH_MODE=supabase`; `0` = tắt. Cộng thêm với 2 giới hạn phút. Quá -> 429, `Retry-After` = số giây tới 00:00 UTC. **Đếm trong RAM**: máy chủ ngủ (scale về 0) / khởi động lại thì về 0; chỉ đúng khi tối đa 1 bản chạy (replica). Lớp chống dùng chùa, không phải sổ cái |
 | `ALLOWED_ORIGINS` | (trống = chỉ `https://khangnguyen196.github.io`) | nguồn (trang web) được gọi máy chủ, cách nhau dấu phẩy, dạng `http(s)://tên-miền[:cổng]`; bỏ khoảng trắng, phần tử rỗng, "/" cuối, nguồn trùng; đổi về chữ thường, bỏ cổng mặc định. `*`, có đường dẫn / `?` / `#` / tên đăng nhập -> từ chối khởi động. Có giá trị thì THAY mặc định (muốn giữ github.io phải ghi vào danh sách). Azure: `https://khangnguyen196.github.io,https://localhost:5173` |
 | `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng), **cộng thêm** với `ALLOWED_ORIGINS` (không thay). `chay-thu.ps1` luôn đặt 1, nên chạy trên máy = `ALLOWED_ORIGINS` (mặc định github.io) + mọi localhost; ảnh Docker đặt 0 |
-| `CATALOG_PATH` | (trống) | (đợt `kho-lon` vòng 2, cờ tùy chọn) đường dẫn danh mục JSONL / JSONL.gz (`{code, name, brand, img, text, grp}` mỗi dòng). Trống = không nạp, `/ocr` trả **y hệt** trước (không có khóa `candidates`). Có giá trị: nạp MỘT lần lúc khởi động (lifespan), `/ocr` thêm `candidates` (mục "Hợp đồng API ứng viên"); nạp lỗi -> 1 dòng log tên lỗi, OCR vẫn chạy, không có `candidates`. Vòng 2 chưa thêm vào `.env.example` / Dockerfile (ảnh Docker hiện chưa chép `catalog_search.py`; chỉ mục lúc build ảnh + mmap để vòng 3) |
+| `CATALOG_PATH` | (trống; ảnh Docker `/app/catalog-index`) | (đợt `kho-lon`) THƯ MỤC chỉ mục dựng sẵn (`python catalog_search.py build <danh mục .jsonl.gz> <thư mục>`: mảng `.npy` + `meta.json` + `lines.jsonl`; nạp bằng mmap, (c) 0,04 giây) HOẶC file danh mục .jsonl / .jsonl.gz (`{code, name, brand, img, text, grp}` mỗi dòng; dựng trong RAM lúc khởi động, (c) ~17 giây: chỉ để test / thử). Trống = không nạp, `/ocr` trả **y hệt** trước (không có khóa `candidates`). Có giá trị: nạp MỘT lần trong lifespan TRƯỚC khi nhận yêu cầu (máy chủ scale về 0: lượt đầu sau khi thức đã có ứng viên), `/ocr` thêm `candidates` (mục "Hợp đồng API ứng viên"), `/health` báo `catalog`; nạp lỗi -> 1 dòng log tên lỗi, OCR vẫn chạy, không có `candidates`. Ảnh Docker dựng chỉ mục mức (c) LÚC BUILD và đặt sẵn biến; `-e CATALOG_PATH=` để tắt |
 | `PORT` | 8080 | cổng máy chủ nghe TRONG Docker (`CMD` của Dockerfile đọc `${PORT:-8080}`, `HEALTHCHECK` cũng đọc). `chay-thu.ps1` không đọc biến này (dùng tham số `-Port`, mặc định 8765) |
 
 ## API
@@ -90,8 +90,11 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 ### `GET /health`
 
 ```json
-{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0", "commit": "a295a86" }
+{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0", "commit": "a295a86", "catalog": { "loaded": true, "n": 532732 } }
 ```
+
+`catalog` (đợt `kho-lon` vòng 3): `loaded` = đã nạp danh mục ứng viên (`CATALOG_PATH`), `n` = số sản phẩm (không nạp /
+nạp lỗi: `{"loaded": false, "n": 0}`); không lộ đường dẫn.
 
 `commit` (đợt `cung-co`): 7 ký tự đầu của mã commit Git mà ảnh Docker được build từ đó (biến `GIT_SHA`, Dockerfile
 `ARG GIT_SHA`, workflow truyền `--build-arg GIT_SHA=${GITHUB_SHA::7}` và kiểm `/health` trả đúng). Biến thiếu / sai dạng
@@ -158,8 +161,13 @@ Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/oc
   JS trước, sinh lại file vàng, rồi sửa Python cho khớp.
 - Nguồn fixture `tests/fixtures/catalog-mini.jsonl.gz` (2.092 dòng trích từ danh mục mức (c)) và chữ / mã trong
   `t1-golden.json`: dữ liệu Open Food Facts (https://world.openfoodfacts.org), giấy phép ODbL 1.0, bản xuất 08/11/2026.
-- RSS (chỉ báo, vòng 2, Windows, Python 3.12, chưa nạp model OCR): sau nạp mức (a) 32 MiB, (b) 44 MiB, (c) 170 MiB
-  (nạp + dựng (c) 16,8 giây); H2 (RAM đỉnh cả tiến trình) đo chính thức ở vòng 3.
+- Số đo vòng 3 (`do_h2h3.py`, cách đọc số chốt trước ở đầu file; Windows 10, MỘT tiến trình uvicorn thật, OCR_THREADS=1,
+  nạp -> 30 ảnh bộ B -> JPEG CMYK nhiều lượt quét 40 MP; MiB): RAM đỉnh (max đỉnh working set / đỉnh bộ nhớ riêng) mốc
+  không danh mục 822,3, (a) 824,0, (b) 825,6, (c) 835,3 (ngưỡng 1.536); thời gian CHỈ phần tìm p95 trên 30 ảnh (a) 2,1 ms,
+  (b) 5,7 ms, (c) 23,5 ms (ngưỡng 1.000 ms); khởi động tới `/health` 200 (trung vị 3 lần) mốc 3,42 s, thư mục mmap (a)
+  3,37 / (b) 3,36 / (c) 3,34 s, file .gz dựng trong RAM (a) 3,37 / (b) 4,47 / (c) 21,63 s; cỡ thư mục chỉ mục (a) 1,8 MB,
+  (b) 12,0 MB, (c) 134,4 MB (lines.jsonl 92,6 MB). Mức chọn theo luật: (c).
+- Log `/ocr` (vòng 3): dòng có sẵn thêm `tìm <ms>ms` (chỉ phần `catalog.search`) hoặc `tìm -`; không ghi chữ OCR.
 
 ### Lỗi
 
@@ -465,7 +473,9 @@ D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-x
 
 `Dockerfile`: `python:3.12-slim`, `pip install --no-cache-dir -r requirements.txt`, bước build kiểm sha256 model, chuyển
 sang người dùng không phải root `ocr` rồi MỚI nạp thử RapidOCR với `OCR_OFFLINE=1` (chứng minh người dùng chạy thật đọc
-được model). Biến chạy thật: `PORT=8080`, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, **`AUTH_MODE=supabase`** (quên đặt
+được model). Đợt `kho-lon` vòng 3: COPY `catalog/c.jsonl.gz` (danh mục mức (c), 14,2 MB, ODbL), RUN `catalog_search.py
+build` ra `/app/catalog-index` + `verify` (nạp được, N == số dòng nguồn, sha256 nguồn trùng; sai thì build hỏng), xóa
+.gz, người dùng `ocr` nạp thử chỉ mục; `CATALOG_PATH=/app/catalog-index`. Biến chạy thật: `PORT=8080`, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, **`AUTH_MODE=supabase`** (quên đặt
 `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` thì máy chủ KHÔNG khởi động; chạy thử không đăng nhập phải tự đặt
 `-e AUTH_MODE=off`), `OCR_THREADS=1` (Container App 1 vCPU / 2 GiB), `MAX_PIXELS=50000000`,
 `MAX_PIXELS_PROGRESSIVE=40000000` (ca nặng nhất đo được 822 MB riêng trên Windows, dưới 2 GiB), `BODY_TIMEOUT_S=30`.
@@ -488,7 +498,9 @@ chính workflow, và chạy tay (Actions → Server image → Run workflow). Quy
 `GITHUB_TOKEN`. Các bước: `docker build` → chạy container `AUTH_MODE=off PORT=8080` → chờ `/health` 200 (tối đa 90 giây)
 → `/ocr` với `tests/fixtures/chu.png` (200 + có các chữ `CHU_PNG_WORDS`) và `tests/fixtures/xoay6.heic` (200, kiểm
 libheif trên Linux) → ghi vào Summary của lượt chạy: cỡ ảnh (MB), RAM (`docker stats`, `memory.peak` của cgroup sau 2
-ảnh OCR), thời gian khởi động → chạy container KHÔNG đặt `AUTH_MODE` phải thoát lỗi (mặc định an toàn). CHỈ trên `main`
+ảnh OCR), thời gian khởi động → (kho-lon vòng 3) `/health` `catalog.loaded` true và `n` = số dòng danh mục, `chu.png` có khóa
+`candidates` là danh sách, ảnh nặng 40 MP (JPEG CMYK nhiều lượt quét, sinh bằng Pillow trong container riêng) trả 200
+trước bước đo RAM, Summary thêm `catalog n` → chạy container KHÔNG đặt `AUTH_MODE` phải thoát lỗi (mặc định an toàn). CHỈ trên `main`
 và khi mọi bước trên đạt: đăng nhập ghcr.io bằng `GITHUB_TOKEN`, đẩy `ghcr.io/khangnguyen196/quet-ma-vach-ocr:latest` và
 `:<7 ký tự đầu mã commit>`, in digest vào Summary. Nhánh khác chỉ build + chạy thử, không đẩy.
 Tạo Container App trỏ vào ảnh này: `server/AZURE.md`.
