@@ -164,6 +164,42 @@ server/upload.py server/ratelimit.py server/auth.py server/requirements.txt serv
 sau a295a86 thư mục server/ chỉ có 2 commit docs (ceea781, 9c61990). Hoặc: **Revisions and replicas** → tích revision cũ → **Activate**
 (nếu đang ở chế độ Single thì cách sửa ảnh như trên chắc hơn). Xem lỗi khởi động: **Monitoring** → **Log stream**.
 
+### 4b. Trỏ Container App sang tag mới (đợt kho-lon)
+
+Đợt `kho-lon` thêm vào ảnh danh mục lớn (532.732 sản phẩm Open Food Facts, chỉ mục dựng sẵn lúc build ảnh) để `/ocr`
+trả thêm `candidates` (≤ 10 ứng viên). App mới dùng ứng viên này làm nguồn chính khi có.
+
+> **Cảnh báo**: Từ lúc app mới lên GitHub Pages tới lúc Container App chạy tag mới, app dùng đường lùi (danh mục trong app + kho phụ 893 + Open Food Facts) và kho phụ chỉ bắt đầu tải sau khi máy chủ trả chữ, nên lần chụp đầu có thể chậm hơn vài giây; mạng yếu thì có thể không dùng được kho phụ (kết quả như bản trước khi có kho phụ). Hãy trỏ Container App sang tag mới ngay sau khi lên main.
+
+**Tag**: 7 ký tự mã commit trên `main` SAU khi nhánh `kho-lon` lên main (tag chỉ có sau khi workflow **Server image**
+trên `main` chạy xanh, nên không trỏ trước được). Xem tag 1 trong 2 cách như mục 4a: trang Packages ghcr.io của repo
+(`https://github.com/users/khangnguyen196/packages/container/package/quet-ma-vach-ocr`, tag mới nhất cạnh `latest`), hoặc
+Summary / log của lượt workflow **Server image** trên `main` (dòng "Đã đẩy: `…:latest`, `…:<7 ký tự>`").
+
+**Bước trên Portal** (6 biến môi trường giữ nguyên; KHÔNG cần đặt `CATALOG_PATH`: ảnh đã có `ENV CATALOG_PATH=/app/catalog-index`):
+1. Portal → Container App **quet-ma-vach-ocr** → **Application** → **Containers** → **Edit and deploy**.
+2. Tab **Container image** → bấm container `ocr` → sửa **Image and tag** thành `khangnguyen196/quet-ma-vach-ocr:<7 ký tự>`.
+3. Giữ **CPU and Memory** = **1 CPU core, 2 Gi memory** (danh mục cần RAM; đừng hạ xuống 0,5 / 1 Gi). **Save** → **Create**
+   (tạo revision mới). Tab Scale giữ nguyên: **Min replicas 0**, Max 1.
+4. **Application** → **Revisions and replicas**: revision mới phải **Provisioned** + **Running** (hoặc "Scale to 0" khi
+   không ai gọi); bấm vào tên revision mới → kiểm phần container ghi đúng **1 vCPU / 2 Gi** và image đúng tag vừa đặt.
+   Revision cũ tự thành Inactive.
+
+**Kiểm sau khi trỏ**: mở `https://<địa chỉ app>/health` (lần đầu chờ máy chủ thức dậy). Phải thấy `"ok":true`,
+**`"commit":"<7 ký tự>"` đúng tag** và **`"catalog":{"loaded":true,"n":532732}`**. `catalog.loaded` false thì `/ocr` vẫn đọc
+chữ nhưng không có ứng viên (app đi đường lùi): xem **Monitoring** → **Log stream** dòng "KHÔNG nạp được danh mục". Muốn
+tạm TẮT ứng viên mà không đổi ảnh: thêm biến `CATALOG_PATH` với giá trị rỗng (tạo revision mới); xóa biến đó để bật lại.
+
+**Ảnh nặng hơn**: ảnh mới 235,8 MB (đo trên CI, run 43721377339), ước +147 MB do danh mục (chỉ mục 134,4 MB + file nén
+14,2 MB; trước đợt này chưa ghi cỡ ảnh cũ). Lần kéo ảnh / thức dậy đầu tiên sau khi trỏ có thể lâu hơn trước vài giây;
+các lần thức dậy sau đó gần như cũ (chỉ mục đọc kiểu mmap, khởi động ~3–5 giây trên CI).
+
+**Quay về** (revision mới Failed, `/health` không trả lời, hoặc app lỗi): làm lại các bước 1–3 với **Image and tag** =
+`khangnguyen196/quet-ma-vach-ocr:0215890` (tag đang ghim trước đợt kho-lon, PLAN.md đợt `cung-co`), hoặc **Revisions and
+replicas** → tích revision cũ → **Activate**. App vẫn chạy với máy chủ cũ (đường lùi như cảnh báo ở trên).
+
+Không chạy `az`, không cần khóa Azure: mọi bước làm bằng tay trên Portal.
+
 ## 5. Tạm tắt
 
 Container App → **Overview** → nút **Stop** (Dừng). Bật lại: **Start**. Khi dừng không có bản nào chạy, không tốn gì.
