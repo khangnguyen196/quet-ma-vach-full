@@ -1,7 +1,9 @@
 """Độ dài chữ ứng viên (đợt kho-lon vòng 5): app cắt name / brand ≤ SERVER_NAME_MAX và text ≤ SERVER_TEXT_MAX ký tự
 (src/front-server.js, cut() theo Array.from = ký tự Unicode). Giới hạn phải ≥ độ dài lớn nhất trên danh mục máy chủ
 (server/catalog/c.jsonl.gz) để app không cắt chữ mà khung đo (không cắt) vẫn dùng: cắt text làm lệch điểm BM25 so với
-khung đo. Đọc đúng các trường máy chủ trả trong candidates (CatalogIndex.row: null -> ""). Chạy ~5 giây.
+khung đo. Đọc đúng các trường máy chủ trả trong candidates (CatalogIndex.row: null -> ""). Chạy ~4 giây (đo vòng 6:
+pytest báo 3,6–3,8 giây cho file này; cả lệnh kể khởi động Python 4,7–5,6 giây).
+Đổi server/catalog/c.jsonl.gz thì phải chạy pytest server: CI (server-image.yml, deploy.yml) KHÔNG chạy pytest.
 """
 from __future__ import annotations
 
