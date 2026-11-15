@@ -523,7 +523,9 @@ Tạo Container App trỏ vào ảnh này: `server/AZURE.md`.
 Đợt kho-lon (run 43719480770, push nhánh `kho-lon` commit a99f025, có danh mục (c), chưa giới hạn 2g): ảnh 235,8 MB
 (247.252.861 byte), `/health` 200 sau 3,6 giây, `catalog` {loaded: true, n: 532732}, `chu.png` trả 10 `candidates`, ảnh
 40 MP 200, `memory.peak` 609,8 MB sau 2 ảnh OCR + ảnh 40 MP (`docker stats` lúc đó 231,2 MiB); không đẩy ghcr.io (không
-phải main).
+phải main). Run 43721377339 (push nhánh `kho-lon` commit e120901): ảnh 235,8 MB (247.254.313 byte); hai run cùng
+235,8 MB, chênh 1.452 byte. Ảnh `:0215890` đang chạy trên Azure (run 43609207756, `main` commit 0215890): 198,7 MB
+(208.316.974 byte). MB theo CI = byte / 1.048.576.
 
 **Cảnh báo lần đẩy đầu**: lượt push `main` đầu tiên của package mới (run 43382142507) đỏ ở bước "Đẩy ảnh" với
 `error from registry: denied`. Xử lý: chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run
