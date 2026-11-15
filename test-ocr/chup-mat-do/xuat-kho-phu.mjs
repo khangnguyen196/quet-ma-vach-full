@@ -17,8 +17,11 @@ import { catalogMeta, catalogJson, NGUON_VN_893 } from "./xuat-danh-muc.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
-/** Ngày ghi trong meta (cố định: chạy lại trùng từng byte; là ngày đo vòng 5 nên cỡ file trùng số vòng 5). */
+/** Ngày ghi trong meta.ngayXuat = NGÀY DỰNG kho phụ (cố định: chạy lại trùng từng byte; là ngày đo vòng 5). */
 export const KHO_PHU_DATE = "2026-11-15";
+/** Ngày BẢN XUẤT nguồn của Open Food Facts (JSONL 08/11/2026 mà mo-rong.json lấy từ đó), ghi ở meta.banXuat (vòng 7,
+ *  gợi ý 1 reviewer vòng 6): ngayXuat giữ nghĩa ngày dựng, banXuat cho biết dữ liệu mới tới ngày nào. */
+export const BAN_XUAT = "2026-11-08";
 export const OUT_REL = "public/chup-mat-do/kho-phu-893.json";
 export const MO_RONG = "D:\\tmp\\nang-t1\\du-lieu\\mo-rong.json";
 
@@ -26,7 +29,8 @@ export const MO_RONG = "D:\\tmp\\nang-t1\\du-lieu\\mo-rong.json";
 export function buildKhoPhu(records, catalogProducts) {
   const codes = new Set((catalogProducts || []).map((p) => p.code));
   const products = store893(records, codes);
-  const json = catalogJson(catalogMeta({ withNameBrand: true, count: products.length, date: KHO_PHU_DATE, nguon: NGUON_VN_893 }), products);
+  const meta = { ...catalogMeta({ withNameBrand: true, count: products.length, date: KHO_PHU_DATE, nguon: NGUON_VN_893 }), banXuat: BAN_XUAT };
+  const json = catalogJson(meta, products);
   return { products, json };
 }
 
