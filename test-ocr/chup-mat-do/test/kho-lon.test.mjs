@@ -66,6 +66,26 @@ test("isInside (vòng 2): so bằng path.relative, không so tiền tố chuỗi
   assert.ok(FORBIDDEN_OUT_ROOTS.includes("D:\\quet-ma-vach-full") && FORBIDDEN_OUT_ROOTS.length === 2);
 });
 
+test("kho-lon-vang (vòng 2): pickMini giữ mã bắt buộc + mẫu theo seed, giữ thứ tự dòng; câu tự dựng đủ loại", async () => {
+  const { pickMini, craftedQueries, goldOf } = await import("../kho-lon-vang.mjs");
+  const rows = [];
+  for (const g of ["vn", "th", "us"]) for (let i = 0; i < 20; i++) rows.push({ code: `${g}${String(i).padStart(2, "0")}`, grp: g, text: `x ${g}` });
+  const a = pickMini(rows, ["us19", "th03"], { seed: 5, perGroup: 4, groups: ["vn", "th", "us"] });
+  const b = pickMini(rows, ["us19", "th03"], { seed: 5, perGroup: 4, groups: ["vn", "th", "us"] });
+  assert.deepEqual(a, b);
+  assert.ok(a.some((r) => r.code === "us19") && a.some((r) => r.code === "th03"));
+  assert.ok(a.length >= 12 && a.length <= 14);
+  assert.deepEqual(a.map((r) => rows.indexOf(r)), a.map((r) => rows.indexOf(r)).slice().sort((x, y) => x - y), "giữ thứ tự dòng gốc");
+  const q = craftedQueries();
+  assert.equal(new Set(q.map((x) => x.id)).size, q.length);
+  assert.ok(q.some((x) => x.input.text === "") && q.some((x) => Array.isArray(x.input.items) && !x.input.items.length));
+  const products = [{ code: "1", text: "Soda chanh 7Up" }, { code: "2", text: "7Up Revive" }, { code: "3", text: "banh quy" }];
+  const ri = buildRankIndex(t1, products);
+  const g = goldOf(t1, { rankFromItems: () => { throw new Error("không dùng"); }, rankFromText }, ri, { text: "soda 7 up" });
+  assert.deepEqual(g.query, ["soda", "7up"]);
+  assert.deepEqual(g.hits.map((h) => h.code), ["1", "2"]);
+});
+
 // ---------------- kho-lon-do.mjs ----------------
 test("hằng luật chốt trước", () => {
   assert.equal(SERVER_K, 10);
