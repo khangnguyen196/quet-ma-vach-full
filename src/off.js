@@ -4,10 +4,11 @@
 const BASE = import.meta.env?.VITE_OFF_API || "https://world.openfoodfacts.org/api/v2";
 
 // Tên và phiên bản app gửi kèm mỗi lần tra, để Open Food Facts biết lượt gọi đến từ app nào.
-// APP_VERSION khớp "version" trong package.json: đổi phiên bản thì đổi cả 2 chỗ cùng lúc.
+// APP_VERSION khớp "version" trong package.json: đổi phiên bản thì đổi 2 chỗ cùng lúc (đây và package.json;
+// src/off-search.js import lại từ đây, tests/off-search.test.js so với package.json).
 // APP_NAME là tên repo (quet-ma-vach-full), không phải "name" trong package.json.
-const APP_NAME = "quet-ma-vach-full";
-const APP_VERSION = "0.1.0";
+export const APP_NAME = "quet-ma-vach-full";
+export const APP_VERSION = "0.1.0";
 
 const FIELDS = [
   "code", "product_name", "product_name_vi", "product_name_en", "brands", "quantity", "categories",

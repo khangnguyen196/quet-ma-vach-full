@@ -15,10 +15,10 @@
 //   const r = await off.searchVnThenAll(qs[0], { signal });       // { ok: true, hits: [{ code, name, brand, img, vn }] }
 //   if (!r.ok) { /* r.kind: network | timeout | rate | server | badJson | aborted | limited → dùng kết quả danh mục */ }
 
+// Một nguồn với src/off.js (APP_NAME là tên repo; APP_VERSION khớp package.json).
+import { APP_NAME, APP_VERSION } from "./off.js";
+
 export const OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl";
-// Giống src/off.js (APP_NAME là tên repo; APP_VERSION khớp package.json).
-const APP_NAME = "quet-ma-vach-full";
-const APP_VERSION = "0.1.0";
 
 /** Hết giờ một lượt tìm (ms): ngắn, vì đây là nguồn phụ; quá thì dùng kết quả danh mục. */
 export const SEARCH_TIMEOUT_MS = 7000;
@@ -74,20 +74,36 @@ function fold(s) {
     .trim();
 }
 
-/** Một dòng chữ → danh sách từ dùng được (đã bỏ dấu, bỏ cụm chung, số, đơn vị, từ nhiễu). */
-function lineWords(text) {
+/** Từ vựng có từ w không (Set / Map / bất kỳ có has(); không có từ vựng → false). */
+function inVocab(vocab, w) {
+  try { return !!(vocab && typeof vocab.has === "function" && vocab.has(w)); } catch { return false; }
+}
+
+/**
+ * Một dòng chữ → danh sách từ dùng được (đã bỏ dấu, bỏ cụm chung, số, đơn vị, từ nhiễu).
+ * vocab (từ vựng danh mục, vd chỉ mục T1): "7 up" → "7up" CHỈ khi "7up" có trong vocab (không ghép "3 in", "24 lon",
+ * "2 tui": từ sau là từ nhiễu / "in" thì không bao giờ ghép); từ toàn phụ âm (vd hãng "th") giữ khi có trong vocab.
+ */
+function lineWords(text, vocab) {
   let s = ` ${fold(text)} `;
-  // "co op" / "co.op" → "coop"; "7 up" → "7up" (số 1–2 chữ số + từ ngắn không phải đơn vị: tên hãng kiểu 7Up)
   s = s.replace(/ co op /g, " coop ");
-  s = s.replace(/ (\d{1,2}) ([a-z]{1,3})(?= )/g, (m, d, w) => (UNIT_WORD.test(w) ? m : ` ${d}${w}`));
+  s = s.replace(/ (\d{1,2}) ([a-z]{1,3})(?= )/g, (m, d, w) => (
+    UNIT_WORD.test(w) || STOP_WORDS.has(w) || w === "in" || !inVocab(vocab, `${d}${w}`) ? m : ` ${d}${w}`
+  ));
   for (let pass = 0; pass < 2; pass++) for (const p of STOP_PHRASES) s = s.split(` ${p} `).join(" ");
   return s.split(" ").filter((w) => {
     if (!w || STOP_WORDS.has(w)) return false;
     if (/^\d+$/.test(w) || NUM_UNIT.test(w)) return false;
     const letters = w.replace(/[^a-z]/g, "");
     if (letters.length < 2) return false;
-    return /[aeiouy]/.test(letters) || /\d/.test(w);
+    return /[aeiouy]/.test(letters) || /\d/.test(w) || inVocab(vocab, w);
   });
+}
+
+/** Câu tìm dùng được: không phải 1 từ dưới 5 chữ cái (vd "ca" khớp hàng nghìn sản phẩm, "7up" một mình). */
+function okQuery(q) {
+  const w = q.split(" ").filter(Boolean);
+  return w.length > 1 || (w.length === 1 && w[0].replace(/[^a-z]/g, "").length >= 5);
 }
 
 function toLines(input) {
@@ -111,13 +127,13 @@ function capWords(words) {
  * 2. từ "giống tên hãng" (dòng đầu tiên chỉ có 1–2 từ, khác dòng 1, giữ cả từ ngắn như "up") + 2 từ đầu của câu 1;
  * 3. dòng dài thứ hai (≥ 5 chữ cái);
  * 4. (nếu còn chỗ) 2 từ đầu của câu 1 khi câu 1 dài hơn 2 từ — câu rộng hơn, vì search.pl cần khớp MỌI từ.
- * Không có dòng dùng được → [].
+ * Không có dòng dùng được → []. Câu chỉ 1 từ dưới 5 chữ cái bị bỏ. vocab: xem lineWords.
  */
-export function cleanQuery(input) {
+export function cleanQuery(input, { vocab = null } = {}) {
   const lines = [];
   const seen = new Set();
   toLines(input).forEach((text, i) => {
-    const words = lineWords(text);
+    const words = lineWords(text, vocab);
     const key = words.join(" ");
     if (!words.length || seen.has(key)) return;
     seen.add(key);
@@ -132,7 +148,7 @@ export function cleanQuery(input) {
   const second = byLen.find((l) => l !== main && l !== brand && l.letters >= 5);
   if (second) cands.push(capWords(second.words));
   if (main.words.length > 2) cands.push(main.words.slice(0, 2).join(" "));
-  return [...new Set(cands.filter(Boolean))].slice(0, QUERY_MAX);
+  return [...new Set(cands.filter((q) => q && okQuery(q)))].slice(0, QUERY_MAX);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,8 +186,29 @@ export function parseSearch(json) {
   return out;
 }
 
-function validHits(hits) {
-  return Array.isArray(hits) && hits.every((h) => h && typeof h === "object" && typeof h.code === "string" && /^\d{8,14}$/.test(h.code));
+/**
+ * Lọc lại các mục đọc từ localStorage theo đúng luật parseSearch: mã 8–14 chữ số (bỏ mục hỏng, bỏ trùng),
+ * name / brand phải là chuỗi (không thì ""), img chỉ URL images.openfoodfacts.org (không thì ""), vn chỉ true / false.
+ * Không phải mảng → null.
+ */
+function cleanCachedHits(hits) {
+  if (!Array.isArray(hits)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const h of hits) {
+    if (!h || typeof h !== "object" || typeof h.code !== "string") continue;
+    const code = h.code.trim();
+    if (!/^\d{8,14}$/.test(code) || seen.has(code)) continue;
+    seen.add(code);
+    out.push({
+      code,
+      name: typeof h.name === "string" ? h.name.trim() : "",
+      brand: typeof h.brand === "string" ? h.brand.trim() : "",
+      img: typeof h.img === "string" && h.img.startsWith(IMG_PREFIX) ? h.img : "",
+      vn: h.vn === true,
+    });
+  }
+  return out;
 }
 
 function defaultStorage() {
@@ -217,14 +254,16 @@ export function createOffSearch({
       for (const item of data.e) {
         if (!Array.isArray(item) || typeof item[0] !== "string") continue;
         const v = item[1];
-        if (v && Number.isFinite(v.t) && validHits(v.hits)) cache.set(item[0], { t: v.t, hits: v.hits });
+        const hits = v && Number.isFinite(v.t) ? cleanCachedHits(v.hits) : null;
+        if (hits) cache.set(item[0], { t: v.t, hits });
       }
     } catch { /* bộ lưu lỗi / dữ liệu hỏng: bỏ qua, dùng bộ nhớ trong RAM */ }
   }
 
   function prune() {
     const t = now();
-    for (const [k, v] of cache) if (t - v.t > ttlMs) cache.delete(k);
+    // quá hạn, hoặc thời điểm ở tương lai (đồng hồ chỉnh lùi: không bao giờ hết hạn) → bỏ
+    for (const [k, v] of cache) if (t - v.t > ttlMs || v.t > t) cache.delete(k);
     while (cache.size > maxEntries) cache.delete(cache.keys().next().value);
   }
 
@@ -266,6 +305,8 @@ export function createOffSearch({
       } catch {
         return { ok: false, kind: failKind() };
       }
+      // fetchImpl trả thứ không phải Response (undefined, {}, status không phải số): coi là lỗi mạng, không ném
+      if (!res || typeof res !== "object" || typeof res.status !== "number") return { ok: false, kind: "network" };
       if (res.status === 429) return { ok: false, kind: "rate", status: 429 };
       if (!res.ok) return { ok: false, kind: "server", status: res.status };
       let text;
