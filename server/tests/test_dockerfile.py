@@ -2,6 +2,7 @@
 build + chạy thật nằm ở workflow .github/workflows/server-image.yml (CI)."""
 from __future__ import annotations
 
+import ast
 import json
 import re
 
@@ -74,6 +75,55 @@ def test_git_sha_arg_env_dat_sau_cac_buoc_nang():
     assert arg[0] > max(heavy), "ARG GIT_SHA phải đứng sau mọi RUN / COPY (pip install, mã, kiểm model)"
     # không dùng GIT_SHA ở lệnh nào khác (chỉ ENV cho máy chủ đọc)
     assert sum("GIT_SHA" in ln for ln in lines if not ln.lstrip().startswith("#")) == 2
+
+
+def _local_imports(path) -> set:
+    """Tên module server/*.py mà file import (đọc bằng ast, gồm cả import lười trong hàm / try)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return {n for n in names if (SERVER / f"{n}.py").is_file()}
+
+
+def _app_modules() -> set:
+    """app.py + mọi module server/*.py nó import, kể cả gián tiếp."""
+    todo, seen = ["app"], set()
+    while todo:
+        m = todo.pop()
+        if m in seen:
+            continue
+        seen.add(m)
+        todo.extend(_local_imports(SERVER / f"{m}.py") - seen)
+    return seen
+
+
+def _copied_files(src: str) -> set:
+    out = set()
+    for line in re.sub(r"\\\n", " ", src).splitlines():
+        if line.startswith("COPY ") and "--from" not in line:
+            parts = line.split()[1:]
+            out.update(parts[:-1])  # phần tử cuối là đích
+    return out
+
+
+def test_moi_module_app_import_deu_duoc_copy():
+    """Thiếu 1 file .py mà app.py import (kể cả import lười như catalog_search trong load_catalog) thì ảnh Docker chạy
+    được tới lúc gọi tới mới hỏng: bắt ngay ở đây (đợt kho-lon vòng 3)."""
+    mods = _app_modules()
+    assert {"app", "settings", "auth", "catalog_search"} <= mods, mods
+    copied = _copied_files(_dockerfile())
+    missing = sorted(f"{m}.py" for m in mods if f"{m}.py" not in copied)
+    assert not missing, f"Dockerfile thiếu COPY: {missing}"
+
+
+def test_local_imports_doc_ca_import_luoi(tmp_path, monkeypatch):
+    f = tmp_path / "x.py"
+    f.write_text("import os\ndef f():\n    from catalog_search import CatalogIndex\n    import auth\n", encoding="utf-8")
+    assert _local_imports(f) == {"catalog_search", "auth"}
 
 
 def test_dockerignore_khong_lot_tests_env():
