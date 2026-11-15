@@ -70,9 +70,12 @@ function catalogItem(p, score = null) {
   return { code: p.code, name: String(p.name ?? ""), brand: String(p.brand ?? ""), img: frontImageUrl(p.code, p.img), source: "catalog", vn: true, score };
 }
 
-/** Mục hiển thị từ ứng viên OFF (đã lọc ở parseSearch: mã 8–14 số, ảnh images.openfoodfacts.org). */
+/** Mục hiển thị từ ứng viên OFF (đã lọc ở parseSearch: mã 8–14 số, ảnh images.openfoodfacts.org). Mục kho phụ
+ *  (src/front-extra.js, hit.extra === true) giữ cờ extra: true (vòng 7); mục OFF thường KHÔNG có khóa extra (dạng cũ). */
 function offItem(h, score = null) {
-  return { code: h.code, name: String(h.name ?? ""), brand: String(h.brand ?? ""), img: String(h.img ?? ""), source: "off", vn: h.vn === true, score };
+  const it = { code: h.code, name: String(h.name ?? ""), brand: String(h.brand ?? ""), img: String(h.img ?? ""), source: "off", vn: h.vn === true, score };
+  if (h.extra === true) it.extra = true;
+  return it;
 }
 
 /** Điểm BM25 của một tài liệu (m: từ → số lần, len) cho câu tìm, dùng idf / avgdl / k1 / b của chỉ mục. Cùng công thức
@@ -167,7 +170,8 @@ function applyGuard(ranked, base, { k, lockTop, offMax }) {
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
  * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule, offPromote, strangeFill }
- * (offPromote sai → GuardValueError; f2 / f3 bỏ qua offPromote / strangeFill)
+ * (offPromote / strangeFill sai → GuardValueError; f2 / f3 bỏ qua offPromote / strangeFill)
+ * Mục ra từ kho phụ (hit.extra === true) có thêm extra: true (vòng 7); giao diện vẽ như mục OFF.
  * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD; lockTop / offMax / offGap không phải số nguyên
  * ≥ 0 thì báo lỗi, không tự tắt lớp chặn).
  */
@@ -179,6 +183,11 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
   } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
   const promote = checkPromote(offPromote);
+  // Vòng 7 (gợi ý 3 reviewer vòng 6): strangeFill phải đúng boolean (như offPromote: sai → GuardValueError, không tự
+  // hiểu "x1" / 1 là bật hay null là tắt).
+  if (typeof strangeFill !== "boolean") {
+    throw new GuardValueError(`front-merge: strangeFill phải là true hoặc false (nhận ${typeof strangeFill === "string" ? JSON.stringify(strangeFill) : String(strangeFill)})`);
+  }
   // Vòng 4: giá trị chặn sai (null, NaN, Infinity, số âm, số lẻ, chuỗi…) → báo lỗi ngay, kể cả khi OFF lỗi. Trước đây
   // null / NaN làm lớp chặn tự TẮT (lockTop | 0 = 0, offMax null = không giới hạn). Chọn báo lỗi thay vì lặng lẽ dùng
   // mặc định: truyền sai là lỗi lập trình, test phải thấy ngay; app gọi không truyền (undefined = DEFAULT_GUARD).

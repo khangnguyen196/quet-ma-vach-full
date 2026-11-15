@@ -12,7 +12,7 @@
 //   const xi = buildExtraIndex(t1, store.products);                      // một lần
 //   const ex = searchExtra(rIndex.index, xi, found);                     // found = rankFromItems / rankFromText
 //   mergeFront(t1, rIndex, products, found, joinExtra(off, ex));         // off = joinOffResults(…) hoặc lỗi
-import { bm25DocScore, offDoc } from "./front-merge.js";
+import { bm25DocScore, offDoc, mergeFront, isGuardError } from "./front-merge.js";
 import { frontImageUrl } from "./front-search.js";
 
 // Như front-search.js: viết thẳng import.meta.env.BASE_URL để Vite thay lúc build; node (test) không có → "/".
@@ -108,4 +108,33 @@ export function joinExtra(offResult, extraHits) {
     hits.push(h);
   }
   return { ok: true, hits };
+}
+
+/**
+ * Vòng 7 (P1): hàm gộp DÙNG CHUNG cho app (main.js showPhotoResult) và khung đo cuối (tu-dong-cuoi-do.mjs), để số đo
+ * "qua luồng app" là số của chính code app.
+ * ctx = { t1, rIndex, products, xi } (xi = buildExtraIndex(…) hoặc null / undefined khi kho phụ chưa tải / lỗi / chậm);
+ * found = rankFromItems / rankFromText; off = joinOffResults(…) của các câu tìm OFF ({ ok: false, kind: "none" } khi
+ * không có câu nào).
+ * opts.called: đã gọi mạng tìm OFF chưa (main.js: queries.length > 0); không truyền thì suy từ off (null / kind "none"
+ * = không gọi). opts.merge: CHỈ cho test (mặc định mergeFront; app không truyền).
+ * Trả { merged: tối đa 5 mục (mergeFront, lớp chặn mặc định), offFailed: đã gọi OFF mà không câu nào trả được (tính
+ * trên off GỐC, không trên kết quả đã nối kho phụ) }.
+ * xi null → merged GIỐNG HỆT mergeFront(…, off). Lỗi giá trị chặn (GuardValueError) → console.error rồi mergeFront(…,
+ * null) = đúng kết quả T1 (như main.js vòng 5–6); lỗi khác ném tiếp.
+ * Ví dụ: const { merged, offFailed } = photoMerge({ t1, rIndex, products, xi }, found, off, { called: true });
+ */
+export function photoMerge({ t1, rIndex, products, xi }, found, off, { called, merge = mergeFront } = {}) {
+  const ex = xi ? searchExtra(rIndex.index, xi, found) : [];
+  const didCall = typeof called === "boolean" ? called : !!(off && typeof off === "object" && off.kind !== "none");
+  const offFailed = didCall && !(off && off.ok === true);
+  let merged;
+  try {
+    merged = merge(t1, rIndex, products, found, joinExtra(off, ex)); // lớp chặn mặc định (không truyền tùy chọn)
+  } catch (e) {
+    if (!isGuardError(e)) throw e;
+    console.error(e);
+    merged = merge(t1, rIndex, products, found, null); // = đúng kết quả T1
+  }
+  return { merged, offFailed };
 }
