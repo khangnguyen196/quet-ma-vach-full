@@ -5,8 +5,10 @@ muối, 6 ca dựng, 70 ca dò, đáp án trên từng mức). Danh mục mức:
 trong repo). Mỗi mức chạy trong MỘT tiến trình riêng (để RSS sau nạp không lẫn mức trước):
 
     python server/do_khop_t1.py --muc c [--vang D:\\tmp\\kho-lon\\vang] [--danh-muc D:\\tmp\\kho-lon\\danh-muc]
+    python server/do_khop_t1.py --muc c --cach dir [--chi-muc D:\\tmp\\kho-lon\\chi-muc]   (vòng 3: nạp bằng load_dir)
 
-Trùng hoàn toàn = câu tìm trùng từng từ + mã, chỉ số i, thứ tự 10 gợi ý trùng + điểm lệch tương đối <= 1e-9.
+Trùng hoàn toàn = câu tìm trùng từng từ + LUÔN tìm k = 10 (vòng 3) rồi so số gợi ý (file vàng có < 10 khi T1 JS ra
+< 10) + mã, chỉ số i, thứ tự từng gợi ý + điểm lệch tương đối <= 1e-9.
 Lệch thì in ca; sửa bản Python, KHÔNG sửa JS. In thêm: thời gian nạp + dựng, RSS sau nạp / sau tìm (psutil của
 requirements-dev.txt, chỉ báo; H2 chính thức đo ở vòng 3), thời gian tìm p50 / p95 / max. Thoát mã 1 nếu có lệch.
 """
@@ -24,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalog_search import CatalogIndex, lines_from_text, row_line_info  # noqa: E402
 
 REL_TOL = 1e-9
+GOLD_K = 10
 
 
 def rss_mib():
@@ -38,7 +41,7 @@ def compare(cat: CatalogIndex, q: dict) -> tuple[bool, str, float]:
     """Một câu vàng -> (trùng?, mô tả lệch, ms tìm)."""
     t = time.perf_counter()
     lines = row_line_info(q["items"]) if "items" in q else lines_from_text(q.get("text"))
-    r = cat.rank_lines(lines, len(q["hits"]) if q["hits"] else 10)
+    r = cat.rank_lines(lines, GOLD_K)  # LUÔN k = 10 (như file vàng): so cả số gợi ý lẫn từng mục
     ms = (time.perf_counter() - t) * 1000
     if r["query"] != q["query"]:
         return False, f"câu tìm khác: py {r['query']} / js {q['query']}", ms
@@ -66,11 +69,17 @@ def main(argv=None) -> int:
     ap.add_argument("--muc", required=True, choices=["a", "b", "c"])
     ap.add_argument("--vang", default=r"D:\tmp\kho-lon\vang")
     ap.add_argument("--danh-muc", default=r"D:\tmp\kho-lon\danh-muc")
+    ap.add_argument("--cach", choices=["ram", "dir"], default="ram",
+                    help="ram = dựng trong RAM từ .jsonl.gz; dir = load_dir (mmap) thư mục <--chi-muc>/<mức>")
+    ap.add_argument("--chi-muc", default=r"D:\tmp\kho-lon\chi-muc")
     a = ap.parse_args(argv)
     gold = json.loads(Path(a.vang, f"{a.muc}.json").read_text(encoding="utf-8"))
     rss0 = rss_mib()
     t = time.perf_counter()
-    cat = CatalogIndex.load(Path(a.danh_muc, f"{a.muc}.jsonl.gz"))
+    if a.cach == "dir":
+        cat = CatalogIndex.load_dir(Path(a.chi_muc, a.muc))
+    else:
+        cat = CatalogIndex.load(Path(a.danh_muc, f"{a.muc}.jsonl.gz"))
     load_s = time.perf_counter() - t
     rss1 = rss_mib()
     if cat.N != gold["meta"]["n"]:
@@ -84,14 +93,14 @@ def main(argv=None) -> int:
         if ok:
             same += 1
             lines = row_line_info(q["items"]) if "items" in q else lines_from_text(q.get("text"))
-            r = cat.rank_lines(lines, 10)
+            r = cat.rank_lines(lines, GOLD_K)
             if all(s == h["score"] for (_, s), h in zip(r["hits"], q["hits"])):
                 exact_scores += 1
         else:
             diff.append((q["id"], why))
     rss2 = rss_mib()
     res = {
-        "muc": a.muc, "n": cat.N, "vocab": len(cat.vocab), "postings": cat.postings, "cau": len(gold["queries"]),
+        "muc": a.muc, "cach": a.cach, "k": GOLD_K, "n": cat.N, "vocab": len(cat.vocab), "postings": cat.postings, "cau": len(gold["queries"]),
         "trung": same, "lech": len(diff), "diemBangTuyetDoi": exact_scores, "napGiay": round(load_s, 2),
         "rssMiB": {"truocNap": rss0, "sauNap": rss1, "sauTim": rss2},
         "timMs": {"p50": round(quantile(times, 0.5), 2), "p95": round(quantile(times, 0.95), 2), "max": round(max(times), 2)},
