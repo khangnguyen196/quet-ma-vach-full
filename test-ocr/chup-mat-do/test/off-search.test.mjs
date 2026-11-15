@@ -15,8 +15,14 @@ function fakeClock() {
 }
 
 const madeDirs = [];
-// Windows: thư mục tạm ở ổ D (luật đợt tu-dong: không ghi ổ C; TEMP của máy nằm ở ổ C), như tu-dong-do.test.mjs.
-const TMP_BASE = process.platform === "win32" ? "D:\\tmp\\tu-dong\\test-tmp" : os.tmpdir();
+/** Thư mục gốc cho thư mục tạm (vòng 6): QMV_TEST_TMP (khác rỗng) → D:\tmp\tu-dong\test-tmp nếu có ổ D (luật đợt
+ *  tu-dong: không ghi ổ C; TEMP của máy nằm ở ổ C) → os.tmpdir(). */
+function tmpBase(env = process.env, hasDriveD = () => fs.existsSync("D:\\")) {
+  const v = typeof env?.QMV_TEST_TMP === "string" ? env.QMV_TEST_TMP.trim() : "";
+  if (v) return v;
+  return hasDriveD() ? "D:\\tmp\\tu-dong\\test-tmp" : os.tmpdir();
+}
+const TMP_BASE = tmpBase(process.env, () => process.platform === "win32" && fs.existsSync("D:\\"));
 
 // Vòng 6 (gợi ý 5 reviewer vòng 5): thư mục tạm lấy từ biến môi trường QMV_TEST_TMP; không có thì D:\tmp\tu-dong\test-tmp
 // nếu máy có ổ D, không thì os.tmpdir().

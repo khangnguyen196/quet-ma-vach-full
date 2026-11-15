@@ -10,7 +10,7 @@ import {
 } from "./render.js";
 import {
   ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
-  photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, OFF_WAIT_TEXT
+  photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, confirmAction, OFF_WAIT_TEXT
 } from "./front-photo.js";
 import { loadT1, loadCatalog, t1ModuleUrl } from "./front-search.js";
 import { buildRankIndex, rankFromItems, rankFromText } from "./front-rank.js";
@@ -993,6 +993,8 @@ btnFrontRelogin.addEventListener("click", goToLogin);
 let frontTurn = 0; // số lượt chọn ảnh, như biến current của lookup(): lượt cũ về muộn thì bỏ (đăng xuất cũng tăng)
 let frontPicks = 0; // chỉ đếm số lần chọn ảnh (đăng xuất không tăng): dùng sau khi làm mới phiên lúc gặp 401
 let frontAbort = null; // AbortController của lượt đang gửi (chọn ảnh khác thì hủy)
+// Lượt frontTurn của "Tìm lại" ĐANG CHẠY (vòng 6, NÊN SỬA 3 vòng 5); 0 khi không có. Bấm "Đúng" lúc còn chạy thì hủy.
+let retryTurn = 0;
 let frontSearch = null; // { t1, products, rIndex } khi đã tải xong (dùng cho "Tìm lại")
 let frontSearchPromise = null;
 let frontT1Tries = 0;
@@ -1081,6 +1083,7 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     ++current; // lượt tra đang chạy (nếu có) về muộn thì bỏ
     photoPending = null;
     shownProduct = null;
+    shownLookupId = 0; // như clearPhotoResult (vòng 6, gợi ý 4 vòng 5)
     setMsg();
     result.innerHTML = renderPhotoNone({ lines: found.lines });
   }
@@ -1095,12 +1098,23 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
 function confirmPhoto() {
   const p = photoPending;
   if (!p) return;
+  // Vòng 6 (NÊN SỬA 3 vòng 5): "Tìm lại" còn chạy → hủy lượt đó (không để nó tự mở sản phẩm khác sau khi đã xác nhận).
+  // Không có "Tìm lại": chỉ đổi #frontMsg khi đang là câu kết quả (giữ câu tiến độ của lượt khác).
+  // Chọn ảnh mới thì clearPhotoResult đã xóa khung cũ (photoPending = null) nên không bấm được "Đúng" của ảnh cũ.
+  const act = confirmAction({ retryRunning: retryTurn !== 0 && retryTurn === frontTurn, msgIsResult: frontMsgIsResult });
+  if (act.cancelRetry) {
+    frontAbort?.abort();
+    ++frontTurn;
+    retryTurn = 0;
+  }
   if (!shownProduct || shownLookupId !== p.lookupId || p.lookupId !== current) { lookup(p.code); return; }
   photoPending = null;
   redrawAllergyAlert();
   // #frontMsg không còn nhắc kiểm tra sau khi đã xác nhận (vòng 5, NÊN SỬA 1 vòng 4).
-  const m = photoFollowMessage("confirmed");
-  sayFront(m.text, m.warn);
+  if (act.setMsg) {
+    const m = photoFollowMessage("confirmed");
+    sayFront(m.text, m.warn);
+  }
   // Lưu TRƯỚC, câu báo theo kết quả (vòng 5, gợi ý 5 vòng 4): addHistory nuốt lỗi ghi (storage.js) nên đọc lại để biết.
   let saved = false;
   try {
@@ -1164,8 +1178,10 @@ function onFrontClick(ev) {
   const text = frontBox.querySelector(`#${FRONT_TEXT_ID}`)?.value || "";
   frontAbort?.abort();
   const id = ++frontTurn;
+  retryTurn = id;
   showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true })
-    .catch((e) => { console.error(e); if (id === frontTurn) sayFront("Có lỗi khi tìm lại. Thử lại.", true); });
+    .catch((e) => { console.error(e); if (id === frontTurn) sayFront("Có lỗi khi tìm lại. Thử lại.", true); })
+    .finally(() => { if (retryTurn === id) retryTurn = 0; });
 }
 
 frontFile.addEventListener("change", async (ev) => {

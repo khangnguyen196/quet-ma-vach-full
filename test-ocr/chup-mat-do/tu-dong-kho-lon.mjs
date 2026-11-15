@@ -175,6 +175,25 @@ export function processChunk(text, seq, state) {
   return out;
 }
 
+/**
+ * Bộ đếm khúc đang chờ của scan() (vòng 6, gợi ý 2 reviewer vòng 5): add() khi gửi khúc; done(r) chạy onResult(r) rồi
+ * MỚI giảm bộ đếm (kể cả onResult ném lỗi); wait() xong khi không còn khúc nào (kể cả khúc đang ghi dở trong onResult).
+ * Trước đây bộ đếm giảm TRƯỚC onResult nên bước chờ có thể đi tiếp khi khúc cuối còn đang ghi.
+ */
+export function makeChunkCounter(onResult) {
+  let pending = 0;
+  let waiters = [];
+  const wake = () => { if (pending === 0) { const w = waiters; waiters = []; for (const f of w) f(); } };
+  return {
+    add() { pending++; },
+    async done(r) {
+      try { await onResult(r); } finally { pending--; wake(); }
+    },
+    wait() { return pending === 0 ? Promise.resolve() : new Promise((res) => { waiters.push(res); }); },
+    get pending() { return pending; },
+  };
+}
+
 async function scan(gzFile, outDir, { maxBytes = Infinity, workers: nW = 6 } = {}) {
   const t0 = Date.now();
   const groups = Object.fromEntries(Object.keys(GROUPS).map((k) => [k, makeGroup(k)]));
@@ -184,8 +203,6 @@ async function scan(gzFile, outDir, { maxBytes = Infinity, workers: nW = 6 } = {
   const pool = Array.from({ length: nW }, () => new Worker(new URL(import.meta.url)));
   const busy = new Map(); // worker → số khúc đang chờ
   const waiters = [];
-  let pending = 0;
-  let allDone = null;
   const onResult = async (r) => {
     lines += r.lines;
     bad += r.bad;
@@ -199,16 +216,15 @@ async function scan(gzFile, outDir, { maxBytes = Infinity, workers: nW = 6 } = {
       if (g.pendBytes > (4 << 20)) await flush(g);
     }
   };
+  const chunks = makeChunkCounter(onResult);
   for (const w of pool) {
     busy.set(w, 0);
     w.on("message", async (m) => {
       if (m.type !== "chunk") return;
       busy.set(w, busy.get(w) - 1);
-      pending--;
-      await onResult(m.r);
+      await chunks.done(m.r); // bộ đếm chỉ giảm sau khi onResult xong
       const wake = waiters.shift();
       if (wake) wake();
-      if (pending === 0 && allDone) allDone();
     });
   }
   const pick = () => [...busy.entries()].sort((a, b) => a[1] - b[1])[0];
@@ -219,7 +235,7 @@ async function scan(gzFile, outDir, { maxBytes = Infinity, workers: nW = 6 } = {
     while (pick()[1] >= 2) await new Promise((r) => waiters.push(r));
     const [w] = pick();
     busy.set(w, busy.get(w) + 1);
-    pending++;
+    chunks.add();
     const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
     w.postMessage({ type: "chunk", seq: seq++, ab }, [ab]);
   };
@@ -245,7 +261,7 @@ async function scan(gzFile, outDir, { maxBytes = Infinity, workers: nW = 6 } = {
     if (bytes >= maxBytes) { src.destroy(); break; }
   }
   if (accLen) await send(Buffer.concat(acc, accLen));
-  if (pending) await new Promise((r) => { allDone = r; });
+  await chunks.wait();
   // gộp trạng thái các luồng phụ: từ vựng (Set hợp / HLL lấy max thanh ghi), số mới sửa
   const fresh = freshZero();
   const vocab = {};

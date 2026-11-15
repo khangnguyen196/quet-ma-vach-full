@@ -324,8 +324,10 @@ function rule10(code) {
   const [o, c] = blockAt(body, m.index + m[0].length - 1);
   const cat = body.slice(o, c + 1);
   const e = m[1];
-  const ok = new RegExp(`\\bisGuardError\\s*\\(\\s*${e}\\s*\\)`).test(cat) && new RegExp(`\\bthrow\\s+${e}\\b`).test(cat);
-  return ok ? [] : [`catch phải hỏi isGuardError(${e}) và ném tiếp ${e}`];
+  // Vòng 6 (gợi ý 3 vòng 5): phải đúng dạng "if (!isGuardError(e)) throw e" — "if (isGuardError(e)) throw e" (ngược
+  // điều kiện) hay "throw e" ở chỗ khác không còn qua.
+  const ok = new RegExp(`\\bif\\s*\\(\\s*!\\s*isGuardError\\s*\\(\\s*${e}\\s*\\)\\s*\\)\\s*(?:\\{\\s*)?throw\\s+${e}\\b`).test(cat);
+  return ok ? [] : [`catch phải có if (!isGuardError(${e})) throw ${e}`];
 }
 
 /** Luật (12): confirmPhoto hỏi confirmAction(…); trong khối if (….cancelRetry) có frontAbort?.abort() và ++frontTurn;

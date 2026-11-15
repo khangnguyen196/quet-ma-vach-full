@@ -269,6 +269,18 @@ export function isUnconfirmed(pending, shownLookupId) {
   return !!pending && Number.isInteger(pending.lookupId) && pending.lookupId > 0 && pending.lookupId === shownLookupId;
 }
 
+/**
+ * Bấm "Đúng" (vòng 6, NÊN SỬA 3 vòng 5): retryRunning = lượt "Tìm lại" còn đang chạy (main.js: retryTurn === frontTurn);
+ * msgIsResult = #frontMsg đang là câu KẾT QUẢ. Lượt "Tìm lại" còn chạy → hủy lượt đó (không để nó tự mở sản phẩm khác
+ * sau khi người dùng đã xác nhận) và ghi câu đã xác nhận; không có → chỉ đổi #frontMsg khi đang là câu kết quả (câu tiến
+ * độ của lượt khác, vd "Đang gửi ảnh…", giữ). Chỉ giá trị true mới tính.
+ * Ví dụ: confirmAction({ retryRunning: true, msgIsResult: false }) → { cancelRetry: true, setMsg: true }
+ */
+export function confirmAction({ retryRunning = false, msgIsResult = false } = {}) {
+  const cancelRetry = retryRunning === true;
+  return { cancelRetry, setMsg: cancelRetry || msgIsResult === true };
+}
+
 /** Câu trong khung sau khi bấm "Đúng" (vòng 5, gợi ý 5 vòng 4): theo kết quả lưu lịch sử (saved: đọc lại thấy mã). */
 export function confirmStatusText(saved) {
   return saved === true ? "Đã xác nhận, đã lưu vào lịch sử tra cứu." : "Đã xác nhận (chưa lưu được vào lịch sử).";
