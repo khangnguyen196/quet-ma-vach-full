@@ -1,13 +1,45 @@
 // Test phần thuần của khung đo tu-dong-do.mjs (đợt tu-dong vòng 3): bộ đếm lượt dồn theo vòng, cộng lượt OFF vào
 // api_usage.json ở nhiều thư mục, trần lượt vòng / lần chạy, độ phủ. Không gọi mạng (netFetch giả, thư mục tạm).
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { readLuot, addUsage, makeDiskFetch, coverage, DEFAULT_CAP, ROUND_KEY } from "../tu-dong-do.mjs";
+import * as mod from "../tu-dong-do.mjs";
 
-const tmp = () => fs.mkdtempSync(path.join(process.env.TEMP || os.tmpdir(), "tu-dong-do-"));
+const { readLuot, addUsage, makeDiskFetch, coverage, DEFAULT_CAP, ROUND_KEY } = mod;
+
+// Vòng 4 (gợi ý 5 của reviewer vòng 3): thư mục tạm ở ổ D (luật đợt: không ghi ổ C), xóa sau khi chạy xong.
+const TMP_ROOT = "D:\\tmp\\tu-dong\\test-tmp";
+const made = [];
+const tmp = () => {
+  fs.mkdirSync(TMP_ROOT, { recursive: true });
+  const d = fs.mkdtempSync(path.join(TMP_ROOT, "tu-dong-do-"));
+  made.push(d);
+  return d;
+};
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
+
+test("tmp(): thư mục tạm nằm dưới D:\\tmp\\tu-dong\\test-tmp", () => {
+  assert.ok(tmp().toLowerCase().startsWith(TMP_ROOT.toLowerCase()));
+});
+
+test("addUsage: cùng thư mục viết khác hoa / thường (Windows) chỉ cộng 1 lần", () => {
+  const a = tmp();
+  const flip = a.replace(/^[a-z]:/i, (d) => (d === d.toUpperCase() ? d.toLowerCase() : d.toUpperCase()));
+  addUsage(1, new Date("2026-11-15T05:00:00Z"), [a, flip, a.toUpperCase()]);
+  const j = JSON.parse(fs.readFileSync(path.join(a, "test-ocr", "outputs", "api_usage.json"), "utf8"));
+  if (process.platform === "win32") assert.deepEqual(j, { openfoodfacts: { "2026-11": 1 } });
+  else assert.ok(j.openfoodfacts["2026-11"] >= 1);
+});
+
+test("roundKeyOf (--vong): mặc định vẫn vong3 (đọc được sổ cũ); số 1–99 → vongN; sai → báo lỗi", () => {
+  assert.equal(typeof mod.roundKeyOf, "function");
+  assert.equal(mod.roundKeyOf(undefined), "vong3");
+  assert.equal(mod.roundKeyOf(null), "vong3");
+  assert.equal(mod.roundKeyOf("6"), "vong6");
+  assert.equal(mod.roundKeyOf("12"), "vong12");
+  for (const bad of ["", "0", "-1", "6a", "vong6", "100", "1.5"]) assert.throws(() => mod.roundKeyOf(bad), /--vong/, bad);
+});
 
 test("readLuot: đọc batDau + mọi khóa vongN, tong = tổng; chưa có file → batDau 76", () => {
   const d = tmp();
