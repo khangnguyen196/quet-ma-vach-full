@@ -85,6 +85,23 @@ def test_co_danh_muc_candidates_dung_thu_tu_file_vang(monkeypatch):
     assert len(loads) == 3, "mỗi app (tiến trình) nạp danh mục đúng 1 lần, không nạp lại mỗi lượt /ocr"
 
 
+def test_catalog_path_la_thu_muc_chi_muc_mmap(monkeypatch, tmp_path):
+    """Vòng 3: CATALOG_PATH = thư mục do catalog_search.py build ghi -> nạp bằng mmap, candidates trùng file vàng."""
+    out = tmp_path / "chi-muc"
+    catalog_search.build_index_dir(MINI, out)
+    monkeypatch.setenv("CATALOG_PATH", str(out))
+    q = _gold("7up-may")
+    app = app_module.create_app(make_settings(), engine=ItemsEngine(q["items"]))
+    try:
+        with TestClient(app) as c:
+            j = _post(c).json()
+        assert app.state.catalog.mmapped is True
+        assert [x["code"] for x in j["candidates"]] == [h["code"] for h in q["hits"]]
+    finally:
+        if app.state.catalog is not None:
+            app.state.catalog.close()
+
+
 def test_khong_doc_duoc_chu_candidates_rong(monkeypatch):
     monkeypatch.setenv("CATALOG_PATH", str(MINI))
     app = app_module.create_app(make_settings(), engine=ItemsEngine(_gold("dung-rong-khung")["items"]))

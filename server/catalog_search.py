@@ -20,6 +20,13 @@ Những chỗ dễ lệch với JS (đã xử lý):
   (5) rowLineInfo: sắp xếp ổn định theo (minY, minX), tổng độ tin cộng TUẦN TỰ (không dùng sum(): Python 3.12 cộng
       bù sai số nên khác JS), trim theo đúng tập ký tự trắng của String.prototype.trim.
 
+Vòng 3: chỉ mục DỰNG SẴN lúc build ảnh Docker (build_index_dir -> thư mục .npy + meta.json + lines.jsonl), lúc chạy
+CatalogIndex.load_dir nạp bằng np.load(mmap_mode="r") + mmap (không dựng lại: thức dậy nhanh, trang chỉ vào RAM khi
+đọc). CatalogIndex.load nhận cả thư mục (mmap) lẫn file .jsonl / .jsonl.gz (dựng trong RAM, cho test / thử).
+
+    python catalog_search.py build  D:/tmp/kho-lon/danh-muc/c.jsonl.gz D:/tmp/kho-lon/chi-muc/c
+    python catalog_search.py verify D:/tmp/kho-lon/chi-muc/c D:/tmp/kho-lon/danh-muc/c.jsonl.gz   (mã 1 nếu sai)
+
 Ví dụ:
     cat = CatalogIndex.load("D:/tmp/kho-lon/danh-muc/c.jsonl.gz")
     cat.search(items, k=10)   # [{code, name, brand, img, text, grp, score}] (items = khung chữ của /ocr)
@@ -28,9 +35,13 @@ Ví dụ:
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import math
+import mmap
 import re
+import sys
+import time
 import unicodedata
 from array import array
 from pathlib import Path
@@ -189,6 +200,8 @@ def strip_phrases(norm: str) -> str:
 
 
 def _conf_low(line) -> bool:
+    # Ghi chú: khác JS khi conf là CHUỖI ("0.3": JS so "0.3" < 0.5 -> true do ép kiểu, ở đây _is_number -> false).
+    # Không ảnh hưởng máy chủ: conf luôn do row_line_info sinh (số hoặc None); chỉ dữ liệu gõ tay mới có chuỗi.
     c = line.get("conf") if isinstance(line, dict) else None
     return c is not None and _is_number(c) and c < MIN_CONF
 
@@ -265,6 +278,93 @@ def lines_from_text(text) -> list[dict]:
 
 ROW_KEYS = ("code", "name", "brand", "img", "text", "grp")
 
+# ---- thư mục chỉ mục dựng sẵn (vòng 3): build_index_dir ghi, CatalogIndex.load_dir nạp bằng mmap ----
+INDEX_FORMAT = 1
+INDEX_META = "meta.json"
+INDEX_LINES = "lines.jsonl"
+INDEX_ARRAYS = ("indices", "tf", "indptr", "idf", "lens", "starts", "ends")
+
+
+def read_source(path) -> tuple[bytes, str]:
+    """Đọc danh mục .jsonl / .jsonl.gz -> (byte JSONL chưa nén, sha256 của FILE nguồn như trên đĩa)."""
+    data = Path(path).read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    if Path(path).suffix == ".gz" or data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    return data, sha
+
+
+def build_index_dir(src, out_dir) -> dict:
+    """Dựng chỉ mục của danh mục src (.jsonl / .jsonl.gz) rồi ghi ra THƯ MỤC out_dir (dùng lúc build ảnh Docker):
+    indices / tf / indptr / idf / lens / starts / ends .npy (np.save), meta.json (từ vựng theo thứ tự id, aliasDf, N,
+    avgdl, k1, b, sha256 nguồn) và lines.jsonl (dòng thô chưa nén, starts / ends trỏ vào). Trả meta."""
+    raw, sha = read_source(src)
+    cat = CatalogIndex(raw)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    arrays = {"indices": cat.indices, "tf": cat.tf, "indptr": cat.indptr, "idf": cat.idf, "lens": cat.lens,
+              "starts": cat._starts, "ends": cat._ends}
+    for name in INDEX_ARRAYS:
+        np.save(out / f"{name}.npy", np.ascontiguousarray(arrays[name]), allow_pickle=False)
+    (out / INDEX_LINES).write_bytes(raw)
+    vocab = [None] * len(cat.vocab)
+    for w, t in cat.vocab.items():
+        vocab[t] = w
+    meta = {"format": INDEX_FORMAT, "N": cat.N, "avgdl": cat.avgdl, "k1": cat.k1, "b": cat.b,
+            "postings": cat.postings, "source": Path(src).name, "sha256Source": sha,
+            "sha256Raw": hashlib.sha256(raw).hexdigest(), "rawBytes": len(raw), "vocab": vocab, "aliasDf": cat.alias_df}
+    # json dump số thực bằng repr: avgdl đọc lại trùng từng bit
+    (out / INDEX_META).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return meta
+
+
+def count_lines(raw: bytes) -> int:
+    """Số dòng không rỗng (như CatalogIndex / readLevel của JS)."""
+    return sum(1 for ln in raw.split(b"\n") if ln)
+
+
+def verify_index_dir(out_dir, src) -> list[str]:
+    """Kiểm thư mục chỉ mục với nguồn: nạp được bằng load_dir, N == số dòng nguồn, sha256 nguồn trong meta trùng.
+    Trả danh sách lỗi (rỗng = đạt)."""
+    raw, sha = read_source(src)
+    probs = []
+    try:
+        cat = CatalogIndex.load_dir(out_dir)
+    except Exception as e:  # noqa: BLE001
+        return [f"load_dir lỗi: {type(e).__name__}: {e}"]
+    try:
+        n = count_lines(raw)
+        if cat.N != n:
+            probs.append(f"N {cat.N} khác số dòng nguồn {n}")
+        if cat.meta.get("sha256Source") != sha:
+            probs.append(f"sha256 nguồn trong meta {cat.meta.get('sha256Source')} khác {sha}")
+        if cat.N and not cat.row(cat.N - 1).get("code"):
+            probs.append("dòng cuối không đọc được mã")
+    finally:
+        cat.close()
+    return probs
+
+
+def main(argv=None) -> int:
+    """python catalog_search.py build <src.jsonl.gz> <out_dir> | verify <out_dir> <src.jsonl.gz>"""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) == 3 and args[0] == "build":
+        t = time.perf_counter()
+        meta = build_index_dir(args[1], args[2])
+        size = sum(f.stat().st_size for f in Path(args[2]).iterdir() if f.is_file())
+        print(f"chỉ mục: {meta['N']} sản phẩm, {len(meta['vocab'])} từ, {meta['postings']} mục, "
+              f"{size} B, dựng {time.perf_counter() - t:.1f}s, sha256 nguồn {meta['sha256Source']}")
+        return 0
+    if len(args) == 3 and args[0] == "verify":
+        probs = verify_index_dir(args[1], args[2])
+        for p in probs:
+            print(f"LỖI chỉ mục: {p}")
+        if not probs:
+            print("chỉ mục khớp nguồn (load_dir, N, sha256)")
+        return 1 if probs else 0
+    print(main.__doc__)
+    return 2
+
 
 class CatalogIndex:
     """Chỉ mục BM25 của một danh mục JSONL ({code, name, brand, img, text, grp} mỗi dòng), thứ tự dòng = chỉ số i."""
@@ -329,19 +429,79 @@ class CatalogIndex:
         self.lens = lens.astype(np.float64)
         self.postings = int(self.indptr[-1])
 
+    mmapped = False
+
     # ---- nạp ----
     @classmethod
     def load(cls, path, **kw) -> "CatalogIndex":
+        """Thư mục chỉ mục dựng sẵn -> load_dir (mmap); file .jsonl / .jsonl.gz -> dựng trong RAM (test / thử)."""
         p = Path(path)
-        data = p.read_bytes()
-        if p.suffix == ".gz" or data[:2] == b"\x1f\x8b":
-            data = gzip.decompress(data)
-        return cls(data, **kw)
+        if p.is_dir():
+            return cls.load_dir(p)
+        return cls(read_source(p)[0], **kw)
+
+    @classmethod
+    def load_dir(cls, path) -> "CatalogIndex":
+        """Nạp thư mục do build_index_dir ghi: mảng bằng np.load(mmap_mode="r"), dòng thô bằng mmap (chỉ đọc). Không
+        dựng lại gì: thời gian nạp ~ đọc meta JSON (từ vựng). Gọi close() trước khi xóa thư mục (Windows giữ file)."""
+        p = Path(path)
+        if not p.is_dir():
+            raise FileNotFoundError(f"không có thư mục chỉ mục: {p}")
+        meta = json.loads((p / INDEX_META).read_text(encoding="utf-8"))
+        if meta.get("format") != INDEX_FORMAT:
+            raise ValueError(f"định dạng chỉ mục {meta.get('format')!r}, cần {INDEX_FORMAT}")
+        arrs = {}
+        for name in INDEX_ARRAYS:
+            f = p / f"{name}.npy"
+            if not f.is_file():
+                raise FileNotFoundError(f"thiếu {f.name} trong thư mục chỉ mục")
+            arrs[name] = np.load(f, mmap_mode="r", allow_pickle=False)
+        self = cls.__new__(cls)
+        self.k1 = float(meta["k1"])
+        self.b = float(meta["b"])
+        self.N = int(meta["N"])
+        self.avgdl = meta["avgdl"]
+        self.vocab = {w: t for t, w in enumerate(meta["vocab"])}
+        self.alias_df = dict(meta["aliasDf"])
+        self.indices, self.tf, self.indptr = arrs["indices"], arrs["tf"], arrs["indptr"]
+        self.idf, self.lens = arrs["idf"], arrs["lens"]
+        self._starts, self._ends = arrs["starts"], arrs["ends"]
+        self.postings = int(meta["postings"])
+        if len(self.vocab) != len(self.idf) or len(self.indptr) != len(self.vocab) + 1 or len(self.lens) != self.N \
+                or len(self._starts) != self.N or len(self._ends) != self.N or len(self.indices) != self.postings:
+            raise ValueError("thư mục chỉ mục không khớp meta (số từ / số tài liệu / số mục)")
+        lines = p / INDEX_LINES
+        self._file = open(lines, "rb")  # noqa: SIM115 - giữ mở tới close()
+        size = lines.stat().st_size
+        self._raw = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ) if size else b""
+        self.mmapped = True
+        self.meta = {k: v for k, v in meta.items() if k not in ("vocab", "aliasDf")}
+        return self
+
+    def close(self):
+        """Nhả mmap + file + mảng (Windows: phải gọi trước khi xóa thư mục chỉ mục). Bản RAM: không làm gì."""
+        if not self.mmapped:
+            return
+        raw = self._raw
+        self._raw = b""
+        if isinstance(raw, mmap.mmap):
+            raw.close()
+        f = getattr(self, "_file", None)
+        if f is not None:
+            f.close()
+            self._file = None
+        for name in ("indices", "tf", "indptr", "idf", "lens", "_starts", "_ends"):
+            setattr(self, name, None)
+        self.mmapped = False
 
     # ---- tìm ----
     def row(self, i: int) -> dict:
-        r = json.loads(self._raw[self._starts[i]:self._ends[i]])
-        return {k: r.get(k, "") for k in ROW_KEYS}
+        r = json.loads(self._raw[int(self._starts[i]):int(self._ends[i])])
+        out = {}
+        for k in ROW_KEYS:
+            v = r.get(k)
+            out[k] = "" if v is None else v  # null trong danh mục -> "" (như thiếu khóa)
+        return out
 
     def bm25_search(self, query_words, k: int = DEFAULT_K) -> list[tuple[int, float]]:
         """Như bm25Search của t1.mjs: [(i, điểm)] top k, điểm cao trước, bằng điểm thì i nhỏ trước."""
@@ -400,3 +560,7 @@ class CatalogIndex:
     def search_text(self, text, k: int = DEFAULT_K) -> list[dict]:
         """Chữ người dùng gõ / sửa -> ứng viên (như rankFromText)."""
         return self._out(self.rank_lines(lines_from_text(text), k)["hits"])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

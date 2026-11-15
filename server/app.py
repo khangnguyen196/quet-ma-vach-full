@@ -52,7 +52,9 @@ CANDIDATES_K = 10
 
 
 def catalog_path_from_env(env=None) -> str:
-    """CATALOG_PATH (đường dẫn danh mục JSONL / JSONL.gz); trống / không có = không nạp (/ocr trả y hệt trước)."""
+    """CATALOG_PATH: THƯ MỤC chỉ mục dựng sẵn (catalog_search.py build; nạp bằng mmap, ảnh Docker dùng cách này) hoặc
+    file danh mục .jsonl / .jsonl.gz (dựng trong RAM lúc khởi động, cho test / thử); trống / không có = không nạp
+    (/ocr trả y hệt trước)."""
     env = os.environ if env is None else env
     return str(env.get("CATALOG_PATH") or "").strip()
 
@@ -69,7 +71,8 @@ def load_catalog(path: str):
     except Exception as e:  # noqa: BLE001
         log.error("KHÔNG nạp được danh mục (CATALOG_PATH): %s; /ocr chạy không có candidates", type(e).__name__)
         return None
-    log.info("danh mục: %d sản phẩm, %d từ, nạp %.1fs", cat.N, len(cat.vocab), time.perf_counter() - t)
+    log.info("danh mục: %d sản phẩm, %d từ, nạp %.1fs (%s)", cat.N, len(cat.vocab), time.perf_counter() - t,
+             "thư mục mmap" if getattr(cat, "mmapped", False) else "dựng trong RAM")
     return cat
 
 
