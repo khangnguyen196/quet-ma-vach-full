@@ -511,12 +511,25 @@ describe("cleanQuery: chữ OCR → tối đa 2 câu tìm, mỗi câu 2–3 từ
     }
   });
 
-  test("ca muối Co.op: bỏ dấu, có từ của tên + thương hiệu", () => {
+  test("ca muối Co.op: bỏ dấu, có thương hiệu 'coop' (vòng 3: đưa lại phép kiểm 'coop')", () => {
+    // Vòng 2 phép kiểm "coop" bị thay bằng "mui" vì từ lạ ("bin", "say") lấy idf trung vị (gần idf lớn nhất) nên dòng
+    // "Mui Bin Tinh Sấy" chiếm cả 2 câu; vòng 3 từ lạ không cộng điểm (UNKNOWN_IDF) nên "coop" trở lại.
     const qs = mod.cleanQuery(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"], { idf: IDF });
     ok(qs);
     const all = qs.join(" ");
-    assert.ok(all.includes("mui") && !all.includes("sấy"), JSON.stringify(qs));
+    assert.ok(all.split(" ").includes("coop") && !all.includes("sấy"), JSON.stringify(qs));
     assert.ok(!all.includes("iodizes") && !all.includes("refined"), "từ lạ không trong từ vựng, không phải âm tiết → bỏ");
+  });
+
+  test("vòng 3: từ không có trong từ vựng (âm tiết hợp lệ) không cộng điểm khi xếp dòng / chọn từ", () => {
+    assert.equal(mod.UNKNOWN_IDF, 0);
+    // dòng 4 âm tiết lạ không được đứng trước dòng có từ danh mục chỉ vì dài
+    const qs = mod.cleanQuery(["bin tinh ba bon", "Soda chanh"], { idf: IDF });
+    assert.equal(qs[0], "soda chanh", JSON.stringify(qs));
+    // trong một dòng: từ danh mục được chọn trước từ lạ
+    assert.equal(mod.cleanQuery(["bin ba soda chanh bon"], { idf: IDF })[0], "bin soda chanh", "2 từ danh mục + 1 từ lạ đứng đầu dòng");
+    // không có chỉ mục (không truyền idf): như cũ, mỗi từ 1 điểm (dòng nhiều từ trước)
+    assert.equal(mod.cleanQuery(["Ngon", "bin tinh ba"])[0], "bin tinh ba");
   });
 
   test("bỏ dòng số liệu / khối lượng / nhiễu", () => {
