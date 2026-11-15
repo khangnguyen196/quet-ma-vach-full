@@ -13,8 +13,14 @@ import { joinExtra } from "./front-extra.js";
 
 /** Số ứng viên máy chủ tối đa app nhận (bằng SERVER_K của khung đo / máy chủ). */
 export const SERVER_MAX = 10;
-export const SERVER_TEXT_MAX = 2000;
-export const SERVER_NAME_MAX = 200;
+/**
+ * Giới hạn độ dài (ký tự Unicode) chữ ứng viên app nhận. Kho-lon vòng 5: danh mục (c) có text dài nhất 2.240, name 213,
+ * brand 133 ký tự (4 mục từng bị cắt ở 2.000 / 200) → nâng lên 2.500 / 250 để app không cắt chữ nào của danh mục (khung
+ * đo không cắt; cắt text làm lệch điểm BM25). server/tests/test_catalog_lengths.py đọc 2 dòng dưới bằng regex và giữ
+ * giới hạn ≥ độ dài lớn nhất của danh mục: giữ đúng dạng "export const TÊN = số;".
+ */
+export const SERVER_TEXT_MAX = 2500;
+export const SERVER_NAME_MAX = 250;
 
 /**
  * Tùy chọn gộp G2-g3-w3 (đã chốt ở đợt kho-lon vòng 3, luật chọn trong test-ocr/chup-mat-do/kho-lon-do.mjs): lớp chặn
@@ -34,7 +40,8 @@ function cut(s, n) {
 /**
  * body (JSON của /ocr) → mảng ứng viên sạch, hoặc [] (không có khóa / không phải mảng / máy chủ cũ / tìm lỗi).
  * Chỉ xét tối đa SERVER_MAX phần tử đầu. Mỗi mục phải có: code chuỗi 8–14 chữ số; name, brand, text, grp là chuỗi; score
- * là số hữu hạn. Sai dạng → bỏ mục; trùng mã → giữ mục đầu. Cắt text ≤ 2.000, name / brand ≤ 200 ký tự.
+ * là số hữu hạn. Sai dạng → bỏ mục; trùng mã → giữ mục đầu. Cắt text ≤ SERVER_TEXT_MAX, name / brand ≤ SERVER_NAME_MAX
+ * ký tự (danh mục hiện tại không có mục nào bị cắt).
  * Ra { code, name, brand, img, vn, text, grp, score } (dạng mục máy chủ của khung đo kho-lon-do.mjs).
  * img: CHỈ là khóa ảnh của danh mục (vd "front_vi.3"), app tự dựng URL images.openfoodfacts.org bằng frontImageUrl;
  * khóa sai / URL bất kỳ → "" (không bao giờ nhận URL ảnh từ máy chủ).
@@ -76,6 +83,9 @@ export function serverCandidates(body) {
  * ctx = { t1, rIndex, products }; found = rankFromItems; off = joinOffResults(…) ({ ok: false, kind: "none" } khi không
  * có câu tìm); S = serverCandidates(…) có ≥ 1 mục (S rỗng thì main.js KHÔNG gọi hàm này mà đi đường cũ photoMerge).
  * opts.called: đã gọi mạng tìm OFF chưa (như photoMerge).
+ * found không bao giờ rỗng ở app (khác mergeByMethod trả [] khi found rỗng): "rỗng" ở khung đo là found null / thiếu
+ * (`if (!found) return []`); ở app found luôn là object { lines, query, hits } của rankFromItems, hits rỗng thì
+ * mergeFront vẫn gộp ứng viên máy chủ / OFF.
  * Trả { merged (≤ 5 mục, mục máy chủ / OFF có source "off"), offFailed (tính trên off GỐC như photoMerge) }.
  * Lỗi giá trị chặn (GuardValueError) → console.error rồi kết quả T1; lỗi khác ném tiếp.
  */
