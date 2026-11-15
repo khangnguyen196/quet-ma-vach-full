@@ -94,17 +94,26 @@ describe("serverCandidates: kiểm dạng", () => {
     assert.equal(mod.serverCandidates({ candidates: [ok({ code: "123456789012" })] })[0].img, "");
   });
 
-  test("cắt text ≤ 2.000, name / brand ≤ 200 ký tự (không cắt đôi ký tự ngoài BMP)", () => {
-    const long = "a".repeat(2500);
-    const emo = "😀".repeat(250); // 250 ký tự, 500 đơn vị UTF-16
-    const [c] = mod.serverCandidates({ candidates: [ok({ text: long, name: emo, brand: "b".repeat(300) })] });
-    assert.equal(c.text.length, 2000);
-    assert.equal(Array.from(c.name).length, 200);
-    assert.equal(c.name, "😀".repeat(200));
-    assert.equal(c.brand, "b".repeat(200));
-    const [d] = mod.serverCandidates({ candidates: [ok({ text: "x".repeat(2000), name: "n".repeat(200) })] });
-    assert.equal(d.text.length, 2000);
-    assert.equal(d.name.length, 200);
+  // Kho-lon vòng 5: danh mục (c) có name dài nhất 213, text dài nhất 2.240 ký tự (4 mục từng bị cắt ở 200 / 2.000) →
+  // nâng giới hạn lên 250 / 2.500 (server/tests/test_catalog_lengths.py giữ: giới hạn ≥ độ dài lớn nhất của danh mục).
+  test("cắt text ≤ 2.500, name / brand ≤ 250 ký tự (không cắt đôi ký tự ngoài BMP)", () => {
+    assert.equal(mod.SERVER_TEXT_MAX, 2500);
+    assert.equal(mod.SERVER_NAME_MAX, 250);
+    const long = "a".repeat(3000);
+    const emo = "😀".repeat(300); // 300 ký tự, 600 đơn vị UTF-16
+    const [c] = mod.serverCandidates({ candidates: [ok({ text: long, name: emo, brand: "b".repeat(350) })] });
+    assert.equal(c.text.length, 2500);
+    assert.equal(Array.from(c.name).length, 250);
+    assert.equal(c.name, "😀".repeat(250));
+    assert.equal(c.brand, "b".repeat(250));
+    const [d] = mod.serverCandidates({ candidates: [ok({ text: "x".repeat(2500), name: "n".repeat(250) })] });
+    assert.equal(d.text.length, 2500);
+    assert.equal(d.name.length, 250);
+    // độ dài lớn nhất đo được trên danh mục (c) đi qua nguyên vẹn
+    const [e] = mod.serverCandidates({ candidates: [ok({ text: "t".repeat(2240), name: "n".repeat(213), brand: "b".repeat(133) })] });
+    assert.equal(e.text.length, 2240);
+    assert.equal(e.name.length, 213);
+    assert.equal(e.brand.length, 133);
   });
 
   test("vn chỉ khi grp đúng \"vn\"", () => {
