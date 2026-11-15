@@ -29,6 +29,8 @@ export const SEARCH_WINDOW_MS = 60000;
 export const SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const SEARCH_CACHE_MAX = 30;
 export const SEARCH_CACHE_KEY = "qmv-off-search";
+/** Dạng dữ liệu lưu localStorage (vòng 3: 2 = hit có text + khóa "all|<page_size>|<câu>"); dạng khác bị bỏ qua. */
+export const SEARCH_CACHE_VERSION = 2;
 export const SEARCH_PAGE_SIZE = 24;
 // product_name* + brands + generic_name*: để chữ ứng viên OFF giống trường text của danh mục (docText của
 // test-ocr/chup-mat-do/vn-data.mjs: MỌI product_name*, brands, MỌI generic_name*) khi chấm BM25. Không xin được "mọi
@@ -327,7 +329,7 @@ export function createOffSearch({
       const raw = storage?.getItem(SEARCH_CACHE_KEY);
       if (!raw) return;
       const data = JSON.parse(raw);
-      if (data?.v !== 1 || !Array.isArray(data.e)) return;
+      if (data?.v !== SEARCH_CACHE_VERSION || !Array.isArray(data.e)) return;
       for (const item of data.e) {
         if (!Array.isArray(item) || typeof item[0] !== "string") continue;
         const v = item[1];
@@ -345,7 +347,7 @@ export function createOffSearch({
   }
 
   function save() {
-    try { storage?.setItem(SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [...cache.entries()] })); } catch { /* đầy / bị chặn: bỏ qua */ }
+    try { storage?.setItem(SEARCH_CACHE_KEY, JSON.stringify({ v: SEARCH_CACHE_VERSION, e: [...cache.entries()] })); } catch { /* đầy / bị chặn: bỏ qua */ }
   }
 
   function takeSlot() {
@@ -362,7 +364,7 @@ export function createOffSearch({
     if (signal?.aborted) return { ok: false, kind: "aborted" };
     load();
     prune();
-    const key = `${vn ? "vn" : "all"}|${t}`;
+    const key = `${vn ? "vn" : "all"}|${pageSize}|${t}`;
     const hit = cache.get(key);
     if (hit) return { ok: true, hits: hit.hits.map((h) => ({ ...h })), cached: true };
     if (!takeSlot()) return { ok: false, kind: "limited" };
