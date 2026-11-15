@@ -5,9 +5,12 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import fs from "node:fs";
 
-// import động + catch: chưa có module thì từng test đỏ riêng (thử đỏ / xanh), không phải lỗi cả file
-const mod = await import("../src/off-search.js").catch(() => ({}));
+// import lỗi (thiếu file / lỗi cú pháp) thì cả file đỏ, như tests/front-rank.test.js
+const mod = await import("../src/off-search.js");
+const offMod = await import("../src/off.js");
+const PKG = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const PRODUCTS = [
   { code: "8934588752117", product_name: "Soda Chanh - Diet 7Up", product_name_en: "Soda Chanh - Diet 7Up", brands: "PepsiCo", countries_tags: [], image_front_small_url: "https://images.openfoodfacts.org/images/products/893/458/875/2117/front_en.7.200.jpg" },
@@ -76,6 +79,26 @@ describe("hằng số + URL", () => {
     assert.equal(u.searchParams.get("tag_0"), null);
   });
 
+  test("APP_NAME / APP_VERSION một nguồn: src/off.js export, khớp package.json; off-search dùng lại", () => {
+    assert.equal(offMod.APP_NAME, "quet-ma-vach-full");
+    assert.equal(offMod.APP_VERSION, PKG.version);
+    const u = new URL(mod.searchUrl("soda"));
+    assert.equal(u.searchParams.get("app_name"), offMod.APP_NAME);
+    assert.equal(u.searchParams.get("app_version"), offMod.APP_VERSION);
+    const src = fs.readFileSync(new URL("../src/off-search.js", import.meta.url), "utf8");
+    assert.match(src, /import\s*\{[^}]*APP_NAME[^}]*\}\s*from\s*"\.\/off\.js"/);
+    assert.doesNotMatch(src, /const APP_VERSION\s*=/, "không ghi cứng phiên bản lần 2");
+  });
+
+  test("searchUrl mã hóa ký tự đặc biệt & # % + trong câu tìm (không lọt tham số khác)", () => {
+    const q = "a&b=c #d 50% e+f";
+    const u = new URL(mod.searchUrl(q));
+    assert.equal(u.searchParams.get("search_terms"), q);
+    assert.equal(u.searchParams.get("b"), null);
+    assert.equal(u.hash, "");
+    assert.equal(u.searchParams.get("json"), "1");
+  });
+
   test("searchUrl lọc Việt Nam: tagtype_0=countries, tag_0=en:vietnam; base đổi được (máy chủ giả)", () => {
     const u = new URL(mod.searchUrl("muoi", { vn: true, base: "http://127.0.0.1:1/ok" }));
     assert.equal(u.origin + u.pathname, "http://127.0.0.1:1/ok");
@@ -141,11 +164,33 @@ describe("createOffSearch với máy chủ giả", () => {
     assert.deepEqual([r.ok, r.kind], [false, "timeout"]);
   });
 
-  test("lỗi mạng (cổng đóng / fetch ném TypeError, gồm 503 thiếu CORS trong trình duyệt) → network", async () => {
-    const closed = await mod.createOffSearch({ base: "http://127.0.0.1:1/x", storage: null }).search("a b");
-    assert.deepEqual([closed.ok, closed.kind], [false, "network"]);
+  test("lỗi mạng (fetch ném TypeError / Promise bị từ chối, gồm 503 thiếu CORS trong trình duyệt) → network", async () => {
     const thrown = await mod.createOffSearch({ fetchImpl: () => { throw new TypeError("Load failed"); }, storage: null }).search("a b");
     assert.deepEqual([thrown.ok, thrown.kind], [false, "network"]);
+    const rejected = await mod.createOffSearch({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); }, storage: null }).search("a b");
+    assert.deepEqual([rejected.ok, rejected.kind], [false, "network"]);
+  });
+
+  test("fetchImpl trả thứ không phải Response (undefined, {}, status không phải số) → network, không ném", async () => {
+    for (const bad of [undefined, null, {}, { status: "200", ok: true }]) {
+      const r = await mod.createOffSearch({ fetchImpl: async () => bad, storage: null }).search("a b");
+      assert.deepEqual([r.ok, r.kind], [false, "network"], JSON.stringify(bad));
+    }
+  });
+
+  test("listener abort trên signal của người gọi được gỡ sau khi xong (thành công / lỗi)", async () => {
+    const added = [];
+    const removed = [];
+    const signal = {
+      aborted: false,
+      addEventListener: (type, fn) => added.push([type, fn]),
+      removeEventListener: (type, fn) => removed.push([type, fn]),
+    };
+    await mod.createOffSearch({ fetchImpl: async () => okResponse(), storage: null }).search("soda", { signal });
+    await mod.createOffSearch({ fetchImpl: async () => new Response("x", { status: 503 }), storage: null }).search("soda", { signal });
+    assert.equal(added.length, 2);
+    assert.equal(removed.length, 2);
+    assert.deepEqual(removed.map(([t, fn]) => [t, fn]), added.map(([t, fn]) => [t, fn]), "gỡ đúng hàm đã gắn");
   });
 
   test("signal của người gọi: hủy giữa chừng → aborted; đã hủy trước → aborted, không gọi mạng", async () => {
@@ -187,6 +232,32 @@ describe("giới hạn ≤ 10 lượt / phút cho cả app", () => {
     const r12 = await s.search("cau 12");
     assert.equal(r12.ok, true);
     assert.equal(n, 11);
+  });
+
+  test("lượt lỗi (503 / mạng) và lượt bị hủy giữa chừng vẫn bị tính vào 10 lượt", async () => {
+    let t = 5_000_000;
+    let n = 0;
+    const s = mod.createOffSearch({
+      fetchImpl: async (u, init) => {
+        n++;
+        if (n % 3 === 0) throw new TypeError("Load failed");
+        if (n % 3 === 1) return new Response("x", { status: 503 });
+        return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+      },
+      now: () => t,
+      storage: null,
+    });
+    for (let i = 0; i < 10; i++) {
+      const ac = new AbortController();
+      const p = s.search(`loi ${i}`, { signal: ac.signal });
+      ac.abort();
+      const r = await p;
+      assert.equal(r.ok, false, `lượt ${i + 1}`);
+    }
+    assert.equal(n, 10);
+    const r11 = await s.search("loi 11");
+    assert.deepEqual([r11.ok, r11.kind], [false, "limited"]);
+    assert.equal(n, 10, "không gọi mạng lần 11");
   });
 
   test("lượt lấy từ bộ nhớ đệm không tính vào giới hạn", async () => {
@@ -264,6 +335,45 @@ describe("bộ nhớ đệm (bộ nhớ + localStorage)", () => {
     const r = await mod.createOffSearch({ fetchImpl: async () => okResponse(), storage: wrong }).search("soda");
     assert.deepEqual([r.ok, r.cached], [true, false]);
   });
+
+  test("localStorage: mỗi mục đọc lên lọc lại như parseSearch (mã 8–14 số, chuỗi, ảnh images.openfoodfacts.org, vn boolean)", async () => {
+    const st = memStorage();
+    const t = 1_000_000;
+    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t, hits: [
+      { code: "8934588752117", name: 5, brand: { x: 1 }, img: "https://evil.example.com/a.jpg", vn: "yes" },
+      { code: "abc123", name: "mã hỏng" },
+      null,
+      { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "https://images.openfoodfacts.org/images/x.jpg", vn: true },
+      { code: "8934588022111", name: "trùng" },
+    ] }]] }));
+    let n = 0;
+    const r = await mod.createOffSearch({ fetchImpl: async () => { n++; return okResponse(); }, storage: st, now: () => t + 1000 }).search("soda");
+    assert.deepEqual([r.ok, r.cached, n], [true, true, 0]);
+    assert.deepEqual(r.hits, [
+      { code: "8934588752117", name: "", brand: "", img: "", vn: false },
+      { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "https://images.openfoodfacts.org/images/x.jpg", vn: true },
+    ]);
+  });
+
+  test("localStorage: mục có thời điểm ở tương lai (đồng hồ chỉnh lùi) coi là hỏng → gọi lại", async () => {
+    const st = memStorage();
+    const t = 1_000_000;
+    st.setItem(mod.SEARCH_CACHE_KEY, JSON.stringify({ v: 1, e: [["all|soda", { t: t + 3_600_000, hits: [{ code: "8934588752117", name: "x", brand: "", img: "", vn: false }] }]] }));
+    let n = 0;
+    const r = await mod.createOffSearch({ fetchImpl: async () => { n++; return okResponse(); }, storage: st, now: () => t }).search("soda");
+    assert.deepEqual([r.ok, r.cached, n], [true, false, 1]);
+  });
+
+  test("localStorage: mục quá hạn ở phiên mới → gọi lại", async () => {
+    const st = memStorage();
+    let t = 2_000_000;
+    let n = 0;
+    const fetchImpl = async () => { n++; return okResponse(); };
+    await mod.createOffSearch({ fetchImpl, storage: st, now: () => t }).search("soda chanh");
+    t += mod.SEARCH_CACHE_TTL_MS + 1;
+    const r = await mod.createOffSearch({ fetchImpl, storage: st, now: () => t }).search("soda chanh");
+    assert.deepEqual([r.ok, r.cached, n], [true, false, 2]);
+  });
 });
 
 describe("searchVnThenAll: ưu tiên Việt Nam rồi không lọc (không loại hàng ngoại)", () => {
@@ -292,7 +402,7 @@ describe("cleanQuery: chữ OCR → 1–3 câu tìm ngắn", () => {
   const ok = (qs) => {
     assert.ok(Array.isArray(qs) && qs.length >= 1 && qs.length <= 3, JSON.stringify(qs));
     for (const q of qs) {
-      assert.ok(q.split(" ").length <= 5, `câu dài: ${q}`);
+      assert.ok(q.split(" ").length <= mod.QUERY_WORDS_MAX, `câu dài: ${q}`);
       assert.match(q, /^[a-z0-9 ]+$/, `còn dấu / ký tự lạ: ${q}`);
     }
     assert.equal(new Set(qs).size, qs.length, "không trùng");
@@ -304,11 +414,44 @@ describe("cleanQuery: chữ OCR → 1–3 câu tìm ngắn", () => {
     assert.ok(qs.includes("soda chanh"), JSON.stringify(qs));
   });
 
-  test("ca 7Up gõ tay: '7 up' ghép thành '7up', giữ từ ngắn", () => {
-    const qs = mod.cleanQuery("Soda chanh diet 7 up");
+  test("ca 7Up gõ tay: '7 up' ghép thành '7up' khi '7up' có trong từ vựng danh mục", () => {
+    const vocab = new Set(["7up", "soda", "chanh", "diet"]);
+    const qs = mod.cleanQuery("Soda chanh diet 7 up", { vocab });
     ok(qs);
-    assert.ok(qs[0].includes("7up") && qs[0].includes("soda chanh"), JSON.stringify(qs));
-    assert.deepEqual(mod.cleanQuery("7UP"), ["7up"]);
+    assert.ok(qs.some((q) => q.split(" ").includes("7up")), JSON.stringify(qs));
+    assert.ok(qs.some((q) => q.includes("soda chanh")), JSON.stringify(qs));
+  });
+
+  test("ghép số + từ chỉ khi từ ghép có trong từ vựng; không ghép '3 in', '24 lon', '2 túi'", () => {
+    const vocab = new Set(["7up", "ca", "phe", "sua", "bia"]);
+    for (const v of [undefined, vocab]) {
+      const a = mod.cleanQuery("Cà phê sữa 3 in 1", { vocab: v }).join(" ").split(" ");
+      assert.ok(!a.includes("3in"), JSON.stringify(a));
+      const b = mod.cleanQuery(["Bia 24 lon"], { vocab: v }).join(" ").split(" ");
+      assert.ok(!b.includes("24lon"), JSON.stringify(b));
+      const c = mod.cleanQuery(["Bánh quy 2 túi"], { vocab: v }).join(" ").split(" ");
+      assert.ok(!c.includes("2tui"), JSON.stringify(c));
+    }
+    const noVocab = mod.cleanQuery("Soda chanh diet 7 up").join(" ").split(" ");
+    assert.ok(!noVocab.includes("7up"), "không có từ vựng thì không ghép");
+  });
+
+  test("từ toàn phụ âm (tên hãng 'TH') giữ khi có trong từ vựng, bỏ khi không", () => {
+    const withV = mod.cleanQuery(["TH", "true MILK sữa tươi"], { vocab: new Set(["th", "true", "milk", "sua", "tuoi"]) }).join(" ").split(" ");
+    assert.ok(withV.includes("th"), JSON.stringify(withV));
+    const noV = mod.cleanQuery(["TH", "true MILK sữa tươi"]).join(" ").split(" ");
+    assert.ok(!noV.includes("th"), JSON.stringify(noV));
+  });
+
+  test("không có câu chỉ 1 từ dưới 5 chữ cái (ca 'ca' khớp hàng nghìn sản phẩm)", () => {
+    assert.deepEqual(mod.cleanQuery(["Cá"]), []);
+    assert.deepEqual(mod.cleanQuery("7UP"), []);
+    for (const input of [["Cá", "Ngon"], ["CA", "khoi lugng tinh sog"], ["Up", "Soda chanh", "Khong calo"]]) {
+      for (const q of mod.cleanQuery(input)) {
+        const w = q.split(" ");
+        assert.ok(w.length > 1 || w[0].replace(/[^a-z]/g, "").length >= 5, `câu 1 từ ngắn: ${q}`);
+      }
+    }
   });
 
   test("ca muối Co.op: bỏ dấu, có từ của tên + thương hiệu", () => {
