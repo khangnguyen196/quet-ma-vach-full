@@ -82,6 +82,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `DAILY_LIMIT_PER_USER` | 200 | ảnh mỗi người dùng mỗi **ngày UTC** (đổi ngày lúc 00:00 UTC = 7 giờ sáng giờ Việt Nam), chỉ khi `AUTH_MODE=supabase`; `0` = tắt. Cộng thêm với 2 giới hạn phút. Quá -> 429, `Retry-After` = số giây tới 00:00 UTC. **Đếm trong RAM**: máy chủ ngủ (scale về 0) / khởi động lại thì về 0; chỉ đúng khi tối đa 1 bản chạy (replica). Lớp chống dùng chùa, không phải sổ cái |
 | `ALLOWED_ORIGINS` | (trống = chỉ `https://khangnguyen196.github.io`) | nguồn (trang web) được gọi máy chủ, cách nhau dấu phẩy, dạng `http(s)://tên-miền[:cổng]`; bỏ khoảng trắng, phần tử rỗng, "/" cuối, nguồn trùng; đổi về chữ thường, bỏ cổng mặc định. `*`, có đường dẫn / `?` / `#` / tên đăng nhập -> từ chối khởi động. Có giá trị thì THAY mặc định (muốn giữ github.io phải ghi vào danh sách). Azure: `https://khangnguyen196.github.io,https://localhost:5173` |
 | `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng), **cộng thêm** với `ALLOWED_ORIGINS` (không thay). `chay-thu.ps1` luôn đặt 1, nên chạy trên máy = `ALLOWED_ORIGINS` (mặc định github.io) + mọi localhost; ảnh Docker đặt 0 |
+| `CATALOG_PATH` | (trống) | (đợt `kho-lon` vòng 2, cờ tùy chọn) đường dẫn danh mục JSONL / JSONL.gz (`{code, name, brand, img, text, grp}` mỗi dòng). Trống = không nạp, `/ocr` trả **y hệt** trước (không có khóa `candidates`). Có giá trị: nạp MỘT lần lúc khởi động (lifespan), `/ocr` thêm `candidates` (mục "Hợp đồng API ứng viên"); nạp lỗi -> 1 dòng log tên lỗi, OCR vẫn chạy, không có `candidates`. Vòng 2 chưa thêm vào `.env.example` / Dockerfile (ảnh Docker hiện chưa chép `catalog_search.py`; chỉ mục lúc build ảnh + mmap để vòng 3) |
 | `PORT` | 8080 | cổng máy chủ nghe TRONG Docker (`CMD` của Dockerfile đọc `${PORT:-8080}`, `HEALTHCHECK` cũng đọc). `chay-thu.ps1` không đọc biến này (dùng tham số `-Port`, mặc định 8765) |
 
 ## API
@@ -128,6 +129,35 @@ hay Content-Type). Trả:
   `width` / `height` là cỡ ảnh đó; `origWidth` / `origHeight` là cỡ gốc sau khi xoay theo EXIF. Muốn vẽ lên ảnh gốc thì nhân
   `origWidth / width`.
 - `ms`: tổng trên máy chủ (giải mã + thu nhỏ + OCR); `msOcr`: riêng OCR. Số là float thường, chữ UTF-8.
+
+### Hợp đồng API ứng viên (`candidates`, đợt `kho-lon` vòng 2)
+
+Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/ocr` thêm MỘT khóa, các khóa cũ giữ nguyên:
+
+```json
+"candidates": [
+  { "code": "8934588752117", "name": "…", "brand": "…", "img": "front_vi.3", "text": "…", "grp": "893", "score": 21.37 }
+]
+```
+
+- Tối đa 10 mục, tính từ CHÍNH `items` OCR của lượt này bằng `catalog_search.py` = phần tìm của T1 bản Python, khớp
+  T1 JS (`public/chup-mat-do/t1.mjs` + `rankFromItems` của `src/front-rank.js`): ghép hàng `rowLineInfo`, câu tìm
+  `t1QueryFromLines` với từ vựng + bí danh của CHÍNH danh mục máy chủ (luật "7 up" -> "7up", dòng 2 chữ cái là bí danh
+  ở >= 2 tài liệu), BM25 k1 1,2 / b 0,75. Thứ tự = `bm25Search`: điểm giảm dần, bằng điểm thì dòng đứng trước trong
+  danh mục trước.
+- Mỗi mục: `code` (chuỗi mã), `name`, `brand`, `img` (giá trị THÔ của danh mục, vd `front_vi.3` hoặc `""`; app tự dựng URL
+  ảnh bằng `frontImageUrl` như danh mục trong app), `text` (chữ tài liệu BM25 của danh mục, để app CHẤM LẠI bằng chỉ mục
+  của mình như đã đo ở `test-ocr/chup-mat-do/kho-lon-do.mjs`), `grp` (nhóm: `vn`, `893`, `th`, `jp`, `my`, `id`, `kr`,
+  `cn`, `us`), `score` (điểm BM25 trên danh mục MÁY CHỦ, số thực; không so được với điểm của danh mục trong app).
+- Không đọc được chữ / câu tìm rỗng -> `"candidates": []`. Tìm lỗi -> KHÔNG có khóa `candidates` (200, OCR như cũ, log
+  chỉ tên lỗi, không chữ OCR). App phải coi "không có khóa" và "lỗi máy chủ" như nhau: lùi về cách hiện tại.
+- Tìm chạy trong cùng chỗ hàng đợi của lượt OCR (không tăng số ảnh xử lý cùng lúc).
+- Khớp JS kiểm bằng file vàng: `tests/test_catalog_search.py` (danh mục mini `tests/fixtures/catalog-mini.jsonl.gz` +
+  `t1-golden.json`, sinh bằng `test-ocr/chup-mat-do/kho-lon-vang.mjs`) và `do_khop_t1.py` (3 mức thật ngoài repo,
+  `D:\tmp\kho-lon\vang\{a,b,c}.json`): vòng 2 trùng 139 / 139 câu ở mỗi mức (a), (b), (c), 0 lệch. Sửa luật T1 thì sửa
+  JS trước, sinh lại file vàng, rồi sửa Python cho khớp.
+- RSS (chỉ báo, vòng 2, Windows, Python 3.12, chưa nạp model OCR): sau nạp mức (a) 32 MiB, (b) 44 MiB, (c) 170 MiB
+  (nạp + dựng (c) 16,8 giây); H2 (RAM đỉnh cả tiến trình) đo chính thức ở vòng 3.
 
 ### Lỗi
 

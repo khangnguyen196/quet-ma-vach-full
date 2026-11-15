@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -46,9 +47,54 @@ def error(status: int, message: str, headers=None) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status, headers=headers)
 
 
-def create_app(settings: Settings | None = None, engine=None, verifier=None) -> FastAPI:
+# ---- danh mục ứng viên (đợt kho-lon vòng 2, P4): cờ tùy chọn CATALOG_PATH ----
+CANDIDATES_K = 10
+
+
+def catalog_path_from_env(env=None) -> str:
+    """CATALOG_PATH (đường dẫn danh mục JSONL / JSONL.gz); trống / không có = không nạp (/ocr trả y hệt trước)."""
+    env = os.environ if env is None else env
+    return str(env.get("CATALOG_PATH") or "").strip()
+
+
+def load_catalog(path: str):
+    """Nạp danh mục MỘT lần (lúc khởi động). Lỗi -> log tên lỗi, trả None: OCR vẫn chạy, chỉ không có candidates."""
+    if not path:
+        return None
+    t = time.perf_counter()
+    try:
+        from catalog_search import CatalogIndex  # import lười: không đặt CATALOG_PATH thì không cần file này
+
+        cat = CatalogIndex.load(path)
+    except Exception as e:  # noqa: BLE001
+        log.error("KHÔNG nạp được danh mục (CATALOG_PATH): %s; /ocr chạy không có candidates", type(e).__name__)
+        return None
+    log.info("danh mục: %d sản phẩm, %d từ, nạp %.1fs", cat.N, len(cat.vocab), time.perf_counter() - t)
+    return cat
+
+
+def attach_candidates(catalog, result: dict) -> dict:
+    """Thêm "candidates" (<= 10 mục {code, name, brand, img, text, grp, score}) tính từ chính items OCR. Tìm lỗi -> bỏ
+    khóa candidates, log chỉ tên lỗi (không chữ OCR), trả result như cũ."""
+    if catalog is None:
+        return result
+    try:
+        cands = catalog.search(result.get("items") or [], CANDIDATES_K)
+        result["candidates"] = [
+            {"code": str(c["code"]), "name": str(c["name"]), "brand": str(c["brand"]), "img": str(c["img"]),
+             "text": str(c["text"]), "grp": str(c["grp"]), "score": float(c["score"])}
+            for c in cands
+        ]
+    except Exception as e:  # noqa: BLE001
+        result.pop("candidates", None)
+        log.error("lỗi khi tìm ứng viên: %s", type(e).__name__)
+    return result
+
+
+def create_app(settings: Settings | None = None, engine=None, verifier=None, catalog=None) -> FastAPI:
     """engine: đối tượng có .run(img) -> list, .loaded, .info (test truyền engine giả); None = nạp RapidOCR lúc khởi động.
-    verifier: bộ kiểm token (test truyền bản có hàm tải giả); None = tự tạo khi AUTH_MODE=supabase."""
+    verifier: bộ kiểm token (test truyền bản có hàm tải giả); None = tự tạo khi AUTH_MODE=supabase.
+    catalog: chỉ mục danh mục có .search(items, k) (test truyền); None = nạp từ CATALOG_PATH lúc khởi động (nếu có)."""
     settings = settings or load_settings()
     auth.check_startup(settings)  # supabase thiếu / sai biến, giá trị lạ -> ném lỗi, không khởi động
     setup_logging()
@@ -67,12 +113,16 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
             except Exception as e:
                 log.error("KHÔNG KHỞI ĐỘNG được: %s", e)
                 raise
+        if app.state.catalog is None and app.state.catalog_path:
+            app.state.catalog = await run_in_threadpool(load_catalog, app.state.catalog_path)
         yield
 
     app = FastAPI(title="OCR R1", version=SERVER_VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine = engine
     app.state.settings = settings
     app.state.verifier = verifier
+    app.state.catalog = catalog
+    app.state.catalog_path = catalog_path_from_env()
     app.state.limiter = SlidingWindowLimiter(settings.rate_limit_per_min, settings.rate_limit_max_ips)
     # giới hạn theo người dùng (user id của Supabase), cộng thêm với giới hạn theo IP
     app.state.user_limiter = SlidingWindowLimiter(settings.rate_limit_user_per_min, settings.rate_limit_max_users)
@@ -177,6 +227,8 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None) -> 
             request.state.nbytes = nbytes
             await slot.acquire()  # chờ khóa OCR (ảnh đã nằm trong RAM, đã tính vào chỗ đã giành)
             result = await run_in_threadpool(process, eng, data, st.max_pixels, st.max_pixels_progressive)
+            if request.app.state.catalog is not None:  # vẫn giữ chỗ hàng đợi: tìm ứng viên tính vào lượt này
+                result = await run_in_threadpool(attach_candidates, request.app.state.catalog, result)
         except imaging.ImageError as e:
             return error(e.status, e.message)
         except Exception as e:  # noqa: BLE001 - lỗi lạ (engine…): trả 500 NGAY ở đây để có header CORS
