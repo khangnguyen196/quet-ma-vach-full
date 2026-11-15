@@ -52,10 +52,12 @@ jobs:
       - name: Build ảnh
         run: docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t "$LOCAL" server/
 
-      - name: Chạy container (AUTH_MODE=off chỉ để chạy thử) và chờ /health
+      # Kho-lon vòng 4: giới hạn giống Container App (1 vCPU / 2 GiB, không có swap thêm). Tràn RAM thì container bị giết
+      # và các bước sau đỏ: KHÔNG nới giới hạn để CI xanh.
+      - name: Chạy container (AUTH_MODE=off chỉ để chạy thử, 1 CPU / 2 GiB như Azure) và chờ /health
         run: |
           start=$(date +%s%N)
-          docker run -d --name ocr -e AUTH_MODE=off -e PORT=8080 -p 127.0.0.1:8080:8080 "$LOCAL"
+          docker run -d --name ocr --memory=2g --memory-swap=2g --cpus=1 -e AUTH_MODE=off -e PORT=8080 -p 127.0.0.1:8080:8080 "$LOCAL"
           for i in $(seq 1 90); do
             if [ "$(docker inspect -f '{{.State.Running}}' ocr)" != "true" ]; then
               echo "::error::container đã dừng trước khi /health trả 200"
@@ -99,11 +101,23 @@ jobs:
           fi
           echo "CATALOG_N=$n_want" >> "$GITHUB_ENV"
 
+      # Kho-lon vòng 4 (NÊN SỬA 3 vòng 3): số H3 23,5 ms (Windows) là số bộ đệm ẤM (30 ảnh liền nhau). Ở đây xóa bộ đệm
+      # trang của máy (container dùng chung bộ đệm với máy) để lượt chu.png ngay sau là lượt đầu, bộ đệm nguội (trang mmap
+      # của chỉ mục phải đọc lại từ đĩa), gần ca máy chủ vừa thức dậy. Hỏng thì bước đỏ.
+      - name: Xóa bộ đệm trang (lượt chu.png = lượt đầu, bộ đệm nguội)
+        run: |
+          sync && echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+          free -m
+
       - name: Gửi ảnh thử chu.png (PNG) và xoay6.heic (HEIC, kiểm libheif trên Linux)
         run: |
           code=$(curl -s -o png.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png http://127.0.0.1:8080/ocr)
           echo "chu.png: HTTP $code"; cat png.json; echo
           [ "$code" = "200" ] || { echo "::error::chu.png không trả 200"; exit 1; }
+          # dòng log của lượt /ocr đầu tiên (có "tìm <ms>ms" = chỉ phần tìm ứng viên); không đọc được thì vẫn xanh
+          line=$(docker logs ocr 2>&1 | grep -E "POST /ocr .*tìm" | head -n 1 || true)
+          echo "log lượt đầu: ${line:-không đọc được}"
+          echo "- Log /ocr chu.png (lượt đầu, bộ đệm nguội, Linux, chỉ tham khảo; H3 23,5 ms của vòng 3 là số bộ đệm ấm trên Windows): \`${line:-không đọc được}\`" >> "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY'
           import json, sys
           sys.path.insert(0, "server/tests/fixtures")
@@ -150,6 +164,9 @@ jobs:
             echo "- RAM đỉnh (cgroup memory.peak, sau 2 ảnh OCR + ảnh nặng 40 MP): $peak_mb MB"
             echo "- Khởi động tới /health 200: ${STARTUP_SECONDS} giây"
             echo "- Danh mục ứng viên (/health catalog.n): ${CATALOG_N} sản phẩm"
+            echo "- Container chạy với --memory=2g --memory-swap=2g --cpus=1 (như Container App 1 vCPU / 2 GiB); tràn RAM thì CI đỏ."
+            echo "- memory.peak của cgroup tính cả bộ đệm file / trang mmap của chỉ mục đã chạm (không chỉ bộ nhớ riêng của tiến trình): không so thẳng với H2 Windows (đỉnh working set / bộ nhớ riêng)."
+            echo "- Ảnh 40 MP ở đây là ảnh dải màu tự sinh (ít chữ): phần OCR có thể nhẹ hơn ảnh chụp thật cùng cỡ."
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"
 

@@ -21,22 +21,27 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py catalog_search.py LICENSES.md ./
+# Danh mục ứng viên (đợt kho-lon vòng 3): mức (c) = VN + 893 + th / jp / my / id / kr / cn + us, 532.732 sản phẩm Open
+# Food Facts (ODbL, bản xuất 08/11/2026; LICENSES.md). Chỉ mục dựng LÚC BUILD (catalog_search.py build: mảng .npy + meta +
+# dòng thô), lúc chạy nạp bằng mmap (không dựng lại: máy chủ scale về 0 thức dậy vẫn có ứng viên ngay lượt đầu).
+# Vòng 4: lớp danh mục đứng TRƯỚC COPY các file máy chủ khác (sửa app.py không làm dựng lại chỉ mục ~20 giây; catalog_search.py
+# chỉ cần numpy). Trước khi dựng: sha256 của file .gz phải trùng số ghi ở đây = số trong LICENSES.md (pytest
+# test_sha256_danh_muc_trung_3_noi kiểm cả 3 nơi); sai thì build hỏng. Sau khi dựng (catalog_search.py verify): load_dir
+# được, N == số dòng nguồn, sha256 nguồn trong meta trùng; sai thì build hỏng. Xóa .gz sau khi dựng (lớp COPY vẫn giữ
+# ~14 MB trong ảnh). Thư mục đọc được bởi người dùng ocr (a+rX).
+COPY catalog_search.py ./
+COPY catalog/c.jsonl.gz /tmp/catalog-src/c.jsonl.gz
+RUN echo "370a9ab314b3f6fc88ad7cf1fdd67011ab0a8cd57e9557d5362f8136a7bcd164  /tmp/catalog-src/c.jsonl.gz" | sha256sum -c - \
+ && python catalog_search.py build /tmp/catalog-src/c.jsonl.gz /app/catalog-index \
+ && python catalog_search.py verify /app/catalog-index /tmp/catalog-src/c.jsonl.gz \
+ && rm -rf /tmp/catalog-src \
+ && chmod -R a+rX /app/catalog-index
+
+COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py LICENSES.md ./
 
 # Model lúc build: wheel rapidocr==3.10.0 đã kèm PP-OCRv6_det_small.onnx + PP-OCRv6_rec_small.onnx trong
 # site-packages/rapidocr/models. Kiểm sha256 (trùng server/README.md và MODEL_SHA256 của ocr_engine.py): sai thì build hỏng.
 RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); assert not p, p; print('sha256 model OK:', e.MODEL_SHA256)"
-
-# Danh mục ứng viên (đợt kho-lon vòng 3): mức (c) = VN + 893 + th / jp / my / id / kr / cn + us, 532.732 sản phẩm Open
-# Food Facts (ODbL, bản xuất 08/11/2026; LICENSES.md). Chỉ mục dựng LÚC BUILD (catalog_search.py build: mảng .npy + meta +
-# dòng thô), lúc chạy nạp bằng mmap (không dựng lại: máy chủ scale về 0 thức dậy vẫn có ứng viên ngay lượt đầu).
-# Kiểm sau khi dựng (catalog_search.py verify): load_dir được, N == số dòng nguồn, sha256 nguồn trong meta trùng; sai
-# thì build hỏng. Xóa .gz sau khi dựng (lớp COPY vẫn giữ ~14 MB trong ảnh). Thư mục đọc được bởi người dùng ocr (a+rX).
-COPY catalog/c.jsonl.gz /tmp/catalog-src/c.jsonl.gz
-RUN python catalog_search.py build /tmp/catalog-src/c.jsonl.gz /app/catalog-index \
- && python catalog_search.py verify /app/catalog-index /tmp/catalog-src/c.jsonl.gz \
- && rm -rf /tmp/catalog-src \
- && chmod -R a+rX /app/catalog-index
 
 # Chạy thật: không tải model, CORS chỉ theo ALLOWED_ORIGINS (không localhost), BẮT BUỘC đăng nhập.
 # AUTH_MODE=supabase là mặc định của ảnh: quên đặt SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY trên Azure thì máy chủ KHÔNG

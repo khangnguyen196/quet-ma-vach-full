@@ -157,14 +157,16 @@ Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/oc
 - Tìm chạy trong cùng chỗ hàng đợi của lượt OCR (không tăng số ảnh xử lý cùng lúc).
 - Khớp JS kiểm bằng file vàng: `tests/test_catalog_search.py` (danh mục mini `tests/fixtures/catalog-mini.jsonl.gz` +
   `t1-golden.json`, sinh bằng `test-ocr/chup-mat-do/kho-lon-vang.mjs`) và `do_khop_t1.py` (3 mức thật ngoài repo,
-  `D:\tmp\kho-lon\vang\{a,b,c}.json`): vòng 2 trùng 139 / 139 câu ở mỗi mức (a), (b), (c), 0 lệch. Sửa luật T1 thì sửa
-  JS trước, sinh lại file vàng, rồi sửa Python cho khớp.
+  `D:\tmp\kho-lon\vang\{a,b,c}.json`): vòng 2 trùng 139 / 139 câu ở mỗi mức (a), (b), (c), 0 lệch. Vòng 3 (luôn k = 10,
+  so số gợi ý + từng mục): 3 mức × 2 cách nạp (dựng trong RAM / thư mục `load_dir` mmap) = 6 lượt, mỗi lượt 139 / 139
+  câu trùng, 0 lệch. Sửa luật T1 thì sửa JS trước, sinh lại file vàng, rồi sửa Python cho khớp.
 - Nguồn fixture `tests/fixtures/catalog-mini.jsonl.gz` (2.092 dòng trích từ danh mục mức (c)) và chữ / mã trong
   `t1-golden.json`: dữ liệu Open Food Facts (https://world.openfoodfacts.org), giấy phép ODbL 1.0, bản xuất 08/11/2026.
 - Số đo vòng 3 (`do_h2h3.py`, cách đọc số chốt trước ở đầu file; Windows 10, MỘT tiến trình uvicorn thật, OCR_THREADS=1,
   nạp -> 30 ảnh bộ B -> JPEG CMYK nhiều lượt quét 40 MP; MiB): RAM đỉnh (max đỉnh working set / đỉnh bộ nhớ riêng) mốc
   không danh mục 822,3, (a) 824,0, (b) 825,6, (c) 835,3 (ngưỡng 1.536); thời gian CHỈ phần tìm p95 trên 30 ảnh (a) 2,1 ms,
-  (b) 5,7 ms, (c) 23,5 ms (ngưỡng 1.000 ms); khởi động tới `/health` 200 (trung vị 3 lần) mốc 3,42 s, thư mục mmap (a)
+  (b) 5,7 ms, (c) 23,5 ms (bộ đệm ấm: 30 ảnh liền nhau, trang mmap của chỉ mục đã nằm trong bộ đệm; lượt đầu sau khi máy
+  chủ thức dậy có thể chậm hơn, workflow ghi số lượt đầu bộ đệm nguội trên Linux để tham khảo) (ngưỡng 1.000 ms); khởi động tới `/health` 200 (trung vị 3 lần) mốc 3,42 s, thư mục mmap (a)
   3,37 / (b) 3,36 / (c) 3,34 s, file .gz dựng trong RAM (a) 3,37 / (b) 4,47 / (c) 21,63 s; cỡ thư mục chỉ mục (a) 1,8 MB,
   (b) 12,0 MB, (c) 134,4 MB (lines.jsonl 92,6 MB). Mức chọn theo luật: (c).
 - Log `/ocr` (vòng 3): dòng có sẵn thêm `tìm <ms>ms` (chỉ phần `catalog.search`) hoặc `tìm -`; không ghi chữ OCR.
@@ -452,8 +454,13 @@ màu hơn ảnh) tối đa 40 MP; các loại khác (JPEG thường, PNG, HEIC) 
   bộ nhớ riêng 822 MB. JPEG không progressive nhưng nhiều lượt quét ở 40 MP chưa đo, ước tương đương.
 - 78 MB (900 − 822) chỉ là biên so với ngưỡng 900 MB đặt ở đợt `may-chu-1` (lúc đó định lên máy ảo B1s 1 GiB). Đợt
   `may-chu-2` chọn Azure Container Apps **1 vCPU / 2 GiB** (không có hệ điều hành + Docker chung trong 2 GiB đó), nên giữ
-  `MAX_PIXELS=50000000` / `MAX_PIXELS_PROGRESSIVE=40000000`. Đo trên Windows 10 máy 8 GB; **Linux chưa đo** ảnh lớn:
-  workflow `server-image.yml` ghi `memory.peak` (cgroup) sau 2 ảnh thử nhỏ; ảnh lớn trên Linux là việc để sau.
+  `MAX_PIXELS=50000000` / `MAX_PIXELS_PROGRESSIVE=40000000`. Đo trên Windows 10 máy 8 GB. Linux (đợt kho-lon): workflow
+  `server-image.yml` gửi ảnh nặng 40 MP (JPEG CMYK nhiều lượt quét, ảnh dải màu tự sinh, ít chữ: phần OCR có thể nhẹ hơn
+  ảnh chụp thật cùng cỡ) rồi ghi `memory.peak` (cgroup); run 43719480770 (commit a99f025, có danh mục (c)): 609,8 MB sau 2
+  ảnh OCR + ảnh 40 MP. `memory.peak` tính cả bộ đệm file / trang mmap đã chạm, nên không so thẳng với H2 Windows (đỉnh
+  working set / bộ nhớ riêng); xấu nhất trên Windows ≈ 835 MiB (H2 (c)) + 134 MiB (cả thư mục chỉ mục nếu chạm hết trang
+  mmap) ≈ 970 MiB < 1.536 MiB. Từ vòng 4 container trong CI chạy `--memory=2g --memory-swap=2g --cpus=1` (như Container
+  App): tràn RAM thì CI đỏ.
 - Nếu sau này chạy ở máy ít RAM hơn (vd 1 GiB): bắt đầu `MAX_PIXELS=24000000`, `MAX_PIXELS_PROGRESSIVE=20000000`, đo
   `VmHWM`, rồi mới nâng dần. Ảnh vẫn được thu về 1.600 px nên trần thấp không làm giảm chất lượng đọc chữ, chỉ từ chối
   ảnh quá to.
@@ -475,7 +482,10 @@ D:\tmp\may-chu-1\venv\Scripts\python server\do-anh-lon.py do --image jpeg-cmyk-x
 sang người dùng không phải root `ocr` rồi MỚI nạp thử RapidOCR với `OCR_OFFLINE=1` (chứng minh người dùng chạy thật đọc
 được model). Đợt `kho-lon` vòng 3: COPY `catalog/c.jsonl.gz` (danh mục mức (c), 14,2 MB, ODbL), RUN `catalog_search.py
 build` ra `/app/catalog-index` + `verify` (nạp được, N == số dòng nguồn, sha256 nguồn trùng; sai thì build hỏng), xóa
-.gz, người dùng `ocr` nạp thử chỉ mục; `CATALOG_PATH=/app/catalog-index`. Biến chạy thật: `PORT=8080`, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, **`AUTH_MODE=supabase`** (quên đặt
+.gz, người dùng `ocr` nạp thử chỉ mục; `CATALOG_PATH=/app/catalog-index`. Vòng 4: lớp danh mục (COPY `catalog_search.py`
++ .gz, RUN `echo "<sha256>  /tmp/catalog-src/c.jsonl.gz" | sha256sum -c -` rồi build + verify) đứng ngay sau `pip
+install`, TRƯỚC COPY các file máy chủ khác (sửa `app.py` không dựng lại chỉ mục); sha256 trong Dockerfile phải trùng
+`LICENSES.md` và file thật (`tests/test_dockerfile.py::test_sha256_danh_muc_trung_3_noi`). Biến chạy thật: `PORT=8080`, `OCR_OFFLINE=1`, `CORS_ALLOW_LOCALHOST=0`, **`AUTH_MODE=supabase`** (quên đặt
 `SUPABASE_URL` / `SUPABASE_PUBLISHABLE_KEY` thì máy chủ KHÔNG khởi động; chạy thử không đăng nhập phải tự đặt
 `-e AUTH_MODE=off`), `OCR_THREADS=1` (Container App 1 vCPU / 2 GiB), `MAX_PIXELS=50000000`,
 `MAX_PIXELS_PROGRESSIVE=40000000` (ca nặng nhất đo được 822 MB riêng trên Windows, dưới 2 GiB), `BODY_TIMEOUT_S=30`.
@@ -500,13 +510,20 @@ chính workflow, và chạy tay (Actions → Server image → Run workflow). Quy
 libheif trên Linux) → ghi vào Summary của lượt chạy: cỡ ảnh (MB), RAM (`docker stats`, `memory.peak` của cgroup sau 2
 ảnh OCR), thời gian khởi động → (kho-lon vòng 3) `/health` `catalog.loaded` true và `n` = số dòng danh mục, `chu.png` có khóa
 `candidates` là danh sách, ảnh nặng 40 MP (JPEG CMYK nhiều lượt quét, sinh bằng Pillow trong container riêng) trả 200
-trước bước đo RAM, Summary thêm `catalog n` → chạy container KHÔNG đặt `AUTH_MODE` phải thoát lỗi (mặc định an toàn). CHỈ trên `main`
+trước bước đo RAM, Summary thêm `catalog n` → (kho-lon vòng 4) container chạy `--memory=2g --memory-swap=2g --cpus=1`;
+sau kiểm catalog, `sync` + xóa bộ đệm trang (`/proc/sys/vm/drop_caches`) rồi mới gửi `chu.png`, dòng log `/ocr` của lượt
+đó (có `tìm <ms>ms`) vào Summary ghi "lượt đầu, bộ đệm nguội, Linux, chỉ tham khảo"; Summary ghi `memory.peak` tính cả
+bộ đệm file / trang mmap (không so thẳng với H2 Windows) và ảnh 40 MP là ảnh dải màu → chạy container KHÔNG đặt `AUTH_MODE` phải thoát lỗi (mặc định an toàn). CHỈ trên `main`
 và khi mọi bước trên đạt: đăng nhập ghcr.io bằng `GITHUB_TOKEN`, đẩy `ghcr.io/khangnguyen196/quet-ma-vach-ocr:latest` và
 `:<7 ký tự đầu mã commit>`, in digest vào Summary. Nhánh khác chỉ build + chạy thử, không đẩy.
 Tạo Container App trỏ vào ảnh này: `server/AZURE.md`.
 
 **Số CI thật** (run 43382316700, chạy tay trên `main` commit a295a86, 13/11/2026): ảnh 198,7 MB (208.316.342 byte), RAM
 đỉnh 293,3 MB (sau 2 ảnh OCR), khởi động tới `/health` 3,2 giây; tag `latest` + `a295a86`.
+Đợt kho-lon (run 43719480770, push nhánh `kho-lon` commit a99f025, có danh mục (c), chưa giới hạn 2g): ảnh 235,8 MB
+(247.252.861 byte), `/health` 200 sau 3,6 giây, `catalog` {loaded: true, n: 532732}, `chu.png` trả 10 `candidates`, ảnh
+40 MP 200, `memory.peak` 609,8 MB sau 2 ảnh OCR + ảnh 40 MP (`docker stats` lúc đó 231,2 MiB); không đẩy ghcr.io (không
+phải main).
 
 **Cảnh báo lần đẩy đầu**: lượt push `main` đầu tiên của package mới (run 43382142507) đỏ ở bước "Đẩy ảnh" với
 `error from registry: denied`. Xử lý: chạy tay workflow (Actions → Server image → Run workflow trên `main`), KHÔNG Re-run
