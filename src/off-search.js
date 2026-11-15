@@ -4,15 +4,15 @@
 //
 // Chọn API (đo 15/11/2026, test-ocr/chup-mat-do/tu-dong-cors.mjs, Playwright Chromium + WebKit từ trang 127.0.0.1):
 // - cgi/search.pl (world.openfoodfacts.org): trả 200 thì có "Access-Control-Allow-Origin: *" (Chromium 15/11,
-//   WebKit 07/11/2026), tìm theo chữ, "7up soda chanh" không lọc ra đúng 8934588752117 ở vị trí 1. Khi OFF quá tải
-//   nó trả 503 KHÔNG kèm header CORS → trong trình duyệt thành lỗi mạng (TypeError), không đọc được mã 503.
+//   WebKit dựa lần đo 07/11/2026), tìm theo chữ; tìm "7up soda chanh" không lọc VN thì 8934588752117 đứng vị trí 1.
+//   Khi OFF quá tải nó trả 503 KHÔNG kèm header CORS → trong trình duyệt thành lỗi mạng (TypeError), không đọc được mã 503.
 // - search-a-licious (search.openfoodfacts.org): trả 200 nhưng KHÔNG có header CORS → trình duyệt chặn (cả 2).
 // - /api/v2/search: không tìm theo chữ (chỉ lọc nhãn), hôm đo còn trả 503.
 //
-// Ví dụ:
+// Ví dụ (vòng 2: mỗi ảnh tối đa 2 câu = 2 lượt, KHÔNG lọc VN; ưu tiên VN xét tại chỗ bằng cờ vn):
 //   const off = createOffSearch();                         // một bộ cho cả app (giới hạn lượt tính chung)
-//   const qs = cleanQuery(["Up", "Soda chanh", "Khong calo"]);   // ["soda chanh", "up soda chanh"]
-//   const r = await off.searchVnThenAll(qs[0], { signal });       // { ok: true, hits: [{ code, name, brand, img, vn }] }
+//   const qs = cleanQuery(["Up", "Soda chanh", "Khong calo"], { idf: index.idf });  // ["soda chanh", "calo up"]
+//   const r = await off.search(qs[0], { signal });         // { ok: true, hits: [{ code, name, brand, img, vn, text }] }
 //   if (!r.ok) { /* r.kind: network | timeout | rate | server | badJson | aborted | limited → dùng kết quả danh mục */ }
 
 // Một nguồn với src/off.js (APP_NAME là tên repo; APP_VERSION khớp package.json).
@@ -29,8 +29,11 @@ export const SEARCH_WINDOW_MS = 60000;
 export const SEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const SEARCH_CACHE_MAX = 30;
 export const SEARCH_CACHE_KEY = "qmv-off-search";
-export const SEARCH_PAGE_SIZE = 10;
-export const SEARCH_FIELDS = "code,product_name,product_name_vi,product_name_en,brands,image_front_small_url,countries_tags";
+export const SEARCH_PAGE_SIZE = 24;
+// generic_name*: để chữ ứng viên OFF giống trường text của danh mục (tên + hãng + tên chung) khi chấm BM25
+export const SEARCH_FIELDS = "code,product_name,product_name_vi,product_name_en,generic_name,generic_name_vi,generic_name_en,brands,image_front_small_url,countries_tags";
+/** Độ dài tối đa chữ chấm điểm (text) của một ứng viên. */
+export const HIT_TEXT_MAX = 400;
 const IMG_PREFIX = "https://images.openfoodfacts.org/";
 const VN_FILTER = "&tagtype_0=countries&tag_contains_0=contains&tag_0=en%3Avietnam";
 
@@ -57,9 +60,10 @@ const STOP_WORDS = new Set([
 const UNIT = "(?:g|gr|gam|kg|mg|ml|l|lit|cl|oz|kcal|kj|x|goi|hop|cm|mm|m)";
 const UNIT_WORD = new RegExp(`^${UNIT}$`);
 const NUM_UNIT = new RegExp(`^\\d+${UNIT}$`);
-/** Số câu tìm tối đa, số từ tối đa mỗi câu, độ dài tối đa (ký tự). */
-export const QUERY_MAX = 3;
-export const QUERY_WORDS_MAX = 4;
+/** Số câu tìm tối đa mỗi ảnh (= số lượt tìm tối đa), số từ tối thiểu / tối đa mỗi câu, độ dài tối đa (ký tự). */
+export const QUERY_MAX = 2;
+export const QUERY_WORDS_MIN = 2;
+export const QUERY_WORDS_MAX = 3;
 export const QUERY_CHARS_MAX = 60;
 
 /** Bỏ dấu, viết thường, đ → d, ký tự không phải chữ / số thành dấu cách. */
@@ -112,43 +116,96 @@ function toLines(input) {
   return input.map((x) => (typeof x === "string" ? x : x && typeof x.text === "string" ? x.text : ""));
 }
 
-function capWords(words) {
+// Âm tiết tiếng Việt hợp lệ khi đã bỏ dấu (luật thuần, không thư viện): âm đầu? + vần.
+// Vần "mở" (nhận âm cuối c / ch / m / n / ng / nh / p / t hoặc không) và vần "đóng" (kết thúc bằng bán nguyên âm i / y / o /
+// u, không có âm cuối). Bỏ dấu nên ơ / ư / â… gộp vào a / o / u. Ví dụ: "chanh", "nghieng", "khuyen", "huong" hợp lệ;
+// rác OCR "lugng", "sog", "vibttef" không hợp lệ.
+const ONSET = "(?:ngh|ng|nh|ch|gh|gi|kh|ph|qu|th|tr|[bcdghklmnprstvx])?";
+const OPEN_NUCLEI = ["uya", "uye", "ia", "ie", "oa", "oe", "oo", "ua", "ue", "uo", "uy", "ya", "ye", "a", "e", "i", "o", "u", "y"];
+const CLOSED_NUCLEI = ["ieu", "yeu", "oai", "oay", "oeo", "uoi", "uou", "uay", "uyu", "ai", "ao", "au", "ay", "eo", "eu", "iu", "oi", "ui", "uu"];
+const CODA = "(?:ch|ng|nh|[cmnpt])?";
+const SYLLABLE = new RegExp(`^${ONSET}(?:(?:${OPEN_NUCLEI.join("|")})${CODA}|(?:${CLOSED_NUCLEI.join("|")}))$`);
+
+/** w (chữ thường, không dấu) có phải âm tiết tiếng Việt hợp lệ không. */
+export function isVietSyllable(w) {
+  return typeof w === "string" && w.length <= 7 && SYLLABLE.test(w);
+}
+
+const unknownIdfCache = new WeakMap();
+/** idf cho từ không có trong chỉ mục: trung vị idf của chỉ mục (từ lạ không được coi là "hiếm nhất"). */
+function unknownIdf(idf) {
+  if (!idf || typeof idf.values !== "function") return 1;
+  if (unknownIdfCache.has(idf)) return unknownIdfCache.get(idf);
+  const v = [...idf.values()].filter(Number.isFinite).sort((a, b) => a - b);
+  const m = v.length ? v[Math.floor(v.length / 2)] : 1;
+  unknownIdfCache.set(idf, m);
+  return m;
+}
+
+/** Ghép từ thành câu, tối đa QUERY_CHARS_MAX ký tự. */
+function joinCapped(words) {
   const out = [];
-  for (const w of words.slice(0, QUERY_WORDS_MAX)) {
+  for (const w of words) {
     if ([...out, w].join(" ").length > QUERY_CHARS_MAX) break;
     out.push(w);
   }
   return out.join(" ");
 }
 
+/** Chọn tối đa n từ có idf cao nhất (bằng nhau: đứng trước), giữ thứ tự trong dòng. */
+function topWords(words, n, idfOf) {
+  const keep = new Set(words.map((w, k) => ({ w, k, s: idfOf(w) })).sort((a, b) => b.s - a.s || a.k - b.k).slice(0, n).map((x) => x.k));
+  return words.filter((_, k) => keep.has(k));
+}
+
 /**
- * Chữ OCR (mảng dòng, mảng { text }, hoặc chuỗi nhiều dòng) → 1–3 câu tìm ngắn (không dấu, ≤ 4 từ), theo thứ tự thử:
- * 1. dòng dài nhất (nhiều chữ cái nhất) — thường là tên sản phẩm;
- * 2. từ "giống tên hãng" (dòng đầu tiên chỉ có 1–2 từ, khác dòng 1, giữ cả từ ngắn như "up") + 2 từ đầu của câu 1;
- * 3. dòng dài thứ hai (≥ 5 chữ cái);
- * 4. (nếu còn chỗ) 2 từ đầu của câu 1 khi câu 1 dài hơn 2 từ — câu rộng hơn, vì search.pl cần khớp MỌI từ.
- * Không có dòng dùng được → []. Câu chỉ 1 từ dưới 5 chữ cái bị bỏ. vocab: xem lineWords.
+ * Chữ OCR (mảng dòng, mảng { text }, hoặc chuỗi nhiều dòng) → tối đa QUERY_MAX (2) câu tìm, mỗi câu 2–3 từ (không dấu).
+ * - Chỉ giữ từ "đáng tin": có trong từ vựng danh mục (vocab / idf) HOẶC là âm tiết tiếng Việt hợp lệ (isVietSyllable).
+ * - Xếp dòng theo tổng idf các từ (từ hiếm trước; từ không có trong chỉ mục lấy trung vị idf), không theo độ dài.
+ * - Câu 1 = dòng điểm cao nhất (dòng > 3 từ: lấy 3 từ hiếm nhất; dòng 1 từ: ghép từ hiếm nhất của dòng khác);
+ *   câu 2 = dòng điểm cao thứ hai (cùng cách), không có thì 2–3 từ hiếm tiếp theo của dòng 1.
+ * - Câu 1 từ chỉ được khi không còn từ nào để ghép và từ đó ≥ 5 chữ cái.
+ * opts: idf (Map từ → idf của chỉ mục T1, cũng dùng làm từ vựng), vocab (từ vựng riêng nếu khác idf).
+ * Không có từ đáng tin → [].
  */
-export function cleanQuery(input, { vocab = null } = {}) {
+export function cleanQuery(input, { vocab = null, idf = null } = {}) {
+  const vb = vocab || idf;
+  const dflt = unknownIdf(idf);
+  const idfOf = (w) => (idf && typeof idf.get === "function" && Number.isFinite(idf.get(w)) ? idf.get(w) : dflt);
   const lines = [];
   const seen = new Set();
   toLines(input).forEach((text, i) => {
-    const words = lineWords(text, vocab);
+    const words = [...new Set(lineWords(text, vb).filter((w) => inVocab(vb, w) || isVietSyllable(w)))];
     const key = words.join(" ");
     if (!words.length || seen.has(key)) return;
     seen.add(key);
-    lines.push({ i, words, letters: words.join("").replace(/[^a-z]/g, "").length });
+    lines.push({ i, words, score: words.reduce((s, w) => s + idfOf(w), 0) });
   });
   if (!lines.length) return [];
-  const byLen = [...lines].sort((a, b) => b.letters - a.letters || a.i - b.i);
-  const main = byLen[0];
-  const cands = [capWords(main.words)];
-  const brand = lines.find((l) => l !== main && l.words.length <= 2);
-  if (brand) cands.push(capWords([...brand.words, ...main.words.slice(0, 2)]));
-  const second = byLen.find((l) => l !== main && l !== brand && l.letters >= 5);
-  if (second) cands.push(capWords(second.words));
-  if (main.words.length > 2) cands.push(main.words.slice(0, 2).join(" "));
-  return [...new Set(cands.filter((q) => q && okQuery(q)))].slice(0, QUERY_MAX);
+  const ranked = [...lines].sort((a, b) => b.score - a.score || a.i - b.i);
+  // mọi từ, từ hiếm trước (để ghép cho dòng chỉ 1 từ)
+  const allWords = [...new Set(ranked.flatMap((l) => l.words))].sort((a, b) => idfOf(b) - idfOf(a));
+
+  const out = [];
+  const used = new Set();
+  const fromWords = (words) => {
+    let ws = topWords(words, QUERY_WORDS_MAX, idfOf);
+    if (ws.length < QUERY_WORDS_MIN) {
+      const partner = allWords.find((w) => !ws.includes(w));
+      if (partner) ws = [...ws, partner];
+    }
+    const q = joinCapped(ws);
+    const key = [...ws].sort().join(" ");
+    if (q && okQuery(q) && !used.has(key)) { used.add(key); out.push(q); }
+  };
+  fromWords(ranked[0].words);
+  if (ranked[1]) fromWords(ranked[1].words);
+  if (out.length < QUERY_MAX) {
+    const first = new Set(topWords(ranked[0].words, QUERY_WORDS_MAX, idfOf));
+    const rest = ranked[0].words.filter((w) => !first.has(w));
+    if (rest.length >= QUERY_WORDS_MIN) fromWords(rest);
+  }
+  return out.slice(0, QUERY_MAX);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,9 +220,13 @@ export function searchUrl(terms, { vn = false, pageSize = SEARCH_PAGE_SIZE, base
     + `&app_name=${encodeURIComponent(APP_NAME)}&app_version=${encodeURIComponent(APP_VERSION)}`;
 }
 
+const str = (x) => (typeof x === "string" ? x.trim() : "");
+
 /**
- * Thân JSON của search.pl → [{ code, name, brand, img, vn }]; thân sai dạng (không có mảng products) → null.
+ * Thân JSON của search.pl → [{ code, name, brand, img, vn, text }]; thân sai dạng (không có mảng products) → null.
  * Bỏ mã không phải 8–14 chữ số (như gợi ý danh mục), bỏ mã trùng; img chỉ nhận URL images.openfoodfacts.org.
+ * text = các product_name* + brands + các generic_name* khác nhau (như trường text của danh mục), tối đa HIT_TEXT_MAX
+ * ký tự: chữ để chấm điểm BM25 khi gộp với T1 (không hiển thị).
  */
 export function parseSearch(json) {
   if (!json || typeof json !== "object" || !Array.isArray(json.products)) return null;
@@ -176,19 +237,21 @@ export function parseSearch(json) {
     const code = String(p.code ?? "").trim();
     if (!/^\d{8,14}$/.test(code) || seen.has(code)) continue;
     seen.add(code);
-    const name = [p.product_name_vi, p.product_name, p.product_name_en].find((x) => typeof x === "string" && x.trim()) || "";
-    const brand = Array.isArray(p.brands) ? p.brands.filter((b) => typeof b === "string" && b.trim()).map((b) => b.trim()).join(", ")
-      : typeof p.brands === "string" ? p.brands.trim() : "";
+    const names = [p.product_name_vi, p.product_name, p.product_name_en].map(str);
+    const name = names.find(Boolean) || "";
+    const brand = Array.isArray(p.brands) ? p.brands.map(str).filter(Boolean).join(", ") : str(p.brands);
     const img = typeof p.image_front_small_url === "string" && p.image_front_small_url.startsWith(IMG_PREFIX) ? p.image_front_small_url : "";
     const vn = Array.isArray(p.countries_tags) && p.countries_tags.includes("en:vietnam");
-    out.push({ code, name: name.trim(), brand, img, vn });
+    const generic = [p.generic_name_vi, p.generic_name, p.generic_name_en].map(str);
+    const text = [...new Set([...names, brand, ...generic].filter(Boolean))].join(" ").slice(0, HIT_TEXT_MAX);
+    out.push({ code, name, brand, img, vn, text });
   }
   return out;
 }
 
 /**
  * Lọc lại các mục đọc từ localStorage theo đúng luật parseSearch: mã 8–14 chữ số (bỏ mục hỏng, bỏ trùng),
- * name / brand phải là chuỗi (không thì ""), img chỉ URL images.openfoodfacts.org (không thì ""), vn chỉ true / false.
+ * name / brand / text phải là chuỗi (không thì ""), img chỉ URL images.openfoodfacts.org (không thì ""), vn chỉ true / false.
  * Không phải mảng → null.
  */
 function cleanCachedHits(hits) {
@@ -206,6 +269,7 @@ function cleanCachedHits(hits) {
       brand: typeof h.brand === "string" ? h.brand.trim() : "",
       img: typeof h.img === "string" && h.img.startsWith(IMG_PREFIX) ? h.img : "",
       vn: h.vn === true,
+      text: typeof h.text === "string" ? h.text.trim().slice(0, HIT_TEXT_MAX) : "",
     });
   }
   return out;
@@ -333,6 +397,9 @@ export function createOffSearch({
   /**
    * Ưu tiên hàng bán ở Việt Nam nhưng không loại hàng nước ngoài: tìm có lọc VN, rồi tìm không lọc (2 lượt), gộp
    * (kết quả VN trước, bỏ trùng). Một lượt lỗi vẫn trả lượt kia; cả 2 lỗi → lỗi của lượt không lọc.
+   * Vòng 2 (đợt tu-dong): luồng tìm KHÔNG dùng hàm này nữa (mỗi câu 1 lượt search() không lọc, ưu tiên VN xét tại chỗ
+   * bằng cờ vn): lượt lọc VN tốn gấp đôi lượt và lọc mất hàng có countries_tags rỗng (7Up Diet 8934588752117).
+   * Giữ lại (có test) phòng khi cần lại; chưa nối vào app.
    */
   async function searchVnThenAll(terms, { signal } = {}) {
     const a = await search(terms, { vn: true, signal });
