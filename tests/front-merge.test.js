@@ -152,7 +152,8 @@ describe("lớp chặn: OFF giả xấu nhất (3 ảnh fixture + ca muối)", (
   test("DEFAULT_GUARD = lớp chặn chọn theo luật P3e vòng 3 (f1-L3-M1-g1: lockTop 3, offMax 1, offGap 1)", () => {
     // test-ocr/chup-mat-do/tu-dong-chan-do.mjs (chỉ cache, D:\tmp\tu-dong\ket-qua\tu-dong-chan-do-BA.json): 32 cách qua
     // (1)–(3); cách này qua (4), ít ảnh bộ B rơi khỏi 5 nhất ở OFF giả (1), bỏ-một-ra 0/0 ở mọi cách.
-    assert.deepEqual({ ...mod.DEFAULT_GUARD }, { lockTop: 3, offMax: 1, offGap: 1, offTopRule: null });
+    // Vòng 6 (P1, V4-2): thêm khóa offPromote (mặc định null = tắt, kết quả như cũ); đổi expected chỉ vì thêm khóa.
+    assert.deepEqual({ ...mod.DEFAULT_GUARD }, { lockTop: 3, offMax: 1, offGap: 1, offTopRule: null, offPromote: null });
   });
 
   test("không chặn: OFF giả xấu nhất ĐẨY được gợi ý 1 của T1 (lý do cần lớp chặn)", () => {
@@ -194,16 +195,18 @@ describe("lớp chặn: OFF giả xấu nhất (3 ảnh fixture + ca muối)", (
     assert.ok(firstOff === -1 || got.slice(firstOff).every((x) => x.source === "off"), got.map((x) => x.source).join(","));
   });
 
-  // Vòng 4 (NÊN SỬA 3 vòng 3, phần câu chữ): đổi tên cho đúng hành vi hiện tại; KHÔNG đổi hành vi (hàng ngoại tên lạ:
-  // vòng 6).
-  test("T1 rỗng: f1 không lấy mục OFF nào (câu tìm T1 rỗng → mục OFF khớp 0 từ bị bỏ, để vòng 6); f2 / f3 lấp đủ chỗ trống bằng mục OFF (offMax chỉ giới hạn khi có mục danh mục để giữ)", () => {
+  // Vòng 6 (P2, NÊN SỬA 3 vòng 3): tên + nội dung đúng hành vi: f1 không có từ lạ → bỏ mục OFF khớp 0 từ; có từ lạ
+  // (strangeFill) → mục OFF chứa từ lạ lấp chỗ trống như mục OFF khác (offMax chỉ giới hạn khi có mục danh mục để giữ).
+  test("T1 rỗng, không có từ lạ: f1 không lấy mục OFF khớp 0 từ; f2 / f3 lấp đủ chỗ trống (offMax chỉ giới hạn khi có mục danh mục để giữ)", () => {
     const empty = fr.rankFromItems(t1, rIndex, []);
     const hits = Array.from({ length: 7 }, (_, j) => FOREIGN(j));
     for (const method of mod.MERGE_METHODS) {
-      const got = mod.mergeFront(t1, rIndex, products, empty, { ok: true, hits }, { method });
-      // f1 chấm theo câu tìm T1 (rỗng → không khớp từ nào → không lấy); f2 / f3 lấp theo thứ tự OFF
-      if (method === "f1") assert.deepEqual(got, []);
-      else assert.equal(got.length, mod.MERGE_K, method);
+      for (const strangeFill of [false, true]) {
+        const got = mod.mergeFront(t1, rIndex, products, empty, { ok: true, hits }, { method, strangeFill });
+        // f1 chấm theo câu tìm T1 (rỗng, ảnh không có chữ nên không có từ lạ → không lấy); f2 / f3 lấp theo thứ tự OFF
+        if (method === "f1") assert.deepEqual(got, [], `strangeFill ${strangeFill}`);
+        else assert.equal(got.length, mod.MERGE_K, method);
+      }
     }
   });
 });
@@ -294,5 +297,144 @@ describe("lớp chặn mặc định: ca 7Up", () => {
     // không chặn thì hàng ngoại đẩy được 7Up của danh mục ra ngoài 5 (lý do cần lớp chặn)
     const raw = mod.mergeFront(t1, rIndex, products, r, offReal, NO_GUARD).map((x) => x.code);
     assert.ok(!raw.includes("8934588022111") || !raw.includes("8934588023064"), raw.join(","));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vòng 6 (P1, V4-2): offPromote — sản phẩm chỉ có trên OFF lên vị trí 1 khi điểm hơn rõ và khớp ≥ minWords từ
+// ---------------------------------------------------------------------------
+
+describe("offPromote (V4-2)", () => {
+  const ngoai = JSON.parse(fs.readFileSync(new URL("./fixtures/off-7up-ngoai.json", import.meta.url), "utf8"));
+  const offReal = { ok: true, hits: parseSearch(ngoai) };
+  const typed = fr.rankFromText(t1, rIndex, "Soda chanh diet 7 up");
+  const machine = fr.rankFromItems(t1, rIndex, itemsOf(["Up", "Soda chanh", "Khong calo"]));
+  const salt = fr.rankFromText(t1, rIndex, "COOP\nSelect\nMui Bin Tinh Sấy l-t\nIODIZES REFINED SEA SALT");
+  const allCases = [...fixture.anh.map((a) => fr.rankFromItems(t1, rIndex, a.items)), typed, machine, salt];
+  const offsFor = (r) => [null, { ok: false, kind: "network" }, { ok: true, hits: [] }, { ok: true, hits: [DIET, LEMON] }, { ok: true, hits: [LEMON, DIET] }, offReal, worstOff(r)];
+  // điểm DIET theo câu gõ cao hơn gợi ý 1 của T1 (7Up hương chanh) — chứng minh để các test dưới có nghĩa
+  const dietScore = mod.bm25DocScore(rIndex.index, mod.offDoc(t1, DIET.text), typed.query);
+
+  test("DEFAULT_GUARD.offPromote = null; không truyền / undefined / null → GIỐNG HỆT kết quả cũ trên mọi ca (cả OFF giả xấu nhất)", () => {
+    assert.equal(mod.DEFAULT_GUARD.offPromote, null);
+    for (const r of allCases) for (const off of offsFor(r)) for (const method of mod.MERGE_METHODS) {
+      const a = mod.mergeFront(t1, rIndex, products, r, off, { method });
+      assert.deepEqual(mod.mergeFront(t1, rIndex, products, r, off, { method, offPromote: undefined }), a);
+      assert.deepEqual(mod.mergeFront(t1, rIndex, products, r, off, { method, offPromote: null }), a);
+    }
+  });
+
+  test("bật { gap: 0, minWords: 2 }: câu gõ 7Up + OFF có 8934588752117 → 8934588752117 vị trí 1, các mục khác lùi giữ thứ tự", () => {
+    assert.ok(dietScore.score >= typed.hits[0].score && dietScore.matched >= 2, JSON.stringify(dietScore));
+    for (const off of [{ ok: true, hits: [LEMON, DIET] }, { ok: true, hits: [DIET, LEMON] }]) {
+      const before = mod.mergeFront(t1, rIndex, products, typed, off).map((x) => x.code);
+      const got = mod.mergeFront(t1, rIndex, products, typed, off, { offPromote: { gap: 0, minWords: 2 } });
+      assert.equal(got[0].code, DIET.code, got.map((x) => x.code).join(","));
+      assert.equal(got[0].source, "off");
+      assert.deepEqual(got.slice(1).map((x) => x.code), before.filter((c) => c !== DIET.code).slice(0, mod.MERGE_K - 1));
+      assert.equal(got.length, mod.MERGE_K);
+    }
+  });
+
+  test("điểm chưa hơn gợi ý 1 đủ gap → không đẩy (giống hệt mặc định)", () => {
+    const off = { ok: true, hits: [LEMON, DIET] };
+    const gap = Math.ceil(dietScore.score - typed.hits[0].score) + 1;
+    assert.deepEqual(mod.mergeFront(t1, rIndex, products, typed, off, { offPromote: { gap, minWords: 2 } }), mod.mergeFront(t1, rIndex, products, typed, off));
+  });
+
+  test("khớp < minWords từ khác nhau → không đẩy dù điểm rất cao", () => {
+    const one = typed.query.find((w) => rIndex.index.idf.has(w));
+    const loud = { code: "9100000000009", name: one, brand: "", img: "", vn: false, text: Array(30).fill(one).join(" ") };
+    const off = { ok: true, hits: [loud] };
+    const got = mod.mergeFront(t1, rIndex, products, typed, off, { offPromote: { gap: 0, minWords: 2 } });
+    assert.notEqual(got[0].code, loud.code);
+    assert.deepEqual(got, mod.mergeFront(t1, rIndex, products, typed, off));
+  });
+
+  test("mục được đẩy tính vào offMax: tổng mục chỉ có trên OFF ≤ offMax; lockTop mục T1 đứng ngay sau, giữ thứ tự", () => {
+    for (const r of allCases) for (const offMax of [1, 2, 3]) {
+      const off = worstOff(r);
+      const got = mod.mergeFront(t1, rIndex, products, r, off, { offMax, offPromote: { gap: 0, minWords: 2 } });
+      assert.ok(offOnly(got) <= offMax, `${offOnly(got)} > ${offMax}`);
+      const lock = r.hits.slice(0, mod.DEFAULT_GUARD.lockTop).map((h) => h.code);
+      const rest = got[0].source === "off" ? got.slice(1) : got;
+      assert.deepEqual(rest.slice(0, lock.length).map((x) => x.code), lock);
+      assert.equal(new Set(got.map((x) => x.code)).size, got.length);
+    }
+  });
+
+  test("OFF lỗi / rỗng / bị hủy + offPromote bật → đúng kết quả T1", () => {
+    for (const r of allCases) for (const off of [null, undefined, { ok: false, kind: "network" }, { ok: false, kind: "aborted" }, { ok: true, hits: [] }]) {
+      const got = mod.mergeFront(t1, rIndex, products, r, off, { offPromote: { gap: 0, minWords: 2 } });
+      assert.deepEqual(got.map((x) => x.code), r.hits.map((h) => h.code));
+    }
+  });
+
+  test("mục kho phụ (hit.extra === true) KHÔNG BAO GIỜ được offPromote đẩy lên vị trí 1, dù điểm rất cao", () => {
+    const extraDiet = { ...DIET, extra: true, text: `${DIET.text} ${DIET.text} ${DIET.text}` };
+    for (const off of [{ ok: true, hits: [extraDiet] }, { ok: true, hits: [LEMON, extraDiet] }]) {
+      const got = mod.mergeFront(t1, rIndex, products, typed, off, { offPromote: { gap: 0, minWords: 2 } });
+      assert.equal(got[0].code, typed.hits[0].code, got.map((x) => x.code).join(","));
+      assert.deepEqual(got, mod.mergeFront(t1, rIndex, products, typed, off));
+    }
+  });
+
+  test("giá trị offPromote sai → GuardValueError (kể cả khi OFF lỗi); null hợp lệ", () => {
+    const BAD = ["x", 1, true, [], { gap: -1, minWords: 2 }, { gap: NaN, minWords: 2 }, { gap: Infinity, minWords: 2 }, { gap: "1", minWords: 2 },
+      { minWords: 2 }, { gap: 1 }, { gap: 1, minWords: 1 }, { gap: 1, minWords: 2.5 }, { gap: 1, minWords: "2" }, { gap: 1, minWords: 0 }, { gap: null, minWords: 2 }];
+    for (const bad of BAD) for (const off of [offReal, { ok: false, kind: "network" }]) {
+      assert.throws(() => mod.mergeFront(t1, rIndex, products, typed, off, { offPromote: bad }),
+        (e) => mod.isGuardError(e) && e.message.includes("offPromote"), JSON.stringify(bad));
+    }
+    assert.doesNotThrow(() => mod.mergeFront(t1, rIndex, products, typed, offReal, { offPromote: null }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vòng 6 (P2): hàng ngoại tên lạ — mục OFF khớp 0 từ câu tìm T1 nhưng chứa từ lạ chỉ lấp chỗ trống
+// ---------------------------------------------------------------------------
+
+describe("từ lạ (strangeFill, P2)", () => {
+  const found = fr.rankFromText(t1, rIndex, "Haribo\nGoldbears"); // T1: 1 gợi ý (Chamallows, hãng Haribo)
+  const GOLD = { code: "9200000000001", name: "Goldbears", brand: "", img: "", vn: false, text: "Goldbears fruit gum" };
+  const GOLD2 = { code: "9200000000002", name: "Goldbears sour", brand: "", img: "", vn: false, text: "Goldbears sour" };
+  const OTHER = { code: "9200000000003", name: "Something else", brand: "", img: "", vn: false, text: "Something else entirely" };
+
+  test("ca dựng: T1 có 1 gợi ý; mục OFF chỉ chứa từ lạ 'goldbears' khớp 0 từ", () => {
+    assert.equal(found.hits.length, 1);
+    assert.equal(mod.bm25DocScore(rIndex.index, mod.offDoc(t1, GOLD.text), found.query).matched, 0);
+  });
+
+  test("tắt (mặc định hiện tại): bỏ mục OFF khớp 0 từ như cũ", () => {
+    const got = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [GOLD, OTHER] }, { strangeFill: false });
+    assert.deepEqual(got.map((x) => x.code), found.hits.map((h) => h.code));
+  });
+
+  test("bật: mục OFF chứa từ lạ xếp SAU mọi mục danh mục, mục không chứa từ lạ vẫn bị bỏ, vẫn theo offMax / chỗ trống", () => {
+    const got = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [OTHER, GOLD, GOLD2] }, { strangeFill: true });
+    const codes = got.map((x) => x.code);
+    assert.equal(codes[0], found.hits[0].code);
+    assert.ok(codes.includes(GOLD.code), codes.join(","));
+    assert.ok(!codes.includes(OTHER.code), codes.join(","));
+    assert.ok(codes.indexOf(GOLD.code) > codes.lastIndexOf(found.hits[found.hits.length - 1].code));
+  });
+
+  test("bật, T1 đủ 5 mục danh mục: mục từ lạ không chen vào (chỉ lấp chỗ trống)", () => {
+    const r = fr.rankFromText(t1, rIndex, "Soda chanh diet 7 up\nFruchtgummi");
+    const strange = { code: "9200000000004", name: "Fruchtgummi", brand: "", img: "", vn: false, text: "Fruchtgummi" };
+    const got = mod.mergeFront(t1, rIndex, products, r, { ok: true, hits: [strange] }, { strangeFill: true });
+    assert.ok(!got.some((x) => x.code === strange.code));
+  });
+
+  test("mục kho phụ (extra) không dùng luật từ lạ", () => {
+    const got = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [{ ...GOLD, extra: true }] }, { strangeFill: true });
+    assert.deepEqual(got.map((x) => x.code), found.hits.map((h) => h.code));
+  });
+
+  test("mặc định strangeFill theo STRANGE_MODE của off-search.js (null = tắt)", async () => {
+    const os = await import("../src/off-search.js");
+    const a = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [GOLD] });
+    const b = mod.mergeFront(t1, rIndex, products, found, { ok: true, hits: [GOLD] }, { strangeFill: os.STRANGE_MODE !== null });
+    assert.deepEqual(a, b);
   });
 });

@@ -582,6 +582,43 @@ describe("cleanQuery: chữ OCR → tối đa 2 câu tìm, mỗi câu 2–3 từ
     assert.ok(all.includes("vissan"), JSON.stringify(qs));
   });
 
+  // Vòng 6 (P2): từ lạ = từ Latin ≥ 5 chữ cái, không dấu, không có trong từ vựng, không phải âm tiết tiếng Việt;
+  // tối đa 2 từ / ảnh (dài nhất trước, hòa theo thứ tự dòng).
+  test("strangeWords: ca muối → iodizes, refined; bỏ từ trong từ vựng, âm tiết, < 5 chữ, có dấu, có số; tối đa 2", () => {
+    assert.equal(mod.STRANGE_MAX, 2);
+    assert.deepEqual(mod.strangeWords(["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"], { idf: IDF }), ["iodizes", "refined"]);
+    assert.deepEqual(mod.strangeWords(["Haribo Goldbears", "Fruchtgummi"], { idf: IDF }), ["fruchtgummi", "goldbears"]);
+    assert.deepEqual(mod.strangeWords(["Soda chanh diet 7 up"], { idf: IDF }), []);
+    assert.deepEqual(mod.strangeWords(["Up", "Soda chanh", "Khong calo"], { idf: IDF }), []);
+    assert.deepEqual(mod.strangeWords(["Bánh Crème Brûlée", "abc12de", "nghieng khuyen"], { idf: IDF }), []);
+    // cụm chung / từ nhiễu bị bỏ như cleanQuery ("made in", "vietnam", "net weight", "grams")
+    assert.deepEqual(mod.strangeWords(["Made in Vietnam", "Net weight 500 grams"], { idf: IDF }), []);
+    assert.deepEqual(mod.strangeWords(["Charl", "Alpha Bravo"], { idf: IDF }), ["charl", "alpha"], "hòa độ dài: theo thứ tự dòng");
+    assert.deepEqual(mod.strangeWords(null), []);
+  });
+
+  test("cleanQuery strange: mặc định STRANGE_MODE (null = tắt) như cũ; x1 thêm từ lạ vào câu 1; x2 từ lạ thành câu riêng thay câu 2", () => {
+    assert.equal(mod.STRANGE_MODE, null);
+    const salt = ["COOP", "Select", "Mui Bin Tinh Sấy l-t", "IODIZES REFINED SEA SALT"];
+    const base = mod.cleanQuery(salt, { idf: IDF });
+    assert.deepEqual(mod.cleanQuery(salt, { idf: IDF, strange: null }), base);
+    const x1 = mod.cleanQuery(salt, { idf: IDF, strange: "x1" });
+    assert.equal(x1.length, base.length);
+    assert.equal(x1[0], `${base[0]} iodizes refined`);
+    assert.equal(x1[1], base[1]);
+    const x2 = mod.cleanQuery(salt, { idf: IDF, strange: "x2" });
+    assert.deepEqual(x2, [base[0], "iodizes refined"]);
+    // không có từ lạ → x1 / x2 giống hệt mặc định (ca 7Up)
+    for (const input of [["Up", "Soda chanh", "Khong calo"], "Soda chanh diet 7 up"]) {
+      for (const strange of ["x1", "x2"]) assert.deepEqual(mod.cleanQuery(input, { idf: IDF, strange }), mod.cleanQuery(input, { idf: IDF }));
+    }
+    // chỉ có từ lạ (không từ đáng tin) → x1 / x2 vẫn có câu từ lạ
+    assert.deepEqual(mod.cleanQuery(["Haribo Goldbears"], { idf: IDF, strange: "x1" }), ["goldbears haribo"]);
+    assert.deepEqual(mod.cleanQuery(["Haribo Goldbears"], { idf: IDF, strange: "x2" }), ["goldbears haribo"]);
+    assert.ok(mod.cleanQuery(salt, { idf: IDF, strange: "x1" }).every((q) => q.length <= mod.QUERY_CHARS_MAX));
+    assert.throws(() => mod.cleanQuery(salt, { idf: IDF, strange: "x3" }), /strange/);
+  });
+
   test("nhận cả mảng { text }; rỗng / toàn số → []", () => {
     assert.deepEqual(mod.cleanQuery([{ text: "Soda chanh" }], { idf: IDF }), ["soda chanh"]);
     assert.deepEqual(mod.cleanQuery([]), []);
