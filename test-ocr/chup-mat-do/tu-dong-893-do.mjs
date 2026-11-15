@@ -66,23 +66,8 @@ export function sizeOf(products, nguon) {
   return { raw: Buffer.byteLength(s), gzip: zlib.gzipSync(s, { level: 9 }).length };
 }
 
-/** Chỉ mục kho phụ: tài liệu BM25 tách từ như ứng viên OFF (offDoc), tính một lần. */
-export function extraIndex(fm, t1, extra, frontImageUrl) {
-  return extra.map((p) => ({ p, doc: fm.offDoc(t1, p.text), hit: { code: p.code, name: p.name, brand: p.brand, img: frontImageUrl(p.code, p.img), vn: false, text: p.text } }));
-}
-
-/** Tìm trong kho phụ cho một kết quả T1: chấm bm25DocScore với chỉ mục CHÍNH, khớp ≥ 1 từ, điểm giảm dần (hòa: thứ tự
- *  kho), tối đa limit. */
-export function searchExtra(fm, index, xi, found, limit = EXTRA_LIMIT) {
-  const q = Array.isArray(found?.query) ? found.query : [];
-  if (!q.length) return [];
-  const sc = [];
-  xi.forEach((x, i) => {
-    const { score, matched } = fm.bm25DocScore(index, x.doc, q);
-    if (matched >= 1) sc.push({ i, score });
-  });
-  return sc.sort((a, b) => b.score - a.score || a.i - b.i).slice(0, limit).map((s) => ({ ...xi[s.i].hit }));
-}
+// Vòng 6 (P5): chỉ mục + tìm kho phụ dùng src/front-extra.js (buildExtraIndex, searchExtra, joinExtra) — bỏ bản sao
+// extraIndex / searchExtra của vòng 5 trong script này.
 
 /** C2: bản sao f1 + lớp chặn của mergeFront (offTopRule null), thêm kho phụ (source "extra") có riêng `own` chỗ. */
 export function mergeF1Extra(fm, t1, rIndex, products, t1Result, offResult, extraHits, { own = 1, k = 5, lockTop = 3, offMax = 1, offGap = 1 } = {}) {
@@ -172,7 +157,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const app = await loadApp();
   const { t1, fr, catalog } = app;
   const fm = await import(pathToFileURL(path.join(ROOT, "src", "front-merge.js")).href);
-  const fs2 = await import(pathToFileURL(path.join(ROOT, "src", "front-search.js")).href);
+  const fx = await import(pathToFileURL(path.join(ROOT, "src", "front-extra.js")).href);
   const products = catalog.products;
   const codes = new Set(products.map((p) => p.code));
   const records = JSON.parse(fs.readFileSync(moRong, "utf8"));
@@ -189,7 +174,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const sizeB = sizeOf(appB.catalog.products, NGUON_VN_893);
   const sizeC = sizeOf(wide, NGUON_VN_893);
   const sizeNow = sizeOf(products, NGUON_VN);
-  const xi = extraIndex(fm, t1, wide, fs2.frontImageUrl);
+  const xi = fx.buildExtraIndex(t1, wide);
 
   // ca theo từng cách (A / B dựng câu tìm T1 + câu OFF lại theo idf mới)
   const casesNow = buildCases(app, setNames);
@@ -211,7 +196,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     const offN = await offFor(cN, "now");
     const offA = await offFor(cA, "A");
     const offB = await offFor(cB, "B");
-    const extraHits = cN.found ? searchExtra(fm, app.rIndex.index, xi, cN.found) : [];
+    const extraHits = cN.found ? fx.searchExtra(app.rIndex.index, xi, cN.found, EXTRA_LIMIT) : [];
     for (const cond of ["i", "ii"]) {
       const row = { set: cN.set, code: cN.code, kind: cN.kind, cond, holdout: !!cN.holdout, m: {} };
       const put = (name, list) => { row.m[name] = { top5: list.map((x) => x.code), src: list.map((x) => x.source) }; };
@@ -220,10 +205,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       put("hien-tai", fm.mergeFront(t1, app.rIndex, products, cN.found, oN));
       put("A", fm.mergeFront(t1, appA.rIndex, appA.catalog.products, cA.found, cond === "i" ? null : offA));
       put("B", fm.mergeFront(t1, appB.rIndex, appB.catalog.products, cB.found, cond === "i" ? null : offB));
-      // C1: kho phụ nối sau hits OFF (bỏ mã trùng), dùng chung offMax; mergeFront thật
-      const seen = new Set();
-      const joint = [...(oN?.ok ? oN.hits : []), ...extraHits].filter((h) => !seen.has(h.code) && seen.add(h.code));
-      put("C1", fm.mergeFront(t1, app.rIndex, products, cN.found, joint.length ? { ok: true, hits: joint } : null));
+      // C1: kho phụ nối sau hits OFF (bỏ mã trùng), dùng chung offMax; mergeFront thật (vòng 6: joinExtra của
+      // src/front-extra.js thay bản sao vòng 5)
+      put("C1", fm.mergeFront(t1, app.rIndex, products, cN.found, fx.joinExtra(oN, extraHits)));
       put("C2", mergeF1Extra(fm, t1, app.rIndex, products, cN.found, oN, extraHits));
       // kiểm bản sao: kho phụ rỗng → trùng mergeFront thật
       const same = mergeF1Extra(fm, t1, app.rIndex, products, cN.found, oN, []).map((x) => x.code).join(",");

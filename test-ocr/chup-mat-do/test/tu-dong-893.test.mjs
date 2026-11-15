@@ -5,14 +5,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { store893, searchExtra, extraIndex, mergeF1Extra, lossOf } from "../tu-dong-893-do.mjs";
+import { store893, mergeF1Extra, lossOf } from "../tu-dong-893-do.mjs";
 import { compactProduct, makeHll, processChunk, rebuildCatalogText, GROUPS } from "../tu-dong-kho-lon.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const t1 = await import(pathToFileURL(path.join(ROOT, "public", "chup-mat-do", "t1.mjs")).href);
 const fr = await import(pathToFileURL(path.join(ROOT, "src", "front-rank.js")).href);
 const fm = await import(pathToFileURL(path.join(ROOT, "src", "front-merge.js")).href);
-const fsrch = await import(pathToFileURL(path.join(ROOT, "src", "front-search.js")).href);
+// Vòng 6: chỉ mục + tìm kho phụ chuyển sang src/front-extra.js (script bỏ bản sao); 2 test dưới gọi bản của app.
+const fx = await import(pathToFileURL(path.join(ROOT, "src", "front-extra.js")).href);
+const extraIndex = (_fm, t, extra) => fx.buildExtraIndex(t, extra);
+const searchExtra = (_fm, index, xi, found, limit) => fx.searchExtra(index, xi, found, limit);
 const appText = fs.readFileSync(path.join(ROOT, "public", "chup-mat-do", "danh-muc-vn.json"), "utf8");
 const products = JSON.parse(appText).products;
 const rIndex = fr.buildRankIndex(t1, products);
@@ -30,7 +33,7 @@ test("store893: chỉ mã 13 số đầu 893, có tên, chưa có trong danh m�
 
 test("searchExtra: chấm bằng chỉ mục CHÍNH (từ lạ không cộng điểm), khớp ≥ 1 từ, tối đa limit", () => {
   const extra = store893([DIET, rec("8930000000009", "Zzqxy Wvut"), rec("8930000000010", "Soda chanh khác", { brands: "X" })], new Set());
-  const xi = extraIndex(fm, t1, extra, fsrch.frontImageUrl);
+  const xi = extraIndex(fm, t1, extra);
   const found = fr.rankFromItems(t1, rIndex, ["Up", "Soda chanh", "Khong calo"].map((text, k) => ({ text, poly: [[0, k * 60], [400, k * 60], [400, 40 + k * 60], [0, 40 + k * 60]], score: 0.95 })));
   const hits = searchExtra(fm, rIndex.index, xi, found);
   assert.ok(hits.some((h) => h.code === DIET.code));
@@ -46,7 +49,7 @@ test("mergeF1Extra: kho phụ rỗng → trùng mergeFront thật (OFF lỗi và
   for (const off of offs) {
     assert.deepEqual(mergeF1Extra(fm, t1, rIndex, products, found, off, []).map((x) => x.code), fm.mergeFront(t1, rIndex, products, found, off).map((x) => x.code));
   }
-  const xi = extraIndex(fm, t1, store893([DIET], new Set()), fsrch.frontImageUrl);
+  const xi = extraIndex(fm, t1, store893([DIET], new Set()));
   const got = mergeF1Extra(fm, t1, rIndex, products, found, null, searchExtra(fm, rIndex.index, xi, found));
   assert.deepEqual(got.slice(0, 3).map((x) => x.code), found.hits.slice(0, 3).map((h) => h.code));
   assert.equal(got.filter((x) => x.source === "extra").length, 1);
