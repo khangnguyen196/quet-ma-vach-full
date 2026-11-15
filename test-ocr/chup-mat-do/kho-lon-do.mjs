@@ -25,8 +25,8 @@
 //   G1 = S(L) thay kho phụ trong đường photoMerge: joinExtra(off, S) rồi mergeFront mặc định (chấm lại F1 bằng chỉ mục
 //        chính, DEFAULT_GUARD, dùng chung offMax với OFF); mục máy chủ mang extra: true nên KHÔNG được offPromote.
 //   G2-g<gap>-w<minWords> = G1 + offPromote { gap ∈ {1,2,3}, minWords ∈ {2,3} } CHỈ cho mục máy chủ (như
-//        tu-dong-v42-do.mjs): mục máy chủ không mang extra, mục OFF mang extra: true (để offPromote của mergeFront chỉ
-//        xét mục máy chủ, không sửa src/).
+//        tu-dong-v42-do.mjs): mục OFF có mã không có trong S mang extra: true; mục có mã trong S là mục máy chủ
+//        (sửa khung đo vòng 2, không đổi luật) (để offPromote của mergeFront chỉ xét mục máy chủ, không sửa src/).
 //   G3 = mục máy chủ KHÔNG chấm lại, giữ thứ tự máy chủ: lấy kết quả mergeFront(T1 + OFF) mặc định (không máy chủ),
 //        giữ nguyên 3 vị trí đầu (lockTop 3), chèn MỘT mục máy chủ (mục đầu tiên theo thứ tự máy chủ chưa có trong 3
 //        vị trí đó) ngay sau, rồi phần còn lại của kết quả cũ; mục không có trong danh mục (mục máy chủ ngoài danh mục +
@@ -171,7 +171,11 @@ export function mergeByMethod({ t1, rIndex, products, found, off, S, method, cat
   const o = off;
   if (m.kind === "g1") return mergeFront(t1, rIndex, products, found, joinExtra(o, server.map((h) => ({ ...h, extra: true }))));
   if (m.kind === "g2") {
-    const offMarked = o && o.ok === true ? { ...o, hits: o.hits.map((h) => ({ ...h, extra: true })) } : o;
+    // vòng 2: chỉ mục OFF có mã KHÔNG nằm trong S mang extra; mục có mã trong S (kể cả trùng OFF) là mục máy chủ
+    const sCodes = new Set(server.map((h) => h.code));
+    const offMarked = o && o.ok === true
+      ? { ...o, hits: o.hits.map((h) => { const { extra, ...rest } = h; return sCodes.has(h.code) ? rest : { ...rest, extra: true }; }) }
+      : o;
     return mergeFront(t1, rIndex, products, found, joinExtra(offMarked, server.map(({ extra, ...h }) => h)), { offPromote: { gap: m.gap, minWords: m.minWords } });
   }
   const codes = catalogCodes instanceof Set ? catalogCodes : new Set((products || []).map((p) => p.code));
