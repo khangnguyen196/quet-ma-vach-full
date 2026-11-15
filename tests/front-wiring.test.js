@@ -315,10 +315,12 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.deepEqual(rule15(CODE), []);
   });
   test("(15) luật bắt được chuỗi mẫu sai", () => {
-    const base = (extra = "", pick = "const s = loadFrontSearch();\nloadFrontExtra().catch(() => {});") => [
+    const pickOk = "const s = loadFrontSearch();\nconst extraP = loadFrontExtra();\nextraP.catch(() => {});";
+    const base = (extra = "", pick = pickOk) => [
+      "// ghi chú nhắc tên loadFrontExtra trong comment không tính",
       "function loadFrontExtra() { return loadExtra().then((x) => x); }",
-      "async function showPhotoResult({ id }) { const x = loadFrontExtra(); }",
-      "function onFrontClick(ev) { loadFrontExtra(); }",
+      "async function showPhotoResult({ id, extraP }) { const xi = await extraP; }",
+      "function onFrontClick(ev) { const extraP = loadFrontExtra(); }",
       "function updateFrontButton() { }",
       `frontFile.addEventListener("change", async (ev) => {\nif (!confirm("x")) return;\n${pick}\nconst r = await sendOcr({});\n});`,
       extra,
@@ -331,6 +333,12 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
       base("initAuth().then(() => loadFrontExtra());"),
       base("", "loadFrontExtra().catch(() => {});\nconst s = loadFrontSearch();"), // trước loadFrontSearch
       base("", "const s = loadFrontSearch();"), // chọn ảnh không bắt đầu tải
+      // Vòng 8 (NÊN SỬA 2 vòng 7): showPhotoResult tự tải kho phụ = lỗi "tải 2 lần mỗi lượt" (sửa ở 5b9cefe) quay lại
+      base().replace("const xi = await extraP;", "const xi = await (extraP || loadFrontExtra());"),
+      // Vòng 8 (gợi ý 2 vòng 7): tên hàm dùng làm tham chiếu, kể cả trong chỗ được phép
+      base("", pickOk + "\ns.then(loadFrontExtra);"),
+      base().replace("const extraP = loadFrontExtra(); }", "const f = loadFrontExtra; f(); }"),
+      base("const f = loadFrontExtra;"),
     ]) assert.notDeepEqual(rule15(bad), [], bad);
   });
 
@@ -442,13 +450,27 @@ function pickBody(code) {
   return blockAt(code, h.index + h[0].length);
 }
 
-/** Luật (15): mọi lời gọi loadExtra( / loadFrontExtra( (không tính dòng khai báo function) nằm trong thân loadFrontExtra
- *  (chỉ loadExtra), handler chọn ảnh, onFrontClick ("Tìm lại") hoặc showPhotoResult; handler chọn ảnh có loadFrontExtra(
- *  SAU loadFrontSearch( và sau câu hỏi gửi nguyên bản (confirm(). */
+/** Thay comment bằng khoảng trắng cùng độ dài (giữ vị trí ký tự): dòng bắt đầu bằng // /* * , khối /* … *\/ trên một
+ *  dòng, đuôi " // …" sau code (URL "https://" không có khoảng trắng trước // nên không bị xóa). */
+function blankComments(code) {
+  const sp = (s) => s.replace(/[^\n]/g, " ");
+  return code.split("\n").map((line) => {
+    if (/^\s*(\/\/|\/\*|\*)/.test(line)) return sp(line);
+    return line.replace(/\/\*.*?\*\//g, sp).replace(/\s\/\/\s.*$/, sp);
+  }).join("\n");
+}
+
+/** Luật (15): mọi lời gọi loadExtra( (không tính dòng khai báo function) nằm trong thân loadFrontExtra. Vòng 8 (NÊN SỬA 2
+ *  + gợi ý 2 vòng 7): MỌI lần xuất hiện tên loadFrontExtra ngoài comment (trừ dòng khai báo function) phải là lời gọi
+ *  "loadFrontExtra(" (không truyền tên hàm làm tham chiếu: .then(loadFrontExtra), const f = loadFrontExtra) và chỉ nằm
+ *  trong handler chọn ảnh hoặc onFrontClick ("Tìm lại"); showPhotoResult KHÔNG được gọi (chỉ nhận extraP), để mỗi lượt
+ *  thử tải kho phụ nhiều nhất 1 lần. Handler chọn ảnh có loadFrontExtra( SAU loadFrontSearch( và sau câu hỏi gửi
+ *  nguyên bản (confirm(). */
 function rule15(code) {
+  code = blankComments(code);
   const out = [];
   const spans = {};
-  for (const name of ["loadFrontExtra", "onFrontClick", "showPhotoResult"]) {
+  for (const name of ["loadFrontExtra", "onFrontClick"]) {
     const m = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).exec(code);
     if (!m) continue;
     let depth = 0, close = -1;
@@ -462,11 +484,18 @@ function rule15(code) {
   if (!pick) out.push("không tìm thấy handler chọn ảnh");
   else spans.pick = pick;
   const inside = (i, names) => names.some((n) => spans[n] && i > spans[n][0] && i < spans[n][1]);
-  for (const m of code.matchAll(/\b(loadExtra|loadFrontExtra)\s*\(/g)) {
-    const before = code.slice(Math.max(0, m.index - 20), m.index);
-    if (/\bfunction\s+$/.test(before)) continue; // khai báo
-    const allowed = m[1] === "loadExtra" ? ["loadFrontExtra"] : ["pick", "onFrontClick", "showPhotoResult"];
-    if (!inside(m.index, allowed)) out.push(`dòng ${lineOf(code, m.index)}: ${m[1]}( ngoài luồng chọn ảnh / Tìm lại`);
+  const isDecl = (i) => /\bfunction\s+$/.test(code.slice(Math.max(0, i - 20), i));
+  for (const m of code.matchAll(/\bloadExtra\s*\(/g)) {
+    if (isDecl(m.index)) continue;
+    if (!inside(m.index, ["loadFrontExtra"])) out.push(`dòng ${lineOf(code, m.index)}: loadExtra( ngoài loadFrontExtra`);
+  }
+  for (const m of code.matchAll(/\bloadFrontExtra\b/g)) {
+    if (isDecl(m.index)) continue; // khai báo
+    if (!/^\s*\(/.test(code.slice(m.index + m[0].length))) {
+      out.push(`dòng ${lineOf(code, m.index)}: loadFrontExtra dùng làm tham chiếu, không phải lời gọi loadFrontExtra(`);
+      continue;
+    }
+    if (!inside(m.index, ["pick", "onFrontClick"])) out.push(`dòng ${lineOf(code, m.index)}: loadFrontExtra( ngoài handler chọn ảnh / onFrontClick`);
   }
   if (pick) {
     const body = code.slice(pick[0], pick[1]);
