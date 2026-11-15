@@ -39,6 +39,18 @@ describe("hằng số + fitSize (giống server/imaging.py fit_size)", () => {
   });
 });
 
+// ---- kho-lon vòng 4: thân /ocr có candidates (máy chủ giả trả { items, ms, ...thân dưới }) ----
+const CAND = (code, extra = {}) => ({ code, name: "Soda chanh 7Up", brand: "7Up", img: "front_vi.3", text: "Soda chanh 7Up", grp: "893", score: 21.5, ...extra });
+const CAND_BODIES = {
+  hople: { candidates: [CAND("8934588752117"), CAND("8934588022111", { grp: "vn", img: "" })] },
+  thieu: {},
+  khongmang: { candidates: { code: "8934588752117" } },
+  hong: { candidates: [null, "x", CAND("8934588752117", { score: "21" }), CAND("8934588022111", { name: 7 }), CAND("8934588023064")] },
+  nhieu: { candidates: Array.from({ length: 13 }, (_, i) => CAND(String(8934588000000 + i))) },
+  anhla: { candidates: [CAND("8934588752117", { img: "https://example.com/x.jpg" }), CAND("8934588022111", { img: "../../front_vi.3" })] },
+  ma15: { candidates: [CAND("893458875211700"), CAND("8934588022111")] },
+};
+
 // ---- máy chủ giả ----
 let server;
 let base;
@@ -74,6 +86,8 @@ before(async () => {
       if (path === "/noitems") return sendJson(res, 200, { items: "không phải mảng" });
       if (path === "/slow") return setTimeout(() => sendJson(res, 200, { items: ITEMS }), 250);
       if (path === "/hang") return setTimeout(() => { if (!res.destroyed) sendJson(res, 200, { items: ITEMS }); }, 3000);
+      // kho-lon vòng 4: /ocr có "candidates" (ứng viên máy chủ)
+      if (path.startsWith("/cand-")) return sendJson(res, 200, { items: ITEMS, ms: 900, ...CAND_BODIES[path.slice(6)] });
       return sendJson(res, 404, { error: "Không có đường dẫn này." });
     });
   });
@@ -231,6 +245,53 @@ describe("sendOcr: máy chủ giả", () => {
     assert.equal(got.init.headers.Authorization, "Bearer " + TOKEN);
     assert.ok(got.init.body instanceof FormData);
     assert.ok(got.init.body.get("image") instanceof Blob);
+  });
+});
+
+describe("sendOcr: candidates của máy chủ (kho-lon vòng 4, máy chủ giả)", () => {
+  const IMG = "https://images.openfoodfacts.org/images/products/893/458/875/2117/front_vi.3.200.jpg";
+  test("candidates hợp lệ → mảng sạch (img thành URL tự dựng, vn theo grp); items / ms giữ nguyên", async () => {
+    const r = await send("/cand-hople");
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.items, ITEMS);
+    assert.ok(Number.isFinite(r.ms));
+    assert.deepEqual(r.candidates, [
+      { code: "8934588752117", name: "Soda chanh 7Up", brand: "7Up", img: IMG, vn: false, text: "Soda chanh 7Up", grp: "893", score: 21.5 },
+      { code: "8934588022111", name: "Soda chanh 7Up", brand: "7Up", img: "", vn: true, text: "Soda chanh 7Up", grp: "vn", score: 21.5 },
+    ]);
+  });
+  test("không có khóa candidates (máy chủ cũ / tìm lỗi) → [] (luôn là mảng)", async () => {
+    for (const p of ["/cand-thieu", "/ok"]) {
+      const r = await send(p);
+      assert.equal(r.ok, true, p);
+      assert.deepEqual(r.candidates, [], p);
+    }
+  });
+  test("candidates không phải mảng → []", async () => {
+    assert.deepEqual((await send("/cand-khongmang")).candidates, []);
+  });
+  test("mục hỏng bị bỏ, mục tốt giữ", async () => {
+    const r = await send("/cand-hong");
+    assert.deepEqual(r.candidates.map((c) => c.code), ["8934588023064"]);
+  });
+  test("> 10 mục → chỉ 10 mục đầu", async () => {
+    const r = await send("/cand-nhieu");
+    assert.equal(r.candidates.length, 10);
+    assert.equal(r.candidates[9].code, "8934588000009");
+  });
+  test("img lạ (URL, đường dẫn) → \"\" (không bao giờ nhận URL ảnh từ máy chủ)", async () => {
+    const r = await send("/cand-anhla");
+    assert.deepEqual(r.candidates.map((c) => c.img), ["", ""]);
+  });
+  test("code 15 số → bỏ", async () => {
+    assert.deepEqual((await send("/cand-ma15")).candidates.map((c) => c.code), ["8934588022111"]);
+  });
+  test("lỗi (401 / 503 / body sai) giữ nguyên dạng cũ: không có khóa candidates", async () => {
+    for (const p of ["/r401", "/r503", "/noitems"]) {
+      const r = await send(p);
+      assert.equal(r.ok, false, p);
+      assert.ok(!("candidates" in r), p);
+    }
   });
 });
 

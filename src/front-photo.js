@@ -6,6 +6,8 @@
 //   giao diện hỏi người dùng trước khi gửi).
 // - sendOcr: POST <máy chủ>/ocr kèm token đăng nhập, hết giờ 45 giây, báo "chậm" sau 5 giây, đổi mã HTTP thành
 //   { kind, message } tiếng Việt. Chữ từ máy chủ (serverMessage, items) giao diện phải đặt bằng textContent.
+//   Đợt kho-lon vòng 4: kết quả ok có thêm candidates (serverCandidates của front-server.js, module thuần trong app).
+import { serverCandidates } from "./front-server.js";
 
 /** Địa chỉ máy chủ OCR mặc định (công khai, không phải bí mật). Đổi bằng VITE_OCR_SERVER_URL. */
 export const OCR_DEFAULT_URL = "https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io";
@@ -366,7 +368,8 @@ function ocrEndpoint(base) {
 
 /**
  * Gửi ảnh tới <base>/ocr kèm token đăng nhập.
- * Trả { ok: true, items, ms } hoặc { ok: false, kind, message, retryAfter, serverMessage, status }.
+ * Trả { ok: true, items, ms, candidates } hoặc { ok: false, kind, message, retryAfter, serverMessage, status }
+ * (candidates: ứng viên máy chủ đã kiểm dạng, luôn là mảng, [] khi không có; đợt kho-lon vòng 4).
  * kind: auth | daily | rate | busy | tooBig | badType | timeout | network | aborted | other.
  * - Token rỗng: kind auth, KHÔNG gọi mạng.
  * - Hết timeoutMs (kể cả lúc đọc body): hủy bằng AbortController, kind timeout.
@@ -414,7 +417,9 @@ export async function sendOcr({
     const retryAfter = parseRetryAfter(res.headers?.get?.("Retry-After"));
     const serverMessage = serverMessageOf(body);
     if (res.status === 200) {
-      if (body && Array.isArray(body.items)) return { ok: true, items: body.items, ms: Date.now() - t0 };
+      // kho-lon vòng 4: candidates = ứng viên máy chủ đã làm sạch (front-server.js), luôn là mảng ([] khi máy chủ cũ /
+      // không có danh mục / tìm lỗi: main.js đi đường cũ).
+      if (body && Array.isArray(body.items)) return { ok: true, items: body.items, ms: Date.now() - t0, candidates: serverCandidates(body) };
       return fail("other", "Máy chủ trả dữ liệu không đúng dạng. Thử lại sau.", { status: 200 });
     }
     return failFromStatus(res.status, retryAfter, serverMessage);
