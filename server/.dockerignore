@@ -12,6 +12,7 @@ requirements-dev.txt
 do-30-anh.mjs
 do_rss.py
 do_khop_t1.py
+do_h2h3.py
 do-anh-lon.py
 chay-thu.ps1
 pytest.ini
