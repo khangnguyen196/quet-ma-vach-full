@@ -4,8 +4,8 @@
 //   node test-ocr/chup-mat-do/tu-dong-chan-do.mjs [--sets B,A] [--cache D:\tmp\tu-dong\cache-off] [--out D:\tmp\tu-dong\ket-qua]
 //
 // Cột (vị trí 1–5 của mã đúng, "-" = ngoài 5): p2 = T1 sau P2 (src/front-rank.js hiện tại, mốc của luật "không làm
-// hại"); f1 (không chặn), f1 + lớp chặn (lockTop 0–3 × offMax 1, 2, 3, 5 × luật: không / m2 = minMatch 2 /
-// top = offTopRule { gap 1, minWords 2 }), f2 / f3 (không chặn và có chặn mặc định).
+// hại"); f1 (không chặn), f1 + lớp chặn (lockTop 0–3 × offMax 1, 2, 3, 5 × luật: không / g1 = offGap 1 / m2 =
+// minMatch 2 / top = offTopRule { gap 1, minWords 2 }), f2 / f3 (không chặn, và lockTop 1–2 × offMax 1–3).
 // Phép đo:
 //   (a) OFF THẬT (cache): bộ B / A vị trí 1 / trong 5, ảnh mất vị trí 1 / rơi khỏi 5 so với p2;
 //   (b) OFF GIẢ XẤU NHẤT (không gọi mạng): mỗi ảnh 24 hàng ngoại vn:false, mã giả 13 số (999…) không có trong danh mục,
@@ -18,7 +18,7 @@
 // Chọn lớp chặn (luật P3e, CHỐT TRƯỚC khi đo): (1) OFF thật: bộ B 0 ảnh mất vị trí 1 / rơi khỏi 5; (2) OFF giả: bộ B
 // 0 ảnh mất vị trí 1; (3) 2 ca 7Up: 8934588752117 trong 5; (4) câu gõ 7Up: 022111 và 023064 trong 5; (5) ít ảnh rơi
 // khỏi 5 nhất ở OFF giả (bộ B); (6) nhiều ảnh nhất ở bỏ-một-ra (trong 5, rồi vị trí 1). Bằng nhau: an toàn hơn trước
-// (lockTop lớn hơn, offMax nhỏ hơn, luật "không" trước m2 trước top, f1 trước f2 trước f3). Không cách nào thỏa
+// (lockTop lớn hơn, offMax nhỏ hơn, luật "không" trước g1 trước m2 trước top, f1 trước f2 trước f3). Không cách nào thỏa
 // (1)–(3) → KHÔNG chọn, giữ mặc định an toàn nhất { lockTop 1, offMax 2 }.
 import fs from "node:fs";
 import path from "node:path";
@@ -27,16 +27,17 @@ import { loadApp, buildCases, looCases, makeDiskFetch, runOff, rank5, SETS, ROOT
 
 export const LEMON_7UP = "8934588022111";
 export const PLAIN_7UP = "8934588023064";
-const NO = { lockTop: 0, offMax: 5, offTopRule: null };
+const NO = { lockTop: 0, offMax: 5, offGap: 0, offTopRule: null };
 
 /** Lưới cách gộp: tên → opts của mergeFront. */
 export function methodGrid() {
   const g = { f1: { method: "f1", ...NO } };
   for (const lockTop of [0, 1, 2, 3]) {
     for (const offMax of [1, 2, 3, 5]) {
-      for (const rule of ["-", "m2", "top"]) {
+      for (const rule of ["-", "g1", "m2", "top"]) {
         if (lockTop === 0 && offMax === 5 && rule === "-") continue; // = f1
-        const o = { method: "f1", lockTop, offMax, offTopRule: null };
+        const o = { method: "f1", lockTop, offMax, offGap: 0, offTopRule: null };
+        if (rule === "g1") o.offGap = 1;
         if (rule === "m2") o.minMatch = 2;
         if (rule === "top") o.offTopRule = { gap: 1, minWords: 2 };
         g[`f1-L${lockTop}-M${offMax}-${rule}`] = o;
@@ -55,7 +56,7 @@ export function methodGrid() {
 /** Khóa so "an toàn hơn" khi bằng điểm (nhỏ trước). */
 function safetyKey(name, o) {
   const m = { f1: 0, f2: 1, f3: 2 }[o.method] ?? 3;
-  const rule = o.offTopRule ? 2 : o.minMatch === 2 ? 1 : 0;
+  const rule = o.offTopRule ? 3 : o.minMatch === 2 ? 2 : o.offGap ? 1 : 0;
   const lock = o.lockTop ?? 0;
   const max = o.offMax ?? 5;
   return [-lock, max, rule, m];
@@ -187,6 +188,15 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   if (salt) console.log(`== muối: câu ${JSON.stringify(salt.queries)} OFF ${JSON.stringify(salt.offPer.map((p) => [p.q, p.ok ? p.n : p.kind]))}\n   p2: ${salt.top5.p2.join(",")}\n   f1: ${salt.top5.f1.map((c, i) => `${c}(${salt.src.f1[i]})`).join(",")}`);
   console.log(`== Bỏ-một-ra B (n=${loo.n}, thiếu cache ${loo.missingCache.length}, OFF có mã đúng: ${JSON.stringify(loo.offHasCode)}): ${show.map((c) => `${c} ${looTally[c].top1}/${looTally[c].top5}`).join(" | ")}`);
   console.log(`== Qua (1)–(3): ${pass13.length} cách. Chọn: ${chosen ? JSON.stringify(chosen) : "KHÔNG (giữ mặc định an toàn nhất)"}`);
+  const pick = chosen ? chosen.name : "f1-L1-M2--";
+  console.log(`== Top 10 theo luật: ${ranked.slice(0, 10).map((j) => `${j.name} (c4 ${j.c4}, rơi ${j.out5}, loo ${j.looTop1}/${j.looTop5})`).join("; ")}`);
+  for (const s of setNames) {
+    console.log(`== Từng ảnh bộ ${s} (OFF thật: p2 / f1 / ${pick} / f2 / f3 | OFF giả: f1 / ${pick} | câu OFF: số kết quả)`);
+    for (const r of rows.filter((x) => x.set === s)) {
+      const v = (o, c) => o[c] ?? "-";
+      console.log(`   ${r.code} ${["p2", "f1", pick, "f2", "f3"].map((c) => v(r.ranks, c)).join(" / ")} | ${v(r.fake, "f1")} / ${v(r.fake, pick)} | ${r.offPer.map((p) => `${p.q}: ${p.ok ? p.n : p.kind}`).join("; ") || "(không câu)"}`);
+    }
+  }
   console.log(`cache: ${JSON.stringify(disk.stats)}`);
   console.log(`Ghi: ${outFile}`);
 }

@@ -17,7 +17,7 @@ const DIET = { code: "8934588752117", name: "Soda Chanh - Diet 7Up", brand: "Pep
 const LEMON = { code: "8934588022111", name: "7Up hương chanh", brand: "7UP", img: "", vn: true, text: "7Up hương chanh 7UP" };
 const FOREIGN = (n) => ({ code: String(9000000000000 + n), name: `Foreign soda ${n}`, brand: "X", img: "", vn: false, text: `Foreign soda ${n} X` });
 /** Tắt lớp chặn (vòng 3): đo F1 / F2 / F3 thô. */
-const NO_GUARD = Object.freeze({ lockTop: 0, offMax: 5, offTopRule: null });
+const NO_GUARD = Object.freeze({ lockTop: 0, offMax: 5, offGap: 0, offTopRule: null });
 
 describe("OFF lỗi / rỗng / bị hủy → GIỐNG HỆT T1", () => {
   const cases = [

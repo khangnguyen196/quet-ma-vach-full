@@ -16,13 +16,15 @@ import { pathToFileURL } from "node:url";
 import { loadApp, buildCases, makeDiskFetch, runOff, rank5, SETS, ROOT, LINES_7UP, TYPED_7UP } from "./tu-dong-do.mjs";
 import { SALT_LINES, saltItems } from "./nang-t1-do.mjs";
 
+// Vòng 3: mergeFront có lớp chặn mặc định; các cột vòng 2 đo KHÔNG chặn (NO).
+const NO = { lockTop: 0, offMax: 5, offGap: 0, offTopRule: null };
 export const METHODS = {
-  f1: { method: "f1" },
-  "f1-gap1": { method: "f1", offGap: 1 },
-  "f1-gap2": { method: "f1", offGap: 2 },
-  "f1-m2": { method: "f1", minMatch: 2 },
-  f2: { method: "f2" },
-  f3: { method: "f3" },
+  f1: { method: "f1", ...NO },
+  "f1-gap1": { method: "f1", ...NO, offGap: 1 },
+  "f1-gap2": { method: "f1", ...NO, offGap: 2 },
+  "f1-m2": { method: "f1", ...NO, minMatch: 2 },
+  f2: { method: "f2", ...NO },
+  f3: { method: "f3", ...NO },
 };
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

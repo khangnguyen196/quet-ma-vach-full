@@ -19,7 +19,7 @@
 //               mục, không bị M giới hạn;
 //   offTopRule { gap, minWords } (chỉ f1): ứng viên chỉ có trên OFF chỉ được xếp trên mục danh mục khi điểm ≥ điểm mục
 //               đó + gap VÀ khớp ≥ minWords từ khác nhau của câu tìm T1; không đạt thì xếp sau mọi mục danh mục.
-//   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k } = không chặn.
+//   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k, offGap: 0 } = không chặn.
 //
 // Ví dụ:
 //   const r = rankFromItems(t1, rIndex, items);                         // T1 (src/front-rank.js)
@@ -29,8 +29,14 @@ import { frontImageUrl } from "./front-search.js";
 
 export const MERGE_K = 5;
 export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
-/** Lớp chặn mặc định (vòng 3). */
-export const DEFAULT_GUARD = Object.freeze({ lockTop: 1, offMax: 2, offTopRule: null });
+/**
+ * Lớp chặn mặc định (vòng 3, chọn theo luật P3e chốt trước, test-ocr/chup-mat-do/tu-dong-chan-do.mjs, chỉ cache OFF):
+ * lockTop 3 + offMax 1 + offGap 1 (f1). Số đo (bộ B, 30 ảnh): OFF thật 14/21 như T1, 0 ảnh mất (F1 không chặn mất
+ * 8936017367107: 3 → ngoài 5); OFF giả xấu nhất 0 ảnh mất vị trí 1, 1 ảnh rơi khỏi 5 (F1 không chặn: 14 / 18);
+ * 7Up chữ máy chủ + câu gõ: 8934588752117 vị trí 4, 7Up hương chanh vị trí 1, câu gõ 7Up vị trí 2; bỏ-một-ra 0/0 ở mọi
+ * cách (OFF không trả sản phẩm đúng cho ảnh nào). OFF chỉ trả được ~1/2 số câu hôm đo nên số đo còn mỏng.
+ */
+export const DEFAULT_GUARD = Object.freeze({ lockTop: 3, offMax: 1, offGap: 1, offTopRule: null });
 export const RRF_K = 60;
 /** Số kết quả đầu của mỗi nguồn đưa vào RRF (f2). */
 export const RRF_DEPTH = 5;
@@ -117,11 +123,11 @@ function applyGuard(ranked, base, { k, lockTop, offMax }) {
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
  * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule }
- * (lockTop / offMax / offTopRule thiếu thì lấy DEFAULT_GUARD).
+ * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD).
  */
 export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {}) {
   const {
-    method = "f1", k = MERGE_K, offGap = 0, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH,
+    method = "f1", k = MERGE_K, offGap = DEFAULT_GUARD.offGap, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH,
     lockTop = DEFAULT_GUARD.lockTop, offMax = DEFAULT_GUARD.offMax, offTopRule = DEFAULT_GUARD.offTopRule,
   } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
