@@ -148,6 +148,12 @@ describe("lớp chặn: OFF giả xấu nhất (3 ảnh fixture + ca muối)", (
     assert.ok(Object.isFrozen(mod.DEFAULT_GUARD));
   });
 
+  test("DEFAULT_GUARD = lớp chặn chọn theo luật P3e vòng 3 (f1-L3-M1-g1: lockTop 3, offMax 1, offGap 1)", () => {
+    // test-ocr/chup-mat-do/tu-dong-chan-do.mjs (chỉ cache, D:\tmp\tu-dong\ket-qua\tu-dong-chan-do-BA.json): 32 cách qua
+    // (1)–(3); cách này qua (4), ít ảnh bộ B rơi khỏi 5 nhất ở OFF giả (1), bỏ-một-ra 0/0 ở mọi cách.
+    assert.deepEqual({ ...mod.DEFAULT_GUARD }, { lockTop: 3, offMax: 1, offGap: 1, offTopRule: null });
+  });
+
   test("không chặn: OFF giả xấu nhất ĐẨY được gợi ý 1 của T1 (lý do cần lớp chặn)", () => {
     const pushed = cases.filter(([, r]) => mod.mergeFront(t1, rIndex, products, r, worstOff(r), NO_GUARD)[0].code !== r.hits[0].code);
     assert.ok(pushed.length >= 1, "OFF giả không đủ xấu để thử lớp chặn");
