@@ -19,6 +19,11 @@
 //               mục, không bị M giới hạn;
 //   offTopRule { gap, minWords } (chỉ f1): ứng viên chỉ có trên OFF chỉ được xếp trên mục danh mục khi điểm ≥ điểm mục
 //               đó + gap VÀ khớp ≥ minWords từ khác nhau của câu tìm T1; không đạt thì xếp sau mọi mục danh mục.
+//   offPromote { gap, minWords } | null (vòng 6, V4-2, chỉ f1): SAU lớp chặn, ứng viên chỉ có trên OFF (không phải mục
+//               kho phụ extra: true) điểm cao nhất trong những ứng viên khớp ≥ minWords từ khác nhau; điểm ≥ điểm gợi ý 1
+//               của T1 + gap → vị trí 1 (tính vào offMax), các mục khác lùi giữ thứ tự. null = tắt (mặc định).
+//   strangeFill (vòng 6, P2, chỉ f1; mặc định theo STRANGE_MODE của off-search.js = tắt): ứng viên OFF khớp 0 từ câu
+//               tìm T1 nhưng chứa từ lạ của ảnh (strangeWords) → hạng 2 (sau mọi mục danh mục, chỉ lấp chỗ trống).
 //   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k, offGap: 0 } = không chặn.
 //   Giá trị sai (null, NaN, Infinity, số âm / lẻ, chuỗi) → báo lỗi (vòng 4), không bao giờ lặng lẽ tắt lớp chặn.
 //
@@ -37,6 +42,10 @@ export const MERGE_METHODS = Object.freeze(["f1", "f2", "f3"]);
  * 8936017367107: 3 → ngoài 5); OFF giả xấu nhất 0 ảnh mất vị trí 1, 1 ảnh rơi khỏi 5 (F1 không chặn: 14 / 18);
  * 7Up chữ máy chủ + câu gõ: 8934588752117 vị trí 4, 7Up hương chanh vị trí 1, câu gõ 7Up vị trí 2; bỏ-một-ra 0/0 ở mọi
  * cách (OFF không trả sản phẩm đúng cho ảnh nào). OFF chỉ trả được ~1/2 số câu hôm đo nên số đo còn mỏng.
+ * offPromote null (vòng 6, V4-2, test-ocr/chup-mat-do/tu-dong-v42-do.mjs, luật chốt trước): 6 cách gap {1,2,3} ×
+ * minWords {2,3} đều 0 ảnh mất / rơi ở bộ B và A, (i) giống hệt mốc, đưa 8934588752117 lên vị trí 1 ở 2 ca 7Up khi OFF
+ * trả được, nhưng KHÔNG giữ vì độ phủ cache bộ B chỉ 21/30 ảnh đủ câu (< 24, OFF lỗi 58,8 % lượt vòng 6); OFF giả xấu
+ * nhất (chỉ báo) bộ B mất vị trí 1 ở 10–11 / 14 ảnh.
  */
 export const DEFAULT_GUARD = Object.freeze({ lockTop: 3, offMax: 1, offGap: 1, offTopRule: null, offPromote: null });
 export const RRF_K = 60;
@@ -157,7 +166,8 @@ function applyGuard(ranked, base, { k, lockTop, offMax }) {
  * Gộp T1 + OFF → tối đa k mục { code, name, brand, img, source: "catalog" | "off", vn, score }.
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
- * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule }
+ * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule, offPromote, strangeFill }
+ * (offPromote sai → GuardValueError; f2 / f3 bỏ qua offPromote / strangeFill)
  * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD; lockTop / offMax / offGap không phải số nguyên
  * ≥ 0 thì báo lỗi, không tự tắt lớp chặn).
  */
