@@ -1085,6 +1085,9 @@ function showPhotoOthers(btn) {
   box.hidden = false;
   bindFrontImages(box);
   btn.setAttribute("aria-expanded", "true");
+  // Danh sách mở ra ngay dưới 2 nút, thường ở mép dưới màn hình: cuộn ít nhất để mục đầu (hoặc khối) hiện trọn.
+  const first = box.querySelector("button[data-front-code]") || box.querySelector(".front-unsure");
+  if (first) scrollToEl(first, "nearest");
 }
 
 /**
