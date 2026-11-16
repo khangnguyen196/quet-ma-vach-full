@@ -18,7 +18,8 @@
 //                   src (đã cài c-idf) so methodMerge("c-idf") của khung đo từng ô, cả mục (lệch → thoát mã 3); (b) số ô A/B
 //                   có danh sách 5 mã khác nền MÁY trong <out>/nen.json, kèm danh sách ảnh (chỉ báo); (c) in lại 2 dòng bảng
 //                   của app theo mẫu hàng c-idf và so dòng 39–40 của <out>/do.log (--do-log; dòng MÁY so phần trước cột
-//                   cổng). Ghi <out>/kiem-app.json; cần <out>/nen.json.
+//                   cổng). Ghi <out>/kiem-app.json; cần <out>/nen.json. Vòng 4: khối luật sha256 khác RULE_SHA256 hoặc không
+//                   tìm thấy khối cũng thoát mã 3 (phán ở kiemAppVerdict).
 //   NỀN MÁY từ vòng 3 = g2Local (bản sao G2 trong khung đo, không phụ thuộc src); kiểm chéo (1) so g2Local với mergeFront
 //   của src TẮT serverIdf trên serverJoin (= serverMerge ở b588ed8) và mergeByMethod G2-g3-w3.
 //   --out           thư mục ra (mặc định D:\tmp\g2-di-qua\ket-qua). --cache: cache OFF đĩa (D:\tmp\tu-dong\cache-off).
@@ -395,6 +396,19 @@ export function ruleBlockOf(text) {
   const start = text.lastIndexOf("\n", i) + 1;
   const nl = text.indexOf("\n", j);
   return text.slice(start, nl < 0 ? text.length : nl + 1);
+}
+
+/**
+ * Phán của --kiem-app (vòng 4, thuần): khối luật phải trùng RULE_SHA256 (không tìm thấy khối = blockSha256 null → lệch),
+ * (a) mọi ô trùng (ok), (c) bảng trùng do.log (rowOk). Trả { exitCode: 0 | 3, lines } (lines: câu in ra; lệch → câu lỗi).
+ */
+export function kiemAppVerdict({ ok, rowOk, blockSha256 }) {
+  const lines = [];
+  if (blockSha256 !== RULE_SHA256) lines.push(`KIỂM APP LỆCH: khối luật ${blockSha256 === null ? "không tìm thấy" : `sha256 ${blockSha256}`} ≠ ${RULE_SHA} (${RULE_SHA256}).`);
+  if (!ok) lines.push("KIỂM APP LỆCH: serverMerge của src khác c-idf của khung đo.");
+  if (!rowOk) lines.push("KIỂM APP LỆCH: bảng app khác do.log dòng 39–40.");
+  if (lines.length) return { exitCode: 3, lines };
+  return { exitCode: 0, lines: ["== KIỂM APP ĐẠT"] };
 }
 
 // ---------------- các cách (P4, viết SAU commit luật; cài đúng định nghĩa trong khối luật) ----------------
@@ -1039,8 +1053,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     if (!rowCheck.maySame) console.log(`   do.log 40: ${want40}`);
     console.log(`L6 câu OFF / ứng viên khác nền (chỉ báo): ${m.qsDiff.length}; LÙI khác nền: ${m.luiDiff.length}`);
     console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
-    if (!ok) { console.error("KIỂM APP LỆCH: serverMerge của src khác c-idf của khung đo."); process.exit(3); }
-    if (!rowOk) { console.error("KIỂM APP LỆCH: bảng app khác do.log dòng 39–40."); process.exit(3); }
-    console.log("== KIỂM APP ĐẠT");
+    // vòng 4: phán qua kiemAppVerdict (khối luật khác / không tìm thấy → thoát 3)
+    const verdict = kiemAppVerdict({ ok, rowOk, blockSha256 });
+    for (const l of verdict.lines) (verdict.exitCode ? console.error : console.log)(l);
+    if (verdict.exitCode) process.exit(verdict.exitCode);
   }
 }
