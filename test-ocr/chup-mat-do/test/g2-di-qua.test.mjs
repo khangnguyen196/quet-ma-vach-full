@@ -1,18 +1,20 @@
-// Test phần thuần của g2-di-qua-do.mjs (đợt g2-di-qua vòng 1): bản sao G2 (g2Local) trùng serverMerge của src/ từng
-// ca (danh mục 1.452 + kho phụ 893 thật làm ứng viên máy chủ, fixture OFF 7Up thật), mục "đi qua được" (khớp 0 từ với
-// 1.452), khóa ca. Không gọi mạng, không đọc dữ liệu đo ở D:\tmp.
+// Test phần thuần của g2-di-qua-do.mjs (đợt g2-di-qua vòng 1): bản sao G2 (g2Local) trùng G2 của src/ từng ca (danh
+// mục 1.452 + kho phụ 893 thật làm ứng viên máy chủ, fixture OFF 7Up thật), mục "đi qua được" (khớp 0 từ với 1.452),
+// khóa ca. Không gọi mạng, không đọc dữ liệu đo ở D:\tmp.
+// Vòng 3: src đã cài c-idf (serverMerge = G2 + c-idf), nên "G2 nền" của các test = g2Local (không phụ thuộc src); g2Local
+// so với G2 của src = mergeFront TẮT serverIdf trên serverJoin; serverMerge mới so methodMerge("c-idf").
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import * as t1 from "../../../public/chup-mat-do/t1.mjs";
 import * as fr from "../../../src/front-rank.js";
 import { parseSearch } from "../../../src/off-search.js";
-import { serverMerge, serverCandidates } from "../../../src/front-server.js";
-import { bm25DocScore, offDoc } from "../../../src/front-merge.js";
+import { serverMerge, serverCandidates, serverJoin, SERVER_MERGE_OPTS } from "../../../src/front-server.js";
+import { bm25DocScore, offDoc, mergeFront } from "../../../src/front-merge.js";
 import {
   g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
   METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE, methodMerge, insertAfterLock, capList, idfScorer, srvScorer,
-  ruleBlockOf, RULE_SHA,
+  ruleBlockOf, RULE_SHA, RULE_SHA256, sha256Of,
 } from "../g2-di-qua-do.mjs";
 import { mergeByMethod } from "../kho-lon-do.mjs";
 
@@ -38,12 +40,15 @@ const MT = sv("8850000000003", "Mi tom Thai", 10);
 const NET = { ok: false, kind: "network" };
 const fMi = fr.rankFromItems(t1, mI, itemsOf(["Mi tom chua cay", "Ruaypuan Hanami"])); // T1 đủ 5 mục
 const fSua = fr.rankFromItems(t1, mI, itemsOf(["Sua tuoi", "Ruaypuan Hanami"])); // T1 1 mục
-const g2Of = (found, S, off = NET) => serverMerge(mctx, found, off, S, { called: true }).merged;
+// G2 nền (vòng 3: g2Local, không phụ thuộc serverMerge của src đã cài c-idf)
+const g2Of = (found, S, off = NET) => g2Local(mctx, found, off, S);
+/** G2 của src không qua serverMerge: mergeFront TẮT serverIdf trên serverJoin (= serverMerge ở b588ed8). */
+const g2Src = (c, found, off, S) => mergeFront(c.t1, c.rIndex, c.products, found, serverJoin(off, S), { ...SERVER_MERGE_OPTS, serverIdf: false });
 const run = (name, found, S, off = NET) => methodMerge(name, mctx, found, off, S, { called: true });
 const codes = (l) => l.map((x) => x.code);
 const offCount = (l) => l.filter((x) => x.source === "off").length;
 
-test("các cách: S rỗng / không mục nào đi qua được → giống hệt serverMerge (trừ G3)", () => {
+test("các cách: S rỗng / không mục nào đi qua được → giống hệt G2 nền (trừ G3)", () => {
   for (const name of METHOD_ORDER) {
     for (const found of [fMi, fSua]) {
       for (const off of [NET, offReal]) {
@@ -260,6 +265,9 @@ test("ruleBlockOf: lấy khối từ đầu dòng dấu mở đến hết dòng 
   const self = ruleBlockOf(fs.readFileSync(new URL("../g2-di-qua-do.mjs", import.meta.url), "utf8"));
   assert.ok(self && self.startsWith("// LU") && self.includes("export function pickMethod"));
   assert.equal(RULE_SHA, "1d56860");
+  // vòng 3: khối luật hiện tại trùng từng byte khối ở 1d56860 (sha256 ghi cứng); sửa một ký tự → khác
+  assert.equal(sha256Of(self), RULE_SHA256);
+  assert.notEqual(sha256Of(self.replace("L1a", "L1A")), RULE_SHA256);
 });
 
 test("luật: mục tiêu, chọn (f5 > f1 > ruaypuan > thứ tự), G3 không được chọn, không hơn nền → không giữ", () => {
@@ -297,14 +305,14 @@ const LINES = [
   ["Keo", "Alpenliebe"], ["Snack", "Oishi", "tom"], ["COOP", "Select", "Mui Bin Tinh Say", "IODIZES REFINED SEA SALT"], ["xyzzy qwerty"],
 ];
 
-test("g2Local (S rỗng, OFF lỗi / có, S có, S có mục danh mục) trùng serverMerge của src/ từng mục", () => {
+test("g2Local (S rỗng, OFF lỗi / có, S có, S có mục danh mục) trùng G2 của src/ (mergeFront tắt serverIdf) từng mục", () => {
   let n = 0;
   let promoted = 0;
   for (const lines of LINES) {
     const found = fr.rankFromItems(t1, rIndex, itemsOf(lines));
     for (const S of [[], serverS(lines), serverS(lines, { withCatalog: 2 })]) {
       for (const off of [{ ok: false, kind: "network" }, { ok: false, kind: "none" }, offReal, { ok: true, hits: [] }]) {
-        const want = serverMerge(ctx, found, off, S, { called: true }).merged;
+        const want = g2Src(ctx, found, off, S);
         assert.deepEqual(g2Local(ctx, found, off, S), want, `${lines.join("/")} S ${S.length} off ${off.ok}`);
         if (want[0] && want[0].source === "off" && found.hits[0] && want[0].code !== found.hits[0].code) promoted++;
         n++;
@@ -315,13 +323,39 @@ test("g2Local (S rỗng, OFF lỗi / có, S có, S có mục danh mục) trùng 
   assert.ok(promoted > 0, "có ít nhất một ca offPromote đẩy mục máy chủ lên vị trí 1 (ca 7Up)");
 });
 
+// Vòng 3: app đã cài c-idf → serverMerge của src = methodMerge("c-idf") của khung đo từng mục (cùng ca trên + mini).
+test("serverMerge của src (c-idf) trùng methodMerge(\"c-idf\") của khung đo từng mục; khác G2 nền ở ≥ 1 ca", () => {
+  let n = 0;
+  let differs = 0;
+  const check = (c, found, off, S, label) => {
+    const want = methodMerge("c-idf", c, found, off, S, { called: true });
+    const got = serverMerge(c, found, off, S, { called: true }).merged;
+    assert.deepEqual(got, want, label);
+    if (JSON.stringify(got) !== JSON.stringify(g2Local(c, found, off, S))) differs++;
+    n++;
+  };
+  for (const lines of LINES) {
+    const found = fr.rankFromItems(t1, rIndex, itemsOf(lines));
+    for (const S of [[], serverS(lines), serverS(lines, { withCatalog: 2 })]) {
+      for (const off of [NET, { ok: false, kind: "none" }, offReal, { ok: true, hits: [] }]) check(ctx, found, off, S, `${lines.join("/")} S ${S.length} off ${off.ok}`);
+    }
+  }
+  const RU3 = sv("8852052150101", "Hanami Ruaypuan Prawn crackers", 30);
+  const f3 = fr.rankFromItems(t1, mI, itemsOf(["Mi tom", "Ruaypuan Hanami Prawn"]));
+  for (const S of [[RU], [RU3], [MT, RU3, ZZ], [RU3, RU]]) for (const found of [fMi, fSua, f3]) {
+    for (const off of [NET, offDup(offHit(RU.code, "Ruaypuan Xyz")), offReal]) check(mctx, found, off, S, `mini ${S.map((h) => h.code).join(",")}`);
+  }
+  assert.equal(n, LINES.length * 12 + 4 * 3 * 3);
+  assert.ok(differs > 0, `c-idf phải khác G2 nền ở ≥ 1 ca (khác ${differs}/${n})`);
+});
+
 test("g2Local: serverScore chỉ áp cho mục máy chủ ngoài danh mục; trả nguyên điểm thì trùng G2", () => {
   const lines = ["Up", "Soda chanh", "Khong calo"];
   const found = fr.rankFromItems(t1, rIndex, itemsOf(lines));
   const S = serverS(lines);
   const seen = [];
   const same = g2Local(ctx, found, offReal, S, { serverScore: (h, { m1452, doc, index, query }) => { seen.push(h.code); return { score: bm25DocScore(index, doc, query).score, matched: m1452 }; } });
-  assert.deepEqual(same, serverMerge(ctx, found, offReal, S, { called: true }).merged);
+  assert.deepEqual(same, g2Src(ctx, found, offReal, S));
   const sCodes = new Set(S.map((h) => h.code));
   assert.ok(seen.length > 0 && seen.every((c) => sCodes.has(c)));
   assert.ok(seen.every((c) => !products.some((p) => p.code === c)));
@@ -343,7 +377,7 @@ test("passThrough: chỉ mục S khớp 0 từ với 1.452 (G2 bỏ), giữ th�
   assert.equal(pt[2].item.source, "catalog");
   assert.equal("extra" in pt[0].item, false);
   // G2 bỏ cả 3 (khớp 0 từ) → nền không có mục nào của S
-  const g2 = serverMerge(ctx, found, { ok: false, kind: "network" }, S, { called: true }).merged;
+  const g2 = g2Local(ctx, found, { ok: false, kind: "network" }, S);
   assert.equal(g2.some((x) => S.some((h) => h.code === x.code)), false);
   // mục khớp ≥ 1 từ với 1.452 không đi qua
   const found2 = fr.rankFromItems(t1, rIndex, itemsOf(["Soda chanh", "Up"]));

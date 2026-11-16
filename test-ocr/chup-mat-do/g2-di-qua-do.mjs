@@ -6,12 +6,21 @@
 // cleanQuery / createOffSearch / strangeWords (off-search.js), rankFromItems / rankFromText (front-rank.js).
 // OFF CHỈ đọc cache đĩa (0 lượt OFF thật), 0 lượt Azure, không chạy lại OCR (bộ A / B, ruaypuan, buldak).
 //
-//   node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs (--chi-nen | --do-cach) [--out <thư mục>] [--cache <thư mục>]
-//        [--ocr <thư mục>] [--danh-muc <c.jsonl.gz>] [--kho-lon <json>] [--dong-noi-bat <json>] [--mo-rong <json>] [--ghi-de]
+//   node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs (--chi-nen | --do-cach | --kiem-app) [--out <thư mục>]
+//        [--cache <thư mục>] [--ocr <thư mục>] [--danh-muc <c.jsonl.gz>] [--kho-lon <json>] [--dong-noi-bat <json>]
+//        [--mo-rong <json>] [--do-log <do.log>] [--ghi-de]
 //   --chi-nen       chỉ nền + kiểm chéo (1)–(4) → <out>/nen.json.
 //   --do-cach       nền + kiểm chéo, rồi đo MỌI cách theo luật → <out>/do.json (cần <out>/nen.json). Trước khi đo tự kiểm:
 //                   khối luật so từng byte với commit 1d56860 (git show), worktree sạch, mục tiêu nền MÁY = BASE_TARGET;
-//                   lệch / thiếu git → thoát mã 3. Phải có đúng một trong hai cờ (không cờ → thoát mã 2).
+//                   lệch / thiếu git → thoát mã 3. Phải có đúng một trong ba cờ (không cờ / nhiều cờ → thoát mã 2).
+//                   Từ vòng 3 (src đã cài c-idf) L7 trượt theo thiết kế: không chạy lại --chi-nen / --do-cach để chọn cách.
+//   --kiem-app      (vòng 3; KHÔNG phán cổng, KHÔNG chọn cách) chạy mọi ca của lần đo (OFF chỉ cache): (a) serverMerge của
+//                   src (đã cài c-idf) so methodMerge("c-idf") của khung đo từng ô, cả mục (lệch → thoát mã 3); (b) số ô A/B
+//                   có danh sách 5 mã khác nền MÁY trong <out>/nen.json, kèm danh sách ảnh (chỉ báo); (c) in lại 2 dòng bảng
+//                   của app theo mẫu hàng c-idf và so dòng 39–40 của <out>/do.log (--do-log; dòng MÁY so phần trước cột
+//                   cổng). Ghi <out>/kiem-app.json; cần <out>/nen.json.
+//   NỀN MÁY từ vòng 3 = g2Local (bản sao G2 trong khung đo, không phụ thuộc src); kiểm chéo (1) so g2Local với mergeFront
+//   của src TẮT serverIdf trên serverJoin (= serverMerge ở b588ed8) và mergeByMethod G2-g3-w3.
 //   --out           thư mục ra (mặc định D:\tmp\g2-di-qua\ket-qua). --cache: cache OFF đĩa (D:\tmp\tu-dong\cache-off).
 //   --ocr           chữ OCR 2 ảnh chụp màn hình (D:\tmp\dong-noi-bat\ocr). --danh-muc: danh mục (c) (server/catalog/c.jsonl.gz).
 //   --kho-lon       file từng ca kho-lon v2 (kiểm chéo 3). --dong-noi-bat: v1-nen.json của dong-noi-bat (kiểm chéo 2).
@@ -20,6 +29,9 @@
 // Vòng 1 P2: chỉ có NỀN (cờ --chi-nen) + kiểm chéo (1)–(4). P3: khối luật dưới. P4: các cách (cờ --do-cach).
 // Vòng 2: sửa code cho đúng luật (ngoài khối luật): c-srv / c-idf chấm mục máy chủ trùng mã OFF theo bản máy chủ,
 // passThrough của các cách dùng tài liệu như mergeFront (S' chữ OFF khi trùng mã); tự kiểm trước khi đo; in none → open.
+// Vòng 3 (sau khi luật chọn c-idf và src đã cài): mọi chỗ coi serverMerge của src là "G2 nền" (methodMerge `base`, nền
+// MÁY, kiểm chéo (1), ruaypuan giả định) đổi sang g2Local (bản sao G2, trùng serverMerge ở b588ed8 từng mục) để nghĩa các
+// cách a-* / b* giữ như lúc đo; khối luật KHÔNG sửa (dòng "g2 = serverMerge(…)" trong khối là serverMerge ở b588ed8).
 //
 // ===================================================================================================================
 // LUẬT CHỐT TRƯỚC — commit riêng "test(g2-di-qua): luật đo chốt trước", SAU khi đo nền (P2, chưa có cách nào; nền ghi ở
@@ -351,13 +363,21 @@ export function pickMethod(list, base = BASE_TARGET) {
 
 // Vòng 2: 2 dòng import của các cách (c384282 đặt nhầm trong khối luật, ngay sau các import cũ) dời ra đây để khối
 // luật trùng từng byte commit 1d56860; import ES được nâng lên đầu module nên chạy không đổi.
-import { serverMerge } from "../../src/front-server.js";
+// Vòng 3: bỏ import serverMerge (khung đo không còn coi serverMerge của src là G2 nền; chỉ --kiem-app gọi nó, qua import động).
 import { mergeByMethod } from "./kho-lon-do.mjs";
+import crypto from "node:crypto";
 
 // ---------------- tự kiểm khối luật (vòng 2) ----------------
 /** Commit luật và đường dẫn file (so từng byte khối luật trước khi đo các cách). */
 export const RULE_SHA = "1d56860";
 export const RULE_FILE = "test-ocr/chup-mat-do/g2-di-qua-do.mjs";
+/** sha256 (hex) của khối luật ở commit RULE_SHA (vòng 3: test + --kiem-app kiểm khối luật không bị sửa). */
+export const RULE_SHA256 = "407d0361868594a53ab9288e41d742ad16df7e3bf1bd342798ca934a2dcf1016";
+
+/** sha256 hex của chuỗi (utf8). */
+export function sha256Of(text) {
+  return crypto.createHash("sha256").update(String(text), "utf8").digest("hex");
+}
 
 /**
  * Khối luật của một bản file: từ ĐẦU dòng có dấu mở (lần gặp đầu tiên) đến HẾT dòng có dấu đóng (lần gặp đầu tiên sau
@@ -428,6 +448,9 @@ export function capList(list, { k, offMax }) {
  * Vòng 2 (NÊN SỬA 1 của reviewer vòng 1): có t1 + S thì tài liệu = offDoc(t1, chữ của BẢN S cùng mã) (S không có text →
  * name + brand như g2Local), bỏ qua doc truyền vào — g2Local truyền bản OFF khi mã có ở cả OFF và S (joinExtra xếp OFF
  * trước), còn luật ghi "BM25 trên chính text ứng viên". Không có t1 / S hoặc mã không có trong S → dùng doc truyền vào.
+ * Mã có ở cả OFF và S: HIỂN THỊ theo bản OFF (g2Local dựng mục từ hit OFF, như offItem(o.h)), ĐIỂM theo chữ bản S (hàm này).
+ * Vòng 3: app cài đúng cách này (serverIdf của src/front-merge.js + serverJoin của src/front-server.js); test khớp từng ca
+ * ở tests/front-server.test.js và cờ --kiem-app.
  */
 export function idfScorer(index, t1 = null, S = null) {
   let maxIdf = 0;
@@ -485,13 +508,14 @@ export function sWithOffText(S, off) {
 }
 
 /**
- * Gộp MÁY theo cách name (METHOD_NAMES). ctx = { t1, rIndex, products, catalogCodes? }; g2 (tùy chọn) = serverMerge(…)
- * .merged đã tính (không truyền thì tính bằng serverMerge của src/). found null → [].
+ * Gộp MÁY theo cách name (METHOD_NAMES). ctx = { t1, rIndex, products, catalogCodes? }; g2 (tùy chọn) = G2 nền đã tính
+ * (không truyền thì tính bằng g2Local: vòng 3 bỏ phụ thuộc serverMerge của src/, vì src đã cài c-idf; g2Local trùng
+ * serverMerge ở b588ed8 từng mục). found null → []. called: giữ để gọi như cũ (G2 không dùng).
  */
 export function methodMerge(name, ctx, found, off, S, { g2 = null, called } = {}) {
   if (!METHOD_NAMES.includes(name)) throw new Error(`g2-di-qua: cách không có: ${name}`);
   if (!found) return [];
-  const base = g2 ?? serverMerge(ctx, found, off, S, { called }).merged;
+  const base = g2 ?? g2Local(ctx, found, off, S);
   if (name === "c-srv") return g2Local(ctx, found, off, S, { serverScore: srvScorer(S) });
   if (name === "c-idf") return g2Local(ctx, found, off, S, { serverScore: idfScorer(ctx.rIndex.index, ctx.t1, S) });
   if (name === "G3") {
@@ -519,8 +543,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   // nen.json để so L6). Phải có đúng một cờ (không cờ → không chạy gì, tránh lỡ đo cách).
   const onlyBase = argv.includes("--chi-nen");
   const runMethods = argv.includes("--do-cach");
-  if (onlyBase === runMethods) {
-    console.error("Cần đúng một cờ: --chi-nen (chỉ nền) hoặc --do-cach (đo các cách theo luật chốt trước).");
+  const checkApp = argv.includes("--kiem-app");
+  if ([onlyBase, runMethods, checkApp].filter(Boolean).length !== 1) {
+    console.error("Cần đúng một cờ: --chi-nen (chỉ nền), --do-cach (đo các cách theo luật chốt trước) hoặc --kiem-app (so app với c-idf của khung đo).");
     process.exit(2);
   }
   const outDir = arg("--out", "D:\\tmp\\g2-di-qua\\ket-qua");
@@ -564,10 +589,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     console.log(`Tự kiểm: khối luật trùng từng byte ${RULE_SHA} (${ruleCheck.bytes} B, ${ruleCheck.lines} dòng); sha ${sha} dirty ${dirty}; bắt đầu ${startedAt}`);
   }
   const nenFile = path.join(outDir, "nen.json");
-  const outFile = runMethods ? path.join(outDir, "do.json") : nenFile;
-  const nenSaved = runMethods ? (fs.existsSync(nenFile) ? JSON.parse(fs.readFileSync(nenFile, "utf8")) : null) : null;
-  if (runMethods && !nenSaved) {
-    console.error(`--do-cach cần ${nenFile} (chạy --chi-nen trước).`);
+  const outFile = runMethods ? path.join(outDir, "do.json") : checkApp ? path.join(outDir, "kiem-app.json") : nenFile;
+  const nenSaved = runMethods || checkApp ? (fs.existsSync(nenFile) ? JSON.parse(fs.readFileSync(nenFile, "utf8")) : null) : null;
+  if ((runMethods || checkApp) && !nenSaved) {
+    console.error(`${runMethods ? "--do-cach" : "--kiem-app"} cần ${nenFile} (chạy --chi-nen trước).`);
     process.exit(2);
   }
   if (fs.existsSync(outFile) && !argv.includes("--ghi-de")) {
@@ -653,9 +678,11 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     c.S = toS(c.sRes);
   }
 
-  // ---- NỀN: MÁY = serverMerge của src/; LÙI = photoMerge của src/ ----
+  // ---- NỀN: MÁY = g2Local (vòng 3; = serverMerge ở b588ed8); LÙI = photoMerge của src/ ----
   const codesOf = (list) => list.map((x) => x.code);
   const check1 = { mayCells: 0, mayLocalSame: 0, mayKhoLonFnSame: 0, luiCells: 0, luiSame: 0, mayLocalDiff: [], mayKhoLonFnDiff: [], luiDiff: [] };
+  // G2 của src không qua serverMerge: mergeFront TẮT serverIdf trên serverJoin (vòng 3; ở b588ed8 đây đúng là serverMerge)
+  const g2Src = (found, off, S) => fm.mergeFront(t1, rIndex, products, found, fsv.serverJoin(off, S), { ...fsv.SERVER_MERGE_OPTS, serverIdf: false });
   for (const c of cases) {
     c.may = {};
     c.lui = {};
@@ -663,16 +690,16 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     for (const cond of CONDS) {
       if (!c.found) { c.may[cond] = []; c.lui[cond] = []; continue; }
       const called = c.queries.length > 0;
-      const mm = fsv.serverMerge(ctx, c.found, c.off[cond], c.S, { called }).merged;
+      const mm = g2Local(ctx, c.found, c.off[cond], c.S);
       const ml = fx.photoMerge({ ...ctx, xi }, c.found, c.off[cond], { called }).merged;
       c.may[cond] = mm;
       c.lui[cond] = ml;
       c.kind2[`may|${cond}`] = fp.photoOutcome(mm).kind;
       c.kind2[`lui|${cond}`] = fp.photoOutcome(ml).kind;
-      // kiểm chéo (1): bản sao G2 của khung đo (g2Local) trùng serverMerge (cả mục, không chỉ mã); mergeByMethod
+      // kiểm chéo (1): G2 nền (g2Local) trùng G2 của src (mergeFront tắt serverIdf, cả mục, không chỉ mã); mergeByMethod
       // G2-g3-w3 của kho-lon-do.mjs trùng; LÙI gọi lại photoMerge độc lập trùng.
       check1.mayCells++;
-      if (JSON.stringify(g2Local(ctx, c.found, c.off[cond], c.S)) === JSON.stringify(mm)) check1.mayLocalSame++;
+      if (JSON.stringify(g2Src(c.found, c.off[cond], c.S)) === JSON.stringify(mm)) check1.mayLocalSame++;
       else check1.mayLocalDiff.push(`${keyOf(c)}|${cond}`);
       const kl = mergeByMethod({ t1, rIndex, products, found: c.found, off: c.off[cond], S: c.S, method: "G2-g3-w3", catalogCodes });
       if (JSON.stringify(codesOf(kl)) === JSON.stringify(codesOf(mm))) check1.mayKhoLonFnSame++;
@@ -753,7 +780,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     note: "ỨNG VIÊN GIẢ ĐỊNH (a-c80+c-2 của dong-noi-bat), máy chủ thật KHÔNG trả như vậy; chỉ báo, không dùng để chọn",
     sRank: rankIn(codesOf(hypoS), RUAYPUAN_CODE, SERVER_K), S: codesOf(hypoS),
     may: Object.fromEntries(CONDS.map((cond) => {
-      const m = fsv.serverMerge(ctx, ru.found, ru.off[cond], hypoS, { called: ru.queries.length > 0 }).merged;
+      const m = g2Local(ctx, ru.found, ru.off[cond], hypoS);
       return [cond, { rank: rankIn(codesOf(m), RUAYPUAN_CODE), top5: codesOf(m) }];
     })),
     passThrough: passThrough(ctx, ru.found, hypoS).map((x) => ({ j: x.j + 1, code: x.h.code, rawMatched: x.rawMatched })),
@@ -796,7 +823,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     catalogFile: dmFile, catalogN: lv.rows.length, foreign: foreign.map((f) => ({ code: f.code, lines: f.lines })), probesN: probes.length,
     coverage, sum, special, ruInfo, ruHypo, serverMatch, ptStats, checks, allOk, perCase, offStats: disk.stats,
   };
-  if (!runMethods) fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
+  if (onlyBase) fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
 
   // ---- in ----
   const f = (v) => (v == null ? "-" : v);
@@ -809,11 +836,11 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   console.log(`ruaypuan: ${JSON.stringify(ruInfo)}`);
   console.log(`ruaypuan GIẢ ĐỊNH: hạng ${f(ruHypo.sRank)} trong 10; MÁY nền với ứng viên giả định ${CONDS.map((cond) => `${cond} ${f(ruHypo.may[cond].rank)}`).join(", ")}; đi qua được ${JSON.stringify(ruHypo.passThrough)}`);
   console.log(`S Node trùng candidates máy chủ: ${JSON.stringify(serverMatch)}; mục đi qua được (ca có S[0] / ca có ≥ 1): ${JSON.stringify(ptStats)}`);
-  console.log(`Kiểm chéo (1) ${check1ok ? "ĐẠT" : "LỆCH"}: g2Local = serverMerge ${check1.mayLocalSame}/${check1.mayCells}, mergeByMethod G2-g3-w3 = serverMerge ${check1.mayKhoLonFnSame}/${check1.mayCells}, LÙI photoMerge gọi lại ${check1.luiSame}/${check1.luiCells} ${[...check1.mayLocalDiff, ...check1.mayKhoLonFnDiff, ...check1.luiDiff].slice(0, 10).join(" ")}`);
+  console.log(`Kiểm chéo (1) ${check1ok ? "ĐẠT" : "LỆCH"}: g2Local = mergeFront src tắt serverIdf ${check1.mayLocalSame}/${check1.mayCells}, mergeByMethod G2-g3-w3 = g2Local ${check1.mayKhoLonFnSame}/${check1.mayCells}, LÙI photoMerge gọi lại ${check1.luiSame}/${check1.luiCells} ${[...check1.mayLocalDiff, ...check1.mayKhoLonFnDiff, ...check1.luiDiff].slice(0, 10).join(" ")}`);
   console.log(`Kiểm chéo (2) ${check2ok ? "ĐẠT" : "LỆCH"}: ${JSON.stringify(check2.sums)}; từng ca so v1-nen ${check2.perCase.same}/${check2.perCase.cells} ${check2.perCase.diff.slice(0, 10).join(" ")}`);
   console.log(`Kiểm chéo (3) ${check3.ok ? "ĐẠT" : "LỆCH"}: mã 6 ca ${check3.foreignCodesOk}; ngoại trùng kho-lon ${check3.foreignSame}/${check3.foreignCells}, trong 5 ${f5}/12; ca khác trùng kho-lon ${check3.otherSame}/${check3.otherCells} ${[...check3.foreignDiff, ...check3.otherDiff].slice(0, 10).join(" ")}`);
   console.log(`Kiểm chéo (4) ${check4.ok ? "ĐẠT" : "LỆCH"}: buldak MÁY vị trí 1 ${JSON.stringify({ i: check4.i, ii: check4.ii })}`);
-  console.log(`OFF: ${JSON.stringify(disk.stats)}${runMethods ? "" : `; Ghi: ${outFile}`}`);
+  console.log(`OFF: ${JSON.stringify(disk.stats)}${onlyBase ? `; Ghi: ${outFile}` : ""}`);
   if (!allOk) { console.error("KIỂM CHÉO LỆCH: dừng báo, không sửa src/."); process.exit(3); }
 
   // ---- vòng 2: mục tiêu của NỀN MÁY tính trong cùng lần chạy, so BASE_TARGET (không đổi BASE_TARGET) ----
@@ -824,15 +851,13 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const baseTargetOk = JSON.stringify(baseTarget) === JSON.stringify(BASE_TARGET);
   console.log(`Mục tiêu nền MÁY (cùng lần chạy) ${JSON.stringify(baseTarget)} ${baseTargetOk ? "TRÙNG" : "LỆCH"} BASE_TARGET ${JSON.stringify(BASE_TARGET)}`);
   Object.assign(out, { startedAt, ruleCheck, baseTarget, baseTargetOk });
-  if (runMethods && !baseTargetOk) { console.error("Tự kiểm: mục tiêu nền lệch BASE_TARGET: dừng báo, không đo."); process.exit(3); }
+  if ((runMethods || checkApp) && !baseTargetOk) { console.error("Tự kiểm: mục tiêu nền lệch BASE_TARGET: dừng báo, không đo."); process.exit(3); }
 
-  // ---- ĐO CÁC CÁCH (chỉ --do-cach; sau commit luật; phán đúng khối luật) ----
-  if (runMethods) {
-    const l7 = srcSame && Object.values(consts).every(Boolean);
-    const ctxM = { ...ctx, catalogCodes };
-    const sameArr = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-    const methods = {};
-    for (const name of METHOD_NAMES) {
+  // ---- đo MỘT cách gộp MÁY trên mọi ca (vòng 3: tách thành hàm dùng chung cho --do-cach và --kiem-app; thân giữ đúng như
+  // vòng 2). mergeMay(found, off, S, called) → danh sách mục MÁY. ----
+  const ctxM = { ...ctx, catalogCodes };
+  const sameArr = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const measure = (mergeMay) => {
       const res = {};
       const qsDiff = [];
       const luiDiff = [];
@@ -848,7 +873,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         for (const cond of CONDS) {
           if (!found) { r.may[cond] = []; r.lui[cond] = []; continue; }
           const called = queries.length > 0;
-          const mm = methodMerge(name, ctxM, found, c.off[cond], S, { called });
+          const mm = mergeMay(found, c.off[cond], S, called);
           const ml = fx.photoMerge({ ...ctx, xi }, found, c.off[cond], { called }).merged;
           r.may[cond] = codesOf(mm);
           r.lui[cond] = codesOf(ml);
@@ -859,7 +884,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         res[key] = r;
       }
       if (ruHypo && ru.found) {
-        res.__ruHypo = Object.fromEntries(CONDS.map((cond) => [cond, rankIn(codesOf(methodMerge(name, ctxM, ru.found, ru.off[cond], hypoS, { called: ru.queries.length > 0 })), RUAYPUAN_CODE)]));
+        res.__ruHypo = Object.fromEntries(CONDS.map((cond) => [cond, rankIn(codesOf(mergeMay(ru.found, ru.off[cond], hypoS, ru.queries.length > 0)), RUAYPUAN_CODE)]));
       }
       const posM = (c, cond, code = c.code) => (code ? rankIn(res[keyOf(c)].may[cond], code) : null);
       const loss = {};
@@ -910,9 +935,26 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         sumsLui[`${s}|${cond}`] = { top1: rs.filter((c) => posL(c) === 1).length, top5: rs.filter((c) => posL(c) != null).length };
       }
       for (const c of cases.filter((x) => x.set === "7up")) for (const cond of CONDS) s7lui[`${c.kind}|${cond}`] = rankIn(res[keyOf(c)].lui[cond], CODE_7UP_DIET);
-      const verdict = judge({ loss, luiDiff, s7, buldak, salt, confidenceNull: consts.confidenceNull, foreign: foreignJ, qsDiff, l7 });
       const t = targetOf(foreignPos, ruPos);
-      methods[name] = { sums, sumsLui, s7lui, loss, s7, buldak, salt, saltTop1, foreignPos, ruPos, ruHypo: res.__ruHypo ?? null, probe, abInfo, noneToOpen, t, verdict, luiDiffN: luiDiff.length, qsDiffN: qsDiff.length };
+      return { res, qsDiff, luiDiff, foreignJ, v: { sums, sumsLui, s7lui, loss, s7, buldak, salt, saltTop1, foreignPos, ruPos, ruHypo: res.__ruHypo ?? null, probe, abInfo, noneToOpen, t } };
+  };
+  /** 2 dòng bảng (LÙI, MÁY) của một cách như do.log vòng 2; verdictText null → dòng MÁY không có cột cổng. */
+  const rowLines = (name, v, verdictText) => {
+    const s = (k) => `${v.sums[k].top1}/${v.sums[k].top5}`;
+    const sl = (k) => `${v.sumsLui[k].top1}/${v.sumsLui[k].top5}`;
+    const lui = `${name.padEnd(6)} LÙI B ${sl("B|i")} ${sl("B|ii")} A ${sl("A|i")} ${sl("A|ii")} | 7Up LÙI ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7lui[k])).join("")} | muối mục 1 ${JSON.stringify(v.saltTop1)} | ngoại MÁY ${JSON.stringify(v.foreignPos)}`;
+    const may = `${name.padEnd(6)} MÁY B ${s("B|i")} ${s("B|ii")} A ${s("A|i")} ${s("A|ii")} | 7Up ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7[k])).join("")} | buldak ${CONDS.map((c) => (v.buldak[c] === BULDAK_CODE ? "=" : "≠")).join("")} | muối ${JSON.stringify(v.salt)} | ngoại trong 5 ${v.t.f5}/12 vị trí 1 ${v.t.f1}/12 | ruaypuan ${f(v.ruPos.i)}/${f(v.ruPos.ii)} (giả định ${f(v.ruHypo?.i)}/${f(v.ruHypo?.ii)}) | dò ${v.probe.top1.i}/${v.probe.top5.i} ${v.probe.top1.ii}/${v.probe.top5.ii} | A/B đổi ${JSON.stringify(v.abInfo)}`;
+    return [lui, verdictText == null ? may : `${may} | ${verdictText}`];
+  };
+
+  // ---- ĐO CÁC CÁCH (chỉ --do-cach; sau commit luật; phán đúng khối luật) ----
+  if (runMethods) {
+    const l7 = srcSame && Object.values(consts).every(Boolean);
+    const methods = {};
+    for (const name of METHOD_NAMES) {
+      const m = measure((found, off, S, called) => methodMerge(name, ctxM, found, off, S, { called }));
+      const verdict = judge({ loss: m.v.loss, luiDiff: m.luiDiff, s7: m.v.s7, buldak: m.v.buldak, salt: m.v.salt, confidenceNull: consts.confidenceNull, foreign: m.foreignJ, qsDiff: m.qsDiff, l7 });
+      methods[name] = { ...m.v, verdict, luiDiffN: m.luiDiff.length, qsDiffN: m.qsDiff.length };
       process.stdout.write(".");
     }
     console.log("");
@@ -923,10 +965,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     Object.assign(out, { at: new Date().toISOString(), methods, pick, conclusion, offStats: disk.stats, offNetCalls: disk.stats.calls });
     fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
     for (const [name, v] of Object.entries(methods)) {
-      const s = (k) => `${v.sums[k].top1}/${v.sums[k].top5}`;
-      const sl = (k) => `${v.sumsLui[k].top1}/${v.sumsLui[k].top5}`;
-      console.log(`${name.padEnd(6)} LÙI B ${sl("B|i")} ${sl("B|ii")} A ${sl("A|i")} ${sl("A|ii")} | 7Up LÙI ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7lui[k])).join("")} | muối mục 1 ${JSON.stringify(v.saltTop1)} | ngoại MÁY ${JSON.stringify(v.foreignPos)}`);
-      console.log(`${name.padEnd(6)} MÁY B ${s("B|i")} ${s("B|ii")} A ${s("A|i")} ${s("A|ii")} | 7Up ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7[k])).join("")} | buldak ${CONDS.map((c) => (v.buldak[c] === BULDAK_CODE ? "=" : "≠")).join("")} | muối ${JSON.stringify(v.salt)} | ngoại trong 5 ${v.t.f5}/12 vị trí 1 ${v.t.f1}/12 | ruaypuan ${f(v.ruPos.i)}/${f(v.ruPos.ii)} (giả định ${f(v.ruHypo?.i)}/${f(v.ruHypo?.ii)}) | dò ${v.probe.top1.i}/${v.probe.top5.i} ${v.probe.top1.ii}/${v.probe.top5.ii} | A/B đổi ${JSON.stringify(v.abInfo)} | ${v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
+      for (const line of rowLines(name, v, v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(","))) console.log(line);
     }
     // chỉ báo none → open (không là cổng): ảnh nền MÁY "none" (5 rỗng) nay tự mở một sản phẩm
     console.log("none → open (chỉ báo; ảnh: mã đúng → mục 1 mới, vị trí mã đúng):");
@@ -937,5 +976,71 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     console.log(`pickMethod: ${JSON.stringify(pick)}`);
     console.log(`== Kết luận: ${conclusion}`);
     console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
+  }
+
+  // ---- KIỂM APP (vòng 3, chỉ --kiem-app; KHÔNG phán cổng, KHÔNG chọn cách) ----
+  if (checkApp) {
+    const appMerge = (found, offR, S, called) => fsv.serverMerge(ctx, found, offR, S, { called }).merged;
+    const cidf = (found, offR, S, called) => methodMerge("c-idf", ctxM, found, offR, S, { called });
+    // (a) serverMerge của src = methodMerge("c-idf") của khung đo, từng ô, cả mục
+    const cells = { total: 0, same: 0, skippedNoText: 0, diff: [], diffFromG2: 0 };
+    const cmp = (label, found, offR, S, called, g2) => {
+      cells.total++;
+      const a = appMerge(found, offR, S, called);
+      const b = cidf(found, offR, S, called);
+      if (JSON.stringify(a) === JSON.stringify(b)) cells.same++;
+      else cells.diff.push({ cell: label, app: codesOf(a), cidf: codesOf(b) });
+      if (g2 && JSON.stringify(a) !== JSON.stringify(g2)) cells.diffFromG2++;
+      return a;
+    };
+    const appOf = {};
+    for (const c of cases) for (const cond of CONDS) {
+      if (!c.found) { cells.skippedNoText++; continue; }
+      appOf[`${keyOf(c)}|${cond}`] = cmp(`${keyOf(c)}|${cond}`, c.found, c.off[cond], c.S, c.queries.length > 0, c.may[cond]);
+    }
+    if (ru.found) for (const cond of CONDS) cmp(`ruaypuan-gia-dinh|${cond}`, ru.found, ru.off[cond], hypoS, ru.queries.length > 0, g2Local(ctx, ru.found, ru.off[cond], hypoS));
+    // (b) ô A/B có danh sách 5 mã khác nền MÁY trong nen.json (chỉ báo)
+    const nenDiff = [];
+    let abCells = 0;
+    for (const c of cases.filter((x) => x.set === "B" || x.set === "A")) for (const cond of CONDS) {
+      abCells++;
+      const saved = nenSaved.perCase?.[keyOf(c)]?.may?.[cond] ?? null;
+      const got = c.found ? codesOf(appOf[`${keyOf(c)}|${cond}`]) : [];
+      if (!sameArr(saved, got)) nenDiff.push({ set: c.set, code: c.code, cond, nen: saved, app: got });
+    }
+    // (c) bảng hàng của app theo mẫu c-idf, so dòng 39–40 của do.log
+    const m = measure(appMerge);
+    const [luiRow, mayRow] = rowLines("c-idf", m.v, null);
+    const doLogFile = arg("--do-log", path.join(outDir, "do.log"));
+    const doLog = fs.existsSync(doLogFile) ? fs.readFileSync(doLogFile, "utf8").split(/\r?\n/) : null;
+    const want39 = doLog?.[38] ?? null;
+    const want40 = doLog?.[39] ?? null;
+    const want40Body = want40 && want40.lastIndexOf(" | ") > 0 ? want40.slice(0, want40.lastIndexOf(" | ")) : null;
+    const rowCheck = { file: doLogFile, luiSame: luiRow === want39, maySame: mayRow === want40Body, want39, want40 };
+    // khối luật không bị sửa
+    const block = ruleBlockOf(fs.readFileSync(new URL(import.meta.url), "utf8"));
+    const blockSha256 = block ? sha256Of(block) : null;
+    const ok = cells.same === cells.total && cells.total > 0;
+    const rowOk = rowCheck.luiSame && rowCheck.maySame;
+    Object.assign(out, {
+      at: new Date().toISOString(), mode: "kiem-app", ruleBlockSha256: blockSha256, ruleBlockSame: blockSha256 === RULE_SHA256,
+      cells, nenDiff: { abCells, count: nenDiff.length, list: nenDiff }, row: { lui: luiRow, may: mayRow, ...rowCheck },
+      appStats: { ...m.v, qsDiffN: m.qsDiff.length, luiDiffN: m.luiDiff.length }, ok, rowOk, offStats: disk.stats, offNetCalls: disk.stats.calls,
+    });
+    delete out.perCase;
+    fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
+    console.log(`Khối luật sha256 ${blockSha256} ${blockSha256 === RULE_SHA256 ? "TRÙNG" : "KHÁC"} ${RULE_SHA} (${RULE_SHA256})`);
+    console.log(`(a) serverMerge src = methodMerge("c-idf") khung đo: ${cells.same}/${cells.total} ô (bỏ ${cells.skippedNoText} ô không có chữ OCR); ô app khác G2 nền: ${cells.diffFromG2} ${cells.diff.slice(0, 10).map((d) => `${d.cell} app ${d.app.join(",")} ≠ c-idf ${d.cidf.join(",")}`).join(" ; ")}`);
+    console.log(`(b) ô A/B có danh sách 5 mã khác nền MÁY (nen.json; chỉ báo): ${nenDiff.length}/${abCells}${nenDiff.length ? ` [${nenDiff.map((d) => `${d.set}|${d.code}|${d.cond}: ${(d.nen || []).join(",")} → ${d.app.join(",")}`).join(" ; ")}]` : ""}`);
+    console.log(`(c) bảng app (mẫu hàng c-idf), so ${doLogFile} dòng 39–40: LÙI ${rowCheck.luiSame ? "TRÙNG" : "KHÁC"}, MÁY ${rowCheck.maySame ? "TRÙNG" : "KHÁC"} (không phán cổng)`);
+    console.log(luiRow);
+    console.log(mayRow);
+    if (!rowCheck.luiSame) console.log(`   do.log 39: ${want39}`);
+    if (!rowCheck.maySame) console.log(`   do.log 40: ${want40}`);
+    console.log(`L6 câu OFF / ứng viên khác nền (chỉ báo): ${m.qsDiff.length}; LÙI khác nền: ${m.luiDiff.length}`);
+    console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
+    if (!ok) { console.error("KIỂM APP LỆCH: serverMerge của src khác c-idf của khung đo."); process.exit(3); }
+    if (!rowOk) { console.error("KIỂM APP LỆCH: bảng app khác do.log dòng 39–40."); process.exit(3); }
+    console.log("== KIỂM APP ĐẠT");
   }
 }

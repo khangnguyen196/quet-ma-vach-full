@@ -233,6 +233,48 @@ describe("mergeFront tắt serverIdf (phần G2 của serverMerge) trùng mergeB
     const got = mod.serverMerge({ t1, rIndex, products }, f, OFFS["OFF lỗi"], [], { called: true }).merged;
     assert.deepEqual(got, mergeFront(t1, rIndex, products, f, null));
   });
+
+  // g2-di-qua vòng 3 (P2): serverMerge MỚI (G2 + c-idf) trùng methodMerge("c-idf") của khung đo g2-di-qua-do.mjs từng
+  // trường, trên 180 ca trên + ca có từ lạ (ứng viên máy chủ ngoài 1.452 chứa từ không có trong từ vựng 1.452).
+  const S_STRANGE = {
+    "từ lạ (muối biển, ruaypuan) + Diet": [
+      { code: "4000000000017", name: "Refined Sea Salt", brand: "Iodizes", img: "", text: "Refined Sea Salt Iodizes Select", grp: "us", score: 25 },
+      { code: "8852052150101", name: "Hanami", brand: "Ruaypuan", img: "front_th.3", text: "Hanami Ruaypuan Prawn crackers", grp: "th", score: 20 },
+      raw(DIET, "893", 9),
+    ],
+    "từ lạ trùng mã OFF": [{ code: offOnly[1], name: "Hanami prawn", brand: "Ruaypuan", img: "", text: "Hanami Ruaypuan Prawn crackers original", grp: "th", score: 12 }],
+    "từ lạ, text rỗng (name + brand)": [{ code: "8852052150118", name: "Hanami Prawn", brand: "Ruaypuan", img: "", text: "", grp: "th", score: 15 }],
+  };
+  const FOUND_STRANGE = {
+    "ruaypuan gõ": fr.rankFromText(t1, rIndex, "Hanami\nRuaypuan prawn crackers"),
+    "muối biển gõ": fr.rankFromText(t1, rIndex, "Refined sea salt\nIodizes"),
+  };
+  const rowsC = [...rows];
+  for (const [sName, rawS] of Object.entries(S_STRANGE)) {
+    const S = mod.serverCandidates ? mod.serverCandidates({ candidates: rawS }) : [];
+    for (const [fName, found] of Object.entries({ ...FOUND, ...FOUND_STRANGE })) for (const [oName, off] of Object.entries(OFFS)) rowsC.push({ sName, S, fName, found, oName, off });
+  }
+  for (const S of Object.entries(S_CASES)) {
+    const SS = mod.serverCandidates ? mod.serverCandidates({ candidates: S[1] }) : [];
+    for (const [fName, found] of Object.entries(FOUND_STRANGE)) for (const [oName, off] of Object.entries(OFFS)) rowsC.push({ sName: S[0], S: SS, fName, found, oName, off });
+  }
+
+  test(`serverMerge (G2 + c-idf) trùng methodMerge("c-idf") của khung đo g2-di-qua: ${rowsC.length} ca, từng trường; khác G2-g3-w3 ở > 0 ca`, async () => {
+    const { methodMerge } = await import("../test-ocr/chup-mat-do/g2-di-qua-do.mjs");
+    assert.ok(rowsC.length >= 180);
+    let diff = 0;
+    let differsFromG2 = 0;
+    for (const r of rowsC) {
+      const want = methodMerge("c-idf", { t1, rIndex, products }, r.found, r.off, r.S, { called: true });
+      const got = mod.serverMerge({ t1, rIndex, products }, r.found, r.off, r.S, { called: true }).merged;
+      try { assert.deepStrictEqual(got, want); } catch { diff++; console.error(`lệch c-idf: ${r.sName} | ${r.fName} | ${r.oName}`); }
+      const g2 = mergeByMethod({ t1, rIndex, products, found: r.found, off: r.off, S: r.S, method: "G2-g3-w3" });
+      if (JSON.stringify(got) !== JSON.stringify(g2)) differsFromG2++;
+    }
+    console.log(`c-idf: ${rowsC.length - diff}/${rowsC.length} ca trùng khung đo; khác G2-g3-w3 ở ${differsFromG2} ca`);
+    assert.equal(diff, 0);
+    assert.ok(differsFromG2 > 0, "c-idf phải khác G2-g3-w3 ở ít nhất 1 ca (test bắt được thay đổi)");
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
