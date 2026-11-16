@@ -8,7 +8,7 @@ import * as t1 from "../../../public/chup-mat-do/t1.mjs";
 import * as fr from "../../../src/front-rank.js";
 import { parseSearch } from "../../../src/off-search.js";
 import { serverMerge, serverCandidates } from "../../../src/front-server.js";
-import { bm25DocScore } from "../../../src/front-merge.js";
+import { bm25DocScore, offDoc } from "../../../src/front-merge.js";
 import {
   g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
   METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE, methodMerge, insertAfterLock, capList, idfScorer, srvScorer,
@@ -142,6 +142,53 @@ test("c-idf: BM25 trên text ứng viên, từ ngoài từ vựng 1.452 dùng id
   assert.equal(run("c-idf", f3, [RU3])[0].code, RU3.code);
   // mục khớp 0 từ kể cả từ lạ → vẫn bị bỏ
   assert.deepEqual(run("c-idf", fMi, [ZZ]), g2Of(fMi, [ZZ]));
+});
+
+// ---- vòng 2 (NÊN SỬA 1): mã có ở cả OFF và S → c-srv / c-idf chấm theo bản MÁY CHỦ, passThrough theo tài liệu như mergeFront ----
+const offHit = (code, text) => ({ code, name: text, brand: "", img: "", vn: false, text });
+const offDup = (...hits) => ({ ok: true, hits });
+
+test("c-srv: mục máy chủ trùng mã OFF vẫn ra điểm gợi ý 1 × score / score S[0] (bản OFF không có score), không ra 0", () => {
+  const S = [{ ...MT, score: 40 }, RU];
+  const off = offDup(offHit(RU.code, "Ruaypuan khac"));
+  const got = run("c-srv", fSua, S, off);
+  const ref = fSua.hits[0].score;
+  const it = got.find((x) => x.code === RU.code);
+  assert.ok(it, "mục trùng có trong kết quả");
+  assert.ok(Math.abs(it.score - ref * (30 / 40)) < 1e-9, `điểm ${it.score} ≠ ${ref * 0.75}`);
+  assert.ok(it.score > 0);
+  // trực tiếp: tra score theo mã, không theo bản truyền vào
+  assert.deepEqual(srvScorer(S)(offHit(RU.code, "x"), { ref: 8, m1452: 0 }), { score: 6, matched: 1 });
+  assert.deepEqual(srvScorer(S)(offHit("8850000009999", "x"), { ref: 8, m1452: 0 }), { score: 0, matched: 1 });
+});
+
+test("c-idf: mục máy chủ trùng mã OFF chấm BM25 trên chữ của bản máy chủ, không trên chữ của OFF", () => {
+  const S = [RU]; // chữ máy chủ "Hanami Ruaypuan": khớp ruaypuan + hanami
+  const off = offDup(offHit(RU.code, "Ruaypuan Xyz")); // chữ OFF: chỉ khớp ruaypuan
+  const want = idfScorer(mI.index)(RU, { doc: offDoc(t1, RU.text), query: fSua.query });
+  const fromOff = idfScorer(mI.index)(RU, { doc: offDoc(t1, "Ruaypuan Xyz"), query: fSua.query });
+  assert.equal(want.matched, 2);
+  assert.equal(fromOff.matched, 1);
+  assert.notEqual(want.score, fromOff.score);
+  const it = run("c-idf", fSua, S, off).find((x) => x.code === RU.code);
+  assert.ok(it, "mục trùng có trong kết quả");
+  assert.ok(Math.abs(it.score - want.score) < 1e-9, `điểm ${it.score} ≠ ${want.score} (chữ OFF cho ${fromOff.score})`);
+  // trực tiếp: có t1 + S thì bỏ qua doc truyền vào, dùng chữ bản S cùng mã
+  const sc = idfScorer(mI.index, t1, S);
+  assert.deepEqual(sc(offHit(RU.code, "khac"), { doc: offDoc(t1, "Ruaypuan Xyz"), query: fSua.query }), want);
+});
+
+test("passThrough qua methodMerge: mã trùng OFF dùng chữ của OFF (tài liệu mergeFront dùng), vị trí theo S", () => {
+  const SU = sv("8850000000005", "Sua tuoi Thai", 40); // chữ máy chủ khớp sua / tuoi của 1.452
+  const off = offDup(offHit(SU.code, "Zzz qqq")); // chữ OFF khớp 0 từ → G2 bỏ
+  const g2 = g2Of(fSua, [SU, RU], off);
+  assert.equal(g2.some((x) => x.code === SU.code), false, "G2 bỏ mục (chấm theo chữ OFF)");
+  assert.equal(passThrough(mctx, fSua, [SU]).length, 0, "theo chữ máy chủ thì không đi qua");
+  const got = run("a-off", fSua, [SU, RU], off);
+  assert.equal(got[1]?.code, SU.code, "S[0] đi qua được theo chữ OFF → a-off chèn");
+  assert.equal(got[1].name, "Zzz qqq");
+  // không trùng mã → như cũ (chữ máy chủ)
+  assert.deepEqual(run("a-off", fSua, [SU, RU], NET), g2Of(fSua, [SU, RU], NET));
 });
 
 test("G3 = mergeByMethod G3 của kho-lon-do.mjs", () => {

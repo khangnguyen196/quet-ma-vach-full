@@ -387,11 +387,20 @@ export function capList(list, { k, offMax }) {
   return out.slice(0, k);
 }
 
-/** Điểm c-idf cho mục máy chủ: BM25 trên tài liệu của mục, từ ngoài từ vựng dùng idf lớn nhất của chỉ mục. */
-export function idfScorer(index) {
+/**
+ * Điểm c-idf cho mục máy chủ: BM25 trên tài liệu của mục, từ ngoài từ vựng dùng idf lớn nhất của chỉ mục.
+ * Vòng 2 (NÊN SỬA 1 của reviewer vòng 1): có t1 + S thì tài liệu = offDoc(t1, chữ của BẢN S cùng mã) (S không có text →
+ * name + brand như g2Local), bỏ qua doc truyền vào — g2Local truyền bản OFF khi mã có ở cả OFF và S (joinExtra xếp OFF
+ * trước), còn luật ghi "BM25 trên chính text ứng viên". Không có t1 / S hoặc mã không có trong S → dùng doc truyền vào.
+ */
+export function idfScorer(index, t1 = null, S = null) {
   let maxIdf = 0;
   for (const v of index.idf.values()) if (v > maxIdf) maxIdf = v;
-  return (h, { doc, query }) => {
+  const sByCode = new Map();
+  for (const h of Array.isArray(S) ? S : []) if (h && typeof h.code === "string" && !sByCode.has(h.code)) sByCode.set(h.code, h);
+  return (h, { doc: docIn, query }) => {
+    const s = t1 ? sByCode.get(h?.code) : undefined;
+    const doc = s ? offDoc(t1, s.text || `${s.name ?? ""} ${s.brand ?? ""}`) : docIn;
     let score = 0;
     let matched = 0;
     for (const w of new Set(query || [])) {
@@ -407,10 +416,36 @@ export function idfScorer(index) {
   };
 }
 
-/** Điểm c-srv: ref × score / score S[0] (score S[0] ≤ 0 hoặc không số → 0); matched = max(1, số từ khớp 1.452). */
+/**
+ * Điểm c-srv: ref × score / score S[0] (score S[0] ≤ 0 hoặc không số → 0); matched = max(1, số từ khớp 1.452).
+ * Vòng 2 (NÊN SỬA 1): score tra THEO MÃ trong S (Map mã → score), không lấy từ mục truyền vào — khi mã có ở cả OFF và S,
+ * g2Local truyền bản OFF (không có score). Mã không có trong S / score không phải số → 0.
+ */
 export function srvScorer(S) {
-  const s0 = Array.isArray(S) && S.length && Number.isFinite(S[0]?.score) ? S[0].score : 0;
-  return (h, { ref, m1452 }) => ({ score: s0 > 0 && Number.isFinite(h.score) ? ref * (h.score / s0) : 0, matched: Math.max(1, m1452) });
+  const list = Array.isArray(S) ? S : [];
+  const s0 = list.length && Number.isFinite(list[0]?.score) ? list[0].score : 0;
+  const byCode = new Map();
+  for (const h of list) if (h && typeof h.code === "string" && !byCode.has(h.code)) byCode.set(h.code, h.score);
+  return (h, { ref, m1452 }) => {
+    const sc = byCode.get(h?.code);
+    return { score: s0 > 0 && Number.isFinite(sc) ? ref * (sc / s0) : 0, matched: Math.max(1, m1452) };
+  };
+}
+
+/**
+ * S' cho passThrough (vòng 2, NÊN SỬA 1): mục S có mã trùng một mục OFF (off.ok, off.hits; lấy mục OFF đầu tiên cùng
+ * mã) thì text / name / brand lấy theo bản OFF — luật ghi "đúng tài liệu mergeFront dùng", mà mergeFront dùng bản OFF
+ * khi trùng mã (joinExtra xếp OFF trước). Giữ thứ tự / vị trí j theo S; các trường khác giữ của S.
+ */
+export function sWithOffText(S, off) {
+  const list = Array.isArray(S) ? S : [];
+  if (!(off && off.ok === true && Array.isArray(off.hits) && off.hits.length)) return list;
+  const offBy = new Map();
+  for (const h of off.hits) if (h && typeof h.code === "string" && !offBy.has(h.code)) offBy.set(h.code, h);
+  return list.map((h) => {
+    const o = h && offBy.get(h.code);
+    return o ? { ...h, text: o.text, name: o.name, brand: o.brand } : h;
+  });
 }
 
 /**
@@ -422,12 +457,12 @@ export function methodMerge(name, ctx, found, off, S, { g2 = null, called } = {}
   if (!found) return [];
   const base = g2 ?? serverMerge(ctx, found, off, S, { called }).merged;
   if (name === "c-srv") return g2Local(ctx, found, off, S, { serverScore: srvScorer(S) });
-  if (name === "c-idf") return g2Local(ctx, found, off, S, { serverScore: idfScorer(ctx.rIndex.index) });
+  if (name === "c-idf") return g2Local(ctx, found, off, S, { serverScore: idfScorer(ctx.rIndex.index, ctx.t1, S) });
   if (name === "G3") {
     const catalogCodes = ctx.catalogCodes instanceof Set ? ctx.catalogCodes : new Set((ctx.products || []).map((p) => p.code));
     return mergeByMethod({ t1: ctx.t1, rIndex: ctx.rIndex, products: ctx.products, found, off, S, method: "G3", catalogCodes });
   }
-  const pt = passThrough(ctx, found, S);
+  const pt = passThrough(ctx, found, sWithOffText(S, off));
   const p0 = pt.find((x) => x.j === 0) ?? null;
   if (name === "a-lap") return p0 && base.length < MERGE_K && !base.some((x) => x.code === p0.item.code) ? [...base, p0.item] : base;
   if (name === "a-off") return p0 ? insertAfterLock(base, [p0.item]) : base;
