@@ -573,6 +573,8 @@ Kiểm qua app (vòng 4, Playwright Chromium + WebKit, máy chủ OCR trên máy
 
 Đo bỏ dòng rác (a), dòng nổi bật tìm riêng rồi gộp RRF (b), trọng số dòng chữ to (c) trên 2 đường (máy chủ / đường lùi), luật chốt trước ở đầu khung đo; kết quả 0/89 cách cải thiện ca ruaypuan, không đổi app (số đo ở PLAN.md, mục đợt `dong-noi-bat`). Chạy trong thư mục gốc repo: `node --max-old-space-size=4096 test-ocr/chup-mat-do/dong-noi-bat-do.mjs [--chi-nen]` (thêm được `--out`, `--cache`, `--ocr`, `--danh-muc`, `--ban`, `--ghi-de`: xem đầu file). Dữ liệu vào ở `D:\tmp` (chữ OCR bộ A / B `D:\tmp\tu-dong\ocr`, cache OFF `D:\tmp\tu-dong\cache-off`, chữ OCR 2 ảnh chụp màn hình `D:\tmp\dong-noi-bat\ocr`), file ra `D:\tmp\dong-noi-bat\ket-qua\` (không commit; đã có file ra thì dừng, trừ `--ghi-de`).
 
+Đợt `g2-di-qua` (16/11/2026): khung đo `node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs --chi-nen | --do-cach` (bắt buộc đúng một cờ; thêm được `--out`, `--cache`, `--ocr`, `--danh-muc`, `--ghi-de`) đo các cách cho ứng viên máy chủ khớp 0 từ với danh mục 1.452 đi qua G2 (chỉ đổi đường máy chủ), luật chốt trước ở đầu file, tự kiểm chéo nền với `serverMerge` / `photoMerge` của src/, kho-lon và dong-noi-bat (lệch thì thoát mã 3); file ra `D:\tmp\g2-di-qua\ket-qua\nen.json` / `do.json` (không commit).
+
 ---
 
 # Phần F – Thử nhiều model OCR cho "chụp mặt trước" (đợt `ocr-mat`)
