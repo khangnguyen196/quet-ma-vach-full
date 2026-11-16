@@ -11,8 +11,144 @@ import { serverMerge, serverCandidates } from "../../../src/front-server.js";
 import { bm25DocScore } from "../../../src/front-merge.js";
 import {
   g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
-  METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE,
+  METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE, methodMerge, insertAfterLock, capList, idfScorer, srvScorer,
 } from "../g2-di-qua-do.mjs";
+import { mergeByMethod } from "../kho-lon-do.mjs";
+
+const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8"));
+const products = read("../../../public/chup-mat-do/danh-muc-vn.json").products;
+const extra = read("../../../public/chup-mat-do/kho-phu-893.json").products;
+const offReal = { ok: true, hits: parseSearch(read("../../../tests/fixtures/off-7up-ngoai.json")) };
+const rIndex = fr.buildRankIndex(t1, products);
+const xIndex = fr.buildRankIndex(t1, extra);
+const ctx = { t1, rIndex, products };
+const itemsOf = (lines, score = 0.95) => lines.map((text, k) => ({ text, poly: [[10, 10 + k * 60], [410, 10 + k * 60], [410, 50 + k * 60], [10, 50 + k * 60]], score }));
+
+// ---- dữ liệu giả cho các cách (P4): danh mục mini 7 sp, ứng viên máy chủ tự dựng ----
+const MINI = [["8930000000001", "Mi tom chua cay Hao Hao"], ["8930000000002", "Mi tom Omachi"], ["8930000000003", "Mi tom Kokomi"],
+  ["8930000000004", "Mi tom Gau do"], ["8930000000005", "Mi tom Vifon"], ["8930000000006", "Mi tom Miliket"], ["8930000000007", "Sua tuoi"]]
+  .map(([code, text]) => ({ code, name: text, brand: "", text }));
+const mI = fr.buildRankIndex(t1, MINI);
+const mctx = { t1, rIndex: mI, products: MINI };
+const sv = (code, text, score, vn = false) => ({ code, name: text, brand: "", img: "", vn, text, grp: vn ? "vn" : "th", score });
+const RU = sv("8852052150101", "Hanami Ruaypuan", 30);
+const ZZ = sv("8850000000002", "Zzz qqq", 20);
+const MT = sv("8850000000003", "Mi tom Thai", 10);
+const NET = { ok: false, kind: "network" };
+const fMi = fr.rankFromItems(t1, mI, itemsOf(["Mi tom chua cay", "Ruaypuan Hanami"])); // T1 đủ 5 mục
+const fSua = fr.rankFromItems(t1, mI, itemsOf(["Sua tuoi", "Ruaypuan Hanami"])); // T1 1 mục
+const g2Of = (found, S, off = NET) => serverMerge(mctx, found, off, S, { called: true }).merged;
+const run = (name, found, S, off = NET) => methodMerge(name, mctx, found, off, S, { called: true });
+const codes = (l) => l.map((x) => x.code);
+const offCount = (l) => l.filter((x) => x.source === "off").length;
+
+test("các cách: S rỗng / không mục nào đi qua được → giống hệt serverMerge (trừ G3)", () => {
+  for (const name of METHOD_ORDER) {
+    for (const found of [fMi, fSua]) {
+      for (const off of [NET, offReal]) {
+        assert.deepEqual(run(name, found, [], off), g2Of(found, [], off), `${name} S rỗng`);
+      }
+    }
+  }
+  // S chỉ có mục khớp ≥ 1 từ 1.452 → a-* / b* không đổi
+  for (const name of ["a-lap", "a-off", "a-top", "b2", "b3"]) assert.deepEqual(run(name, fMi, [MT]), g2Of(fMi, [MT]), name);
+  assert.deepEqual(run("a-off", null, [RU]), []);
+  assert.throws(() => run("x", fMi, [RU]), /cách không có/);
+});
+
+test("a-lap: S[0] đi qua được chỉ lấp chỗ trống", () => {
+  assert.equal(g2Of(fMi, [RU]).length, 5);
+  assert.deepEqual(run("a-lap", fMi, [RU]), g2Of(fMi, [RU]));
+  assert.deepEqual(codes(run("a-lap", fSua, [RU, ZZ])), ["8930000000007", RU.code]);
+  // S[0] không đi qua được (khớp 1.452) → không lấp dù S[1] đi qua được
+  const SU = sv("8850000000004", "Sua tuoi Thai", 40);
+  assert.equal(passThrough(mctx, fSua, [SU]).length, 0);
+  assert.deepEqual(run("a-lap", fSua, [SU, RU]), g2Of(fSua, [SU, RU]));
+});
+
+test("a-off: S[0] chèn sau 3 vị trí khóa, dùng chỗ offMax; = g3Merge một mục", () => {
+  const g2 = g2Of(fMi, [RU]);
+  const got = run("a-off", fMi, [RU]);
+  assert.deepEqual(codes(got.slice(0, 3)), codes(g2.slice(0, 3)));
+  assert.equal(got[3].code, RU.code);
+  assert.equal(got[3].source, "off");
+  assert.equal(got.length, 5);
+  assert.deepEqual(codes(got), codes(insertAfterLock(g2, [got[3]])));
+  // mục OFF của g2 ở vị trí 4–5 nhường chỗ offMax cho S[0], chỉ lấp chỗ trống
+  const offItem = { code: "9999999999999", source: "off" };
+  const base = [...g2.slice(0, 4), offItem];
+  assert.deepEqual(codes(insertAfterLock(base, [{ code: RU.code, source: "off" }])), [...codes(g2.slice(0, 3)), RU.code, g2[3].code]);
+  // ít hơn 3 mục: chèn ngay sau
+  assert.deepEqual(codes(run("a-off", fSua, [RU])), ["8930000000007", RU.code]);
+});
+
+test("a-top: S[0] có từ của câu tìm → vị trí 1, phần còn lại giữ thứ tự, mục OFF khác chỉ lấp chỗ trống; không có từ → như a-off", () => {
+  const g2 = g2Of(fMi, [RU]);
+  const got = run("a-top", fMi, [RU]);
+  assert.equal(got[0].code, RU.code);
+  assert.deepEqual(codes(got.slice(1)), codes(g2.slice(0, 4)));
+  // S[0] đi qua được nhưng không có từ nào của câu tìm (rawMatched 0) → như a-off
+  assert.deepEqual(run("a-top", fMi, [ZZ]), run("a-off", fMi, [ZZ]));
+  assert.notEqual(run("a-top", fMi, [ZZ])[0].code, ZZ.code);
+  assert.deepEqual(capList([{ code: "1", source: "off" }, { code: "2", source: "catalog" }, { code: "3", source: "off" }], { k: 2, offMax: 0 }).map((x) => x.code), ["2", "1"]);
+});
+
+test("b2 / b3: các mục đi qua được trong 2 / 3 mục đầu của S tranh 1 chỗ offMax: mục trước thắng, mục sau chỉ lấp chỗ trống", () => {
+  // đủ 5 mục: chỉ S[0] vào (chỗ offMax), S[1] không còn chỗ trống
+  assert.deepEqual(codes(run("b2", fMi, [RU, ZZ])), codes(run("a-off", fMi, [RU])));
+  // T1 1 mục: S[0] lấy chỗ offMax, S[1] lấp chỗ trống; b3 thêm S[2] (khớp 0 từ với câu sua / tuoi)
+  assert.deepEqual(codes(run("b2", fSua, [RU, ZZ, MT])), ["8930000000007", RU.code, ZZ.code]);
+  assert.deepEqual(codes(run("b3", fSua, [RU, ZZ, MT])), ["8930000000007", RU.code, ZZ.code, MT.code]);
+  assert.ok(offCount(run("b3", fSua, [RU, ZZ, MT])) === 3);
+  // S[0] khớp 1.452, S[1] đi qua được → b2 vẫn chèn S[1] (a-off thì không)
+  assert.deepEqual(codes(run("b2", fMi, [MT, RU])).slice(3, 4), [RU.code]);
+  assert.deepEqual(run("a-off", fMi, [MT, RU]), g2Of(fMi, [MT, RU]));
+});
+
+test("c-srv: điểm mục máy chủ ngoài 1.452 = điểm gợi ý 1 × score / score S[0]; không bỏ mục khớp 0 từ; giữ 3 vị trí khóa", () => {
+  const MT40 = { ...MT, score: 40 };
+  const g2 = g2Of(fMi, [MT40, RU]);
+  const got = run("c-srv", fMi, [MT40, RU]);
+  assert.deepEqual(codes(got.slice(0, 3)), codes(g2.slice(0, 3)));
+  assert.equal(got[3].code, MT.code); // S[0] (khớp 1.452 nhưng điểm thấp ở G2) lên chỗ offMax nhờ điểm máy chủ
+  assert.notEqual(g2[3]?.code, MT.code);
+  // S[0] đi qua được (khớp 0 từ) cũng không bị bỏ
+  assert.equal(run("c-srv", fMi, [RU, MT])[3].code, RU.code);
+  const sc = srvScorer([MT40, RU]);
+  assert.deepEqual(sc(RU, { ref: 8, m1452: 0 }), { score: 8 * 30 / 40, matched: 1 });
+  assert.deepEqual(sc(MT40, { ref: 8, m1452: 2 }), { score: 8, matched: 2 });
+  assert.deepEqual(srvScorer([{ ...MT, score: 0 }])(MT, { ref: 6, m1452: 0 }), { score: 0, matched: 1 });
+  // hòa điểm: cùng score máy chủ → hàng VN trước (như G2), rồi thứ tự vào
+  const A1 = sv("8850000000011", "Aaa bbb", 10);
+  const A2 = sv("8850000000012", "Ccc ddd", 10, true);
+  assert.deepEqual(codes(run("c-srv", fSua, [A1, A2])), ["8930000000007", A2.code, A1.code]);
+});
+
+test("c-idf: BM25 trên text ứng viên, từ ngoài từ vựng 1.452 dùng idf lớn nhất; đủ 3 từ + điểm đủ → offPromote lên vị trí 1", () => {
+  let maxIdf = 0;
+  for (const v of mI.index.idf.values()) maxIdf = Math.max(maxIdf, v);
+  const doc = { m: new Map([["ruaypuan", 1], ["mi", 1]]), len: 2 };
+  const { score, matched } = idfScorer(mI.index)(RU, { doc, query: ["ruaypuan", "mi", "khac"] });
+  assert.equal(matched, 2);
+  const tf = (1 * (mI.index.k1 + 1)) / (1 + mI.index.k1 * (1 - mI.index.b + mI.index.b * (2 / mI.index.avgdl)));
+  assert.ok(Math.abs(score - (maxIdf + mI.index.idf.get("mi")) * tf) < 1e-9);
+  // 2 từ lạ: không đủ minWords 3 → chỗ offMax sau 3 vị trí khóa
+  const got = run("c-idf", fMi, [RU]);
+  assert.deepEqual(codes(got.slice(0, 3)), codes(g2Of(fMi, [RU]).slice(0, 3)));
+  assert.equal(got[3].code, RU.code);
+  // 3 từ khớp → được đẩy lên vị trí 1 (offPromote của G2 với điểm mới)
+  const f3 = fr.rankFromItems(t1, mI, itemsOf(["Mi tom", "Ruaypuan Hanami Prawn"]));
+  const RU3 = sv("8852052150101", "Hanami Ruaypuan Prawn crackers", 30);
+  assert.equal(run("c-idf", f3, [RU3])[0].code, RU3.code);
+  // mục khớp 0 từ kể cả từ lạ → vẫn bị bỏ
+  assert.deepEqual(run("c-idf", fMi, [ZZ]), g2Of(fMi, [ZZ]));
+});
+
+test("G3 = mergeByMethod G3 của kho-lon-do.mjs", () => {
+  for (const S of [[RU], [MT, RU], []]) {
+    assert.deepEqual(run("G3", fMi, S), mergeByMethod({ t1, rIndex: mI, products: MINI, found: fMi, off: NET, S, method: "G3" }));
+  }
+});
 
 function goodR() {
   const loss = {};
@@ -76,14 +212,6 @@ test("luật: mục tiêu, chọn (f5 > f1 > ruaypuan > thứ tự), G3 không �
   assert.equal(improvesOver(t(4, 0, 0, 0)), false);
 });
 
-const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8"));
-const products = read("../../../public/chup-mat-do/danh-muc-vn.json").products;
-const extra = read("../../../public/chup-mat-do/kho-phu-893.json").products;
-const offReal = { ok: true, hits: parseSearch(read("../../../tests/fixtures/off-7up-ngoai.json")) };
-const rIndex = fr.buildRankIndex(t1, products);
-const xIndex = fr.buildRankIndex(t1, extra);
-const ctx = { t1, rIndex, products };
-const itemsOf = (lines, score = 0.95) => lines.map((text, k) => ({ text, poly: [[10, 10 + k * 60], [410, 10 + k * 60], [410, 50 + k * 60], [10, 50 + k * 60]], score }));
 /** S giả: 10 mục đầu tìm trên kho phụ 893 (+ mục danh mục chen vào đầu nếu có), qua serverCandidates như app. */
 function serverS(lines, { withCatalog = 0 } = {}) {
   const r = fr.rankFromItems(t1, xIndex, itemsOf(lines), 10);

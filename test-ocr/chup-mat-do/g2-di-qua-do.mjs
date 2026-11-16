@@ -84,6 +84,8 @@ import { pathToFileURL } from "node:url";
 import { bm25DocScore, offDoc } from "../../src/front-merge.js";
 import { joinExtra } from "../../src/front-extra.js";
 import { frontImageUrl } from "../../src/front-search.js";
+import { serverMerge } from "../../src/front-server.js";
+import { mergeByMethod } from "./kho-lon-do.mjs";
 
 // ---------------- hằng số ----------------
 export const SERVER_K = 10;
@@ -339,12 +341,115 @@ export function pickMethod(list, base = BASE_TARGET) {
 // HẾT KHỐI LUẬT
 // ===================================================================================================================
 
+// ---------------- các cách (P4, viết SAU commit luật; cài đúng định nghĩa trong khối luật) ----------------
+/**
+ * Chèn sau phần khóa: giữ lockTop mục đầu của base, rồi ins (bỏ mã đã có), rồi base[lockTop..]; mục source "off" tối đa
+ * offMax (tính cả phần giữ); mục vượt → phần thừa, chỉ lấp chỗ trống theo thứ tự gặp; cắt k. ins rỗng → base nguyên vẹn.
+ */
+export function insertAfterLock(base, ins, { k = MERGE_K, lockTop = LOCK_TOP, offMax = OFF_MAX } = {}) {
+  const list = Array.isArray(base) ? base : [];
+  const add = (Array.isArray(ins) ? ins : []).filter((x) => x && !list.some((b) => b.code === x.code));
+  if (!add.length) return list;
+  const lock = list.slice(0, lockTop);
+  const out = [...lock];
+  const have = new Set(lock.map((x) => x.code));
+  let offs = lock.filter((x) => x.source === "off").length;
+  const spare = [];
+  for (const it of [...add, ...list.slice(lockTop)]) {
+    if (out.length >= k) break;
+    if (have.has(it.code)) continue;
+    if (it.source === "off" && offs >= offMax) { spare.push(it); continue; }
+    if (it.source === "off") offs++;
+    have.add(it.code);
+    out.push(it);
+  }
+  for (const it of spare) {
+    if (out.length >= k) break;
+    if (have.has(it.code)) continue;
+    have.add(it.code);
+    out.push(it);
+  }
+  return out.slice(0, k);
+}
+
+/** Giữ thứ tự list, mục "off" tối đa offMax, mục vượt chỉ lấp chỗ trống; cắt k. */
+export function capList(list, { k, offMax }) {
+  const out = [];
+  const spare = [];
+  let offs = 0;
+  for (const it of Array.isArray(list) ? list : []) {
+    if (out.length >= k) break;
+    if (it.source === "off" && offs >= offMax) { spare.push(it); continue; }
+    if (it.source === "off") offs++;
+    out.push(it);
+  }
+  for (const it of spare) { if (out.length >= k) break; out.push(it); }
+  return out.slice(0, k);
+}
+
+/** Điểm c-idf cho mục máy chủ: BM25 trên tài liệu của mục, từ ngoài từ vựng dùng idf lớn nhất của chỉ mục. */
+export function idfScorer(index) {
+  let maxIdf = 0;
+  for (const v of index.idf.values()) if (v > maxIdf) maxIdf = v;
+  return (h, { doc, query }) => {
+    let score = 0;
+    let matched = 0;
+    for (const w of new Set(query || [])) {
+      const f = doc.m.get(w);
+      if (!f) continue;
+      const known = index.idf.get(w);
+      const idf = known === undefined ? maxIdf : known;
+      if (!idf) continue;
+      matched++;
+      score += idf * (f * (index.k1 + 1)) / (f + index.k1 * (1 - index.b + index.b * (doc.len / (index.avgdl || 1))));
+    }
+    return { score, matched };
+  };
+}
+
+/** Điểm c-srv: ref × score / score S[0] (score S[0] ≤ 0 hoặc không số → 0); matched = max(1, số từ khớp 1.452). */
+export function srvScorer(S) {
+  const s0 = Array.isArray(S) && S.length && Number.isFinite(S[0]?.score) ? S[0].score : 0;
+  return (h, { ref, m1452 }) => ({ score: s0 > 0 && Number.isFinite(h.score) ? ref * (h.score / s0) : 0, matched: Math.max(1, m1452) });
+}
+
+/**
+ * Gộp MÁY theo cách name (METHOD_NAMES). ctx = { t1, rIndex, products, catalogCodes? }; g2 (tùy chọn) = serverMerge(…)
+ * .merged đã tính (không truyền thì tính bằng serverMerge của src/). found null → [].
+ */
+export function methodMerge(name, ctx, found, off, S, { g2 = null, called } = {}) {
+  if (!METHOD_NAMES.includes(name)) throw new Error(`g2-di-qua: cách không có: ${name}`);
+  if (!found) return [];
+  const base = g2 ?? serverMerge(ctx, found, off, S, { called }).merged;
+  if (name === "c-srv") return g2Local(ctx, found, off, S, { serverScore: srvScorer(S) });
+  if (name === "c-idf") return g2Local(ctx, found, off, S, { serverScore: idfScorer(ctx.rIndex.index) });
+  if (name === "G3") {
+    const catalogCodes = ctx.catalogCodes instanceof Set ? ctx.catalogCodes : new Set((ctx.products || []).map((p) => p.code));
+    return mergeByMethod({ t1: ctx.t1, rIndex: ctx.rIndex, products: ctx.products, found, off, S, method: "G3", catalogCodes });
+  }
+  const pt = passThrough(ctx, found, S);
+  const p0 = pt.find((x) => x.j === 0) ?? null;
+  if (name === "a-lap") return p0 && base.length < MERGE_K && !base.some((x) => x.code === p0.item.code) ? [...base, p0.item] : base;
+  if (name === "a-off") return p0 ? insertAfterLock(base, [p0.item]) : base;
+  if (name === "a-top") {
+    if (!p0) return base;
+    if (p0.rawMatched < 1) return insertAfterLock(base, [p0.item]);
+    const rest = capList(base.filter((x) => x.code !== p0.item.code), { k: MERGE_K - 1, offMax: OFF_MAX - (p0.item.source === "off" ? 1 : 0) });
+    return [p0.item, ...rest];
+  }
+  const n = name === "b2" ? 2 : 3;
+  return insertAfterLock(base, pt.filter((x) => x.j < n).map((x) => x.item));
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const argv = process.argv.slice(2);
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
+  // --chi-nen: chỉ nền + kiểm chéo → nen.json. --do-cach: nền + kiểm chéo, rồi đo MỌI cách theo luật → do.json (cần
+  // nen.json để so L6). Phải có đúng một cờ (không cờ → không chạy gì, tránh lỡ đo cách).
   const onlyBase = argv.includes("--chi-nen");
-  if (!onlyBase) {
-    console.error("Vòng 1 P2: chỉ chạy được --chi-nen (chưa có cách nào).");
+  const runMethods = argv.includes("--do-cach");
+  if (onlyBase === runMethods) {
+    console.error("Cần đúng một cờ: --chi-nen (chỉ nền) hoặc --do-cach (đo các cách theo luật chốt trước).");
     process.exit(2);
   }
   const outDir = arg("--out", "D:\\tmp\\g2-di-qua\\ket-qua");
@@ -355,10 +460,16 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const { loadApp, makeDiskFetch, ROOT, SETS, LINES_7UP, TYPED_7UP } = await import("./tu-dong-do.mjs");
   const { foreignCases, MO_RONG } = await import("./tu-dong-v42-do.mjs");
   const { ALL_CODES, SALT_LINES, saltItems } = await import("./nang-t1-do.mjs");
-  const { readLevel, pickProbes, mergeByMethod } = await import("./kho-lon-do.mjs");
+  const { readLevel, pickProbes } = await import("./kho-lon-do.mjs");
   const dnb = await import("./dong-noi-bat-do.mjs");
   const dmFile = arg("--danh-muc", path.join(ROOT, "server", "catalog", "c.jsonl.gz"));
-  const outFile = path.join(outDir, "nen.json");
+  const nenFile = path.join(outDir, "nen.json");
+  const outFile = runMethods ? path.join(outDir, "do.json") : nenFile;
+  const nenSaved = runMethods ? (fs.existsSync(nenFile) ? JSON.parse(fs.readFileSync(nenFile, "utf8")) : null) : null;
+  if (runMethods && !nenSaved) {
+    console.error(`--do-cach cần ${nenFile} (chạy --chi-nen trước).`);
+    process.exit(2);
+  }
   if (fs.existsSync(outFile) && !argv.includes("--ghi-de")) {
     console.error(`Đã có ${outFile}. Thêm --ghi-de nếu thật sự muốn ghi đè.`);
     process.exit(2);
@@ -589,7 +700,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     catalogFile: dmFile, catalogN: lv.rows.length, foreign: foreign.map((f) => ({ code: f.code, lines: f.lines })), probesN: probes.length,
     coverage, sum, special, ruInfo, ruHypo, serverMatch, ptStats, checks, allOk, perCase, offStats: disk.stats,
   };
-  fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
+  if (!runMethods) fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
 
   // ---- in ----
   const f = (v) => (v == null ? "-" : v);
@@ -606,6 +717,100 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   console.log(`Kiểm chéo (2) ${check2ok ? "ĐẠT" : "LỆCH"}: ${JSON.stringify(check2.sums)}; từng ca so v1-nen ${check2.perCase.same}/${check2.perCase.cells} ${check2.perCase.diff.slice(0, 10).join(" ")}`);
   console.log(`Kiểm chéo (3) ${check3.ok ? "ĐẠT" : "LỆCH"}: mã 6 ca ${check3.foreignCodesOk}; ngoại trùng kho-lon ${check3.foreignSame}/${check3.foreignCells}, trong 5 ${f5}/12; ca khác trùng kho-lon ${check3.otherSame}/${check3.otherCells} ${[...check3.foreignDiff, ...check3.otherDiff].slice(0, 10).join(" ")}`);
   console.log(`Kiểm chéo (4) ${check4.ok ? "ĐẠT" : "LỆCH"}: buldak MÁY vị trí 1 ${JSON.stringify({ i: check4.i, ii: check4.ii })}`);
-  console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
+  console.log(`OFF: ${JSON.stringify(disk.stats)}${runMethods ? "" : `; Ghi: ${outFile}`}`);
   if (!allOk) { console.error("KIỂM CHÉO LỆCH: dừng báo, không sửa src/."); process.exit(3); }
+
+  // ---- ĐO CÁC CÁCH (chỉ --do-cach; sau commit luật; phán đúng khối luật) ----
+  if (runMethods) {
+    const l7 = srcSame && Object.values(consts).every(Boolean);
+    const ctxM = { ...ctx, catalogCodes };
+    const sameArr = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const methods = {};
+    for (const name of METHOD_NAMES) {
+      const res = {};
+      const qsDiff = [];
+      const luiDiff = [];
+      for (const c of cases) {
+        const key = keyOf(c);
+        // L6: câu OFF + S tính lại thật, so nền cùng lần chạy và nen.json
+        const found = rank(rIndex, c.input, MERGE_K);
+        const queries = found ? osx.cleanQuery(found.lines, { idf }) : [];
+        const S = toS(rank(rIC, c.input, SERVER_K));
+        const saved = nenSaved.perCase?.[key];
+        if (!sameArr(queries, c.queries) || !sameArr(codesOf(S), codesOf(c.S)) || !saved || !sameArr(queries, saved.queries) || !sameArr(codesOf(S), saved.S)) qsDiff.push(key);
+        const r = { may: {}, lui: {}, kind: {} };
+        for (const cond of CONDS) {
+          if (!found) { r.may[cond] = []; r.lui[cond] = []; continue; }
+          const called = queries.length > 0;
+          const mm = methodMerge(name, ctxM, found, c.off[cond], S, { called });
+          const ml = fx.photoMerge({ ...ctx, xi }, found, c.off[cond], { called }).merged;
+          r.may[cond] = codesOf(mm);
+          r.lui[cond] = codesOf(ml);
+          r.kind[`may|${cond}`] = fp.photoOutcome(mm).kind;
+          r.kind[`lui|${cond}`] = fp.photoOutcome(ml).kind;
+          if (!sameArr(r.lui[cond], codesOf(c.lui[cond]))) luiDiff.push(`${key}|${cond}`);
+        }
+        res[key] = r;
+      }
+      if (ruHypo && ru.found) {
+        res.__ruHypo = Object.fromEntries(CONDS.map((cond) => [cond, rankIn(codesOf(methodMerge(name, ctxM, ru.found, ru.off[cond], hypoS, { called: ru.queries.length > 0 })), RUAYPUAN_CODE)]));
+      }
+      const posM = (c, cond, code = c.code) => (code ? rankIn(res[keyOf(c)].may[cond], code) : null);
+      const loss = {};
+      const abInfo = { moved5: 0, top1Changed: 0, noneToOpen: 0 };
+      for (const s of ["B", "A"]) for (const cond of CONDS) {
+        const rs = cases.filter((c) => c.set === s);
+        const rows = rs.map((c) => ({ code: c.code, base: pos(c, "may", cond), got: posM(c, cond) }));
+        loss[`${s}|${cond}`] = { lostTop1: rows.filter((x) => x.base === 1 && x.got !== 1).map((x) => x.code), out5: rows.filter((x) => x.base != null && x.got == null).map((x) => x.code) };
+        for (const c of rs) {
+          const b = pos(c, "may", cond);
+          const g = posM(c, cond);
+          if (b != null && g != null && b !== g) abInfo.moved5++;
+          if ((c.may[cond][0]?.code ?? null) !== (res[keyOf(c)].may[cond][0] ?? null)) abInfo.top1Changed++;
+          if (c.kind2[`may|${cond}`] === "none" && res[keyOf(c)].kind[`may|${cond}`] === "open") abInfo.noneToOpen++;
+        }
+      }
+      const s7 = {};
+      for (const c of cases.filter((x) => x.set === "7up")) for (const cond of CONDS) s7[`${c.kind}|${cond}`] = posM(c, cond, CODE_7UP_DIET);
+      const buldak = Object.fromEntries(CONDS.map((cond) => [cond, res[keyOf(bu)].may[cond][0] ?? null]));
+      const sc = cases.find((x) => x.set === "muoi");
+      const salt = res[keyOf(sc)].kind;
+      const saltTop1 = Object.fromEntries(PATHS.flatMap((p) => CONDS.map((cond) => [`${p}|${cond}`, res[keyOf(sc)][p][cond][0] ?? null])));
+      const foreignPos = {};
+      const foreignJ = {};
+      for (const c of cases.filter((x) => x.set === "ngoai")) {
+        foreignPos[c.code] = Object.fromEntries(CONDS.map((cond) => [cond, posM(c, cond)]));
+        foreignJ[c.code] = Object.fromEntries(CONDS.map((cond) => [cond, { base: pos(c, "may", cond), got: posM(c, cond) }]));
+      }
+      const ruPos = Object.fromEntries(CONDS.map((cond) => [cond, posM(ru, cond, RUAYPUAN_CODE)]));
+      const probe = { top1: {}, top5: {} };
+      for (const cond of CONDS) {
+        const rs = cases.filter((c) => c.set === "do");
+        probe.top1[cond] = rs.filter((c) => posM(c, cond) === 1).length;
+        probe.top5[cond] = rs.filter((c) => posM(c, cond) != null).length;
+      }
+      const sums = {};
+      for (const s of ["B", "A"]) for (const cond of CONDS) {
+        const rs = cases.filter((c) => c.set === s);
+        sums[`${s}|${cond}`] = { top1: rs.filter((c) => posM(c, cond) === 1).length, top5: rs.filter((c) => posM(c, cond) != null).length };
+      }
+      const verdict = judge({ loss, luiDiff, s7, buldak, salt, confidenceNull: consts.confidenceNull, foreign: foreignJ, qsDiff, l7 });
+      const t = targetOf(foreignPos, ruPos);
+      methods[name] = { sums, loss, s7, buldak, salt, saltTop1, foreignPos, ruPos, ruHypo: res.__ruHypo ?? null, probe, abInfo, t, verdict, luiDiffN: luiDiff.length, qsDiffN: qsDiff.length };
+      process.stdout.write(".");
+    }
+    console.log("");
+    const pick = pickMethod(Object.entries(methods).map(([name, v]) => ({ name, pass: v.verdict.pass, t: v.t })));
+    const conclusion = !pick.name ? "KHÔNG CÁCH NÀO ĐẠT: không giữ gì"
+      : pick.improves ? `CHỌN ${pick.name} (qua cổng, mục tiêu ${JSON.stringify(methods[pick.name].t)} hơn nền ${JSON.stringify(BASE_TARGET)})`
+        : `KHÔNG CÁCH NÀO CẢI THIỆN: cách qua cổng tốt nhất ${pick.name} có mục tiêu ${JSON.stringify(methods[pick.name].t)} không hơn nền; không giữ gì`;
+    Object.assign(out, { at: new Date().toISOString(), methods, pick, conclusion, offStats: disk.stats, offNetCalls: disk.stats.calls });
+    fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
+    for (const [name, v] of Object.entries(methods)) {
+      const s = (k) => `${v.sums[k].top1}/${v.sums[k].top5}`;
+      console.log(`${name.padEnd(6)} MÁY B ${s("B|i")} ${s("B|ii")} A ${s("A|i")} ${s("A|ii")} | 7Up ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7[k])).join("")} | buldak ${CONDS.map((c) => (v.buldak[c] === BULDAK_CODE ? "=" : "≠")).join("")} | muối ${JSON.stringify(v.salt)} | ngoại trong 5 ${v.t.f5}/12 vị trí 1 ${v.t.f1}/12 | ruaypuan ${f(v.ruPos.i)}/${f(v.ruPos.ii)} (giả định ${f(v.ruHypo?.i)}/${f(v.ruHypo?.ii)}) | dò ${v.probe.top1.i}/${v.probe.top5.i} | A/B đổi ${JSON.stringify(v.abInfo)} | ${v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
+    }
+    console.log(`== Kết luận: ${conclusion}`);
+    console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
+  }
 }
