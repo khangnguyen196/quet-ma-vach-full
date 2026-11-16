@@ -309,4 +309,29 @@ describe("serverMerge c-idf (g2-di-qua vòng 3): dữ liệu giả", () => {
     // không đổi dữ liệu đầu vào
     assert.ok(!("serverText" in off.hits[0]) && !("serverText" in S[0]));
   });
+
+  // g2-di-qua vòng 4 (NÊN SỬA 2 của code-reviewer vòng 3): kịch bản bao bì song ngữ. Sản phẩm đúng CÓ trong chỉ mục,
+  // T1 xếp vị trí 1; chữ OCR có dòng tiếng Anh gồm ≥ 3 từ không có trong từ vựng chỉ mục; máy chủ trả 1 hàng ngoại khớp
+  // những từ đó; OFF lỗi. c-idf cho mỗi từ lạ idf lớn nhất → hàng ngoại vượt "gợi ý 1 của T1 + 3" → offPromote đẩy lên
+  // vị trí 1, mã đúng lùi xuống vị trí 2 (vẫn trong 5). Test này GHI LẠI hành vi hiện tại, không phải hành vi mong muốn.
+  test("đánh đổi đã biết, chủ dự án quyết ở Việc để sau: bao bì song ngữ, T1 đúng vị trí 1, hàng ngoại khớp ≥ 3 từ lạ lên vị trí 1, mã đúng vị trí 2", () => {
+    const SALT = [["8930000000101", "Muoi bien say kho Bac Lieu"], ["8930000000102", "Muoi tieu chanh"], ["8930000000103", "Muoi ot Tay Ninh"],
+      ["8930000000104", "Bot ngot"], ["8930000000105", "Hat nem"], ["8930000000106", "Nuoc mam"], ["8930000000107", "Sua tuoi"]]
+      .map(([code, text]) => ({ code, name: text, brand: "", text }));
+    const sI = fr.buildRankIndex(t1, SALT);
+    const sctx = { t1, rIndex: sI, products: SALT };
+    const RIGHT = "8930000000101";
+    const found = fr.rankFromItems(t1, sI, itemsOf(["Muoi bien", "IODIZED REFINED SEA SALT"]));
+    assert.equal(found.hits[0].code, RIGHT, "T1 xếp mã đúng vị trí 1");
+    const vocab = new Set(SALT.flatMap((p) => p.text.toLowerCase().split(/\s+/)));
+    const strange = ["iodized", "refined", "sea", "salt"].filter((w) => !vocab.has(w));
+    assert.ok(strange.length >= 3, "dòng tiếng Anh có ≥ 3 từ không có trong từ vựng chỉ mục");
+    const FOREIGN = { code: "4000000000017", name: "Iodized Refined Sea Salt", brand: "Morton", img: "", text: "Iodized Refined Sea Salt Morton", grp: "us", score: 25 };
+    const S = mod.serverCandidates({ candidates: [FOREIGN] });
+    const got = mod.serverMerge(sctx, found, { ok: false, kind: "network" }, S, { called: true }).merged;
+    const codes = got.map((x) => x.code);
+    assert.equal(codes[0], FOREIGN.code, `mục 1 = hàng ngoại: ${codes.join(",")}`);
+    assert.equal(codes[1], RIGHT, "mã đúng ở vị trí 2");
+    assert.ok(codes.slice(0, 5).includes(RIGHT), "mã đúng vẫn trong 5");
+  });
 });
