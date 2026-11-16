@@ -9,7 +9,72 @@ import * as fr from "../../../src/front-rank.js";
 import { parseSearch } from "../../../src/off-search.js";
 import { serverMerge, serverCandidates } from "../../../src/front-server.js";
 import { bm25DocScore } from "../../../src/front-merge.js";
-import { g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer } from "../g2-di-qua-do.mjs";
+import {
+  g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
+  METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE,
+} from "../g2-di-qua-do.mjs";
+
+function goodR() {
+  const loss = {};
+  for (const s of ["B", "A"]) for (const c of ["i", "ii"]) loss[`${s}|${c}`] = { lostTop1: [], out5: [] };
+  const foreign = Object.fromEntries(FOREIGN_CODES.map((code, j) => [code, { i: { base: j === 0 ? 4 : null, got: j === 0 ? 4 : 1 }, ii: { base: j === 0 ? 4 : null, got: j === 0 ? 3 : null } }]));
+  return {
+    loss, luiDiff: [], s7: { "may|i": 1, "may|ii": 1, "go|i": 1, "go|ii": 1 }, buldak: { i: BULDAK_CODE, ii: BULDAK_CODE },
+    salt: { "may|i": "open", "may|ii": "open", "lui|i": "open", "lui|ii": "open" }, confidenceNull: true, foreign, qsDiff: [], l7: true,
+  };
+}
+
+test("luật: đủ cổng → qua; từng cổng hỏng → trượt đúng cổng", () => {
+  assert.equal(judge(goodR()).pass, true);
+  const cases = [
+    ["L1a", (r) => { r.loss["A|ii"].lostTop1 = ["x"]; }],
+    ["L1a", (r) => { r.loss["B|i"].out5 = ["x"]; }],
+    ["L1a", (r) => { delete r.loss["B|ii"]; }],
+    ["L1b", (r) => { r.luiDiff = ["B|1|anh|i"]; }],
+    ["L1b", (r) => { r.luiDiff = undefined; }],
+    ["L2", (r) => { r.s7["may|ii"] = 2; }],
+    ["L2", (r) => { r.s7["go|i"] = null; }],
+    ["L3", (r) => { r.buldak.ii = "8801073115378"; }],
+    ["L4", (r) => { r.confidenceNull = false; }],
+    ["L4", (r) => { r.salt["lui|ii"] = "none"; }],
+    ["L5", (r) => { r.foreign[FOREIGN_CODES[0]].i.got = null; }],
+    ["L5", (r) => { r.foreign[FOREIGN_CODES[1]].i = { base: 1, got: 2 }; }],
+    ["L5", (r) => { delete r.foreign[FOREIGN_CODES[2]]; }],
+    ["L6", (r) => { r.qsDiff = ["7up|x|may"]; }],
+    ["L7", (r) => { r.l7 = false; }],
+  ];
+  for (const [gate, mut] of cases) {
+    const r = goodR();
+    mut(r);
+    const v = judge(r);
+    assert.equal(v.pass, false, gate);
+    assert.equal(v.gates[gate], false, gate);
+    assert.equal(Object.values(v.gates).filter((x) => !x).length, 1, gate);
+  }
+  // L5: nền ngoài 5 → được bất kỳ; nền 4 → 3 vẫn trong 5 (không đòi giữ đúng vị trí, chỉ vị trí 1 / trong 5)
+  assert.equal(judge(goodR()).gates.L5, true);
+});
+
+test("luật: mục tiêu, chọn (f5 > f1 > ruaypuan > thứ tự), G3 không được chọn, không hơn nền → không giữ", () => {
+  assert.deepEqual(targetOf({ a: { i: 1, ii: 4 }, b: { i: null, ii: 2 } }, { i: 3, ii: null }), { f5: 3, f1: 1, ru1: 0, ru5: 1 });
+  assert.deepEqual(BASE_TARGET, { f5: 4, f1: 0, ru1: 0, ru5: 0 });
+  assert.deepEqual(METHOD_ORDER, ["a-lap", "a-off", "a-top", "b2", "b3", "c-srv", "c-idf"]);
+  assert.equal(METHOD_NAMES.at(-1), "G3");
+  const t = (f5, f1, ru1 = 0, ru5 = 0) => ({ f5, f1, ru1, ru5 });
+  const list = [
+    { name: "c-idf", pass: true, t: t(8, 4) },
+    { name: "b2", pass: true, t: t(8, 4) },
+    { name: "a-top", pass: true, t: t(8, 3, 1, 1) },
+    { name: "G3", pass: true, t: t(12, 6) },
+    { name: "a-lap", pass: false, t: t(12, 6) },
+  ];
+  assert.deepEqual(pickMethod(list), { name: "b2", improves: true });
+  assert.deepEqual(pickMethod([{ name: "a-top", pass: true, t: t(8, 4, 0, 1) }, { name: "a-off", pass: true, t: t(8, 4, 0, 0) }]), { name: "a-top", improves: true });
+  assert.deepEqual(pickMethod([{ name: "a-off", pass: true, t: t(4, 0) }]), { name: "a-off", improves: false });
+  assert.deepEqual(pickMethod([{ name: "G3", pass: true, t: t(12, 12) }]), { name: null, improves: false });
+  assert.equal(improvesOver(t(4, 0, 0, 1)), true);
+  assert.equal(improvesOver(t(4, 0, 0, 0)), false);
+});
 
 const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8"));
 const products = read("../../../public/chup-mat-do/danh-muc-vn.json").products;

@@ -9,7 +9,75 @@
 //   node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs --chi-nen [--out D:\tmp\g2-di-qua\ket-qua]
 //        [--cache D:\tmp\tu-dong\cache-off] [--ocr D:\tmp\dong-noi-bat\ocr] [--danh-muc <c.jsonl.gz>] [--ghi-de]
 //
-// Vòng 1 P2: chỉ có NỀN (cờ --chi-nen) + kiểm chéo (1)–(4); luật chốt trước và các cách thêm ở commit sau.
+// Vòng 1 P2: chỉ có NỀN (cờ --chi-nen) + kiểm chéo (1)–(4). P3: khối luật dưới. P4: các cách (cờ chạy riêng).
+//
+// ===================================================================================================================
+// LUẬT CHỐT TRƯỚC — commit riêng "test(g2-di-qua): luật đo chốt trước", SAU khi đo nền (P2, chưa có cách nào; nền ghi ở
+// PLAN.md mục 8) và TRƯỚC mọi lần chạy một cách trên ca thật. Viết lúc 2026-11-16 08:36 +0700 (giờ commit thật ghi ở
+// PLAN.md mục 8, đợt g2-di-qua). Không sửa khối này sau khi thấy số của bất kỳ cách nào; buộc phải sửa thì ghi
+// "LỆCH LUẬT" ở PLAN.md và dừng báo.
+// ===================================================================================================================
+// Nền = mã ở b588ed8 (không cách nào): MÁY = serverMerge (G2-g3-w3) của src/front-server.js; LÙI = photoMerge + kho
+//   phụ 893 của src/front-extra.js. Ca, ứng viên máy chủ S (chỉ mục JS mức (c), SERVER_K 10, qua serverCandidates),
+//   câu OFF (cleanQuery của dòng T1), OFF (i) lỗi / (ii) cache đĩa: như phần nền của khung đo này (P2).
+// Mọi cách CHỈ đổi đường MÁY; found (T1 1.452), câu OFF, OFF, S giữ như nền; LÙI luôn gọi photoMerge của src/.
+// Định nghĩa:
+//   g2 = serverMerge(…).merged của ca / điều kiện đó (nền MÁY).
+//   "Đi qua được" = mục của S khớp 0 từ với chỉ mục 1.452 (bm25DocScore(chỉ mục 1.452, tài liệu, found.query).matched
+//     === 0; tài liệu = tài liệu danh mục nếu mã có trong 1.452, còn lại offDoc(text) — đúng tài liệu mergeFront dùng);
+//     G2 bỏ những mục này. PT = danh sách mục đi qua được theo thứ tự S (passThrough). Mục chèn: mã trong 1.452 →
+//     mục danh mục (source "catalog"); còn lại → mục OFF (source "off", không có cờ extra); điểm 0.
+//   rawMatched(mục) = số từ khác nhau của found.query có trong tài liệu của mục (kể cả từ ngoài từ vựng 1.452).
+//   Chèn sau phần khóa (insertAfterLock(g2, ins)): giữ LOCK_TOP (3) mục đầu của g2; rồi các mục ins (thứ tự S, bỏ mã đã
+//     có), rồi phần còn lại của g2; mục source "off" tối đa OFF_MAX (1) tính cả phần giữ; mục vượt (cả mục ins lẫn mục
+//     OFF của g2) chuyển sang "phần thừa", chỉ lấp chỗ TRỐNG sau cùng theo thứ tự gặp (mục ins trước, rồi đuôi g2); cắt 5.
+//     Nhiều mục cùng tranh 1 chỗ offMax: mục đứng trước trong S thắng. ins rỗng → g2 nguyên vẹn.
+// Lưới cách (chỉnh so với đề xuất của điều phối, lý do ghi kèm):
+//   a-lap : S[0] ∈ PT và g2 < 5 mục → g2 + [S[0]] (lấp chỗ trống, không xét offMax: như phần thừa của lớp chặn); còn lại g2.
+//   a-off : S[0] ∈ PT → insertAfterLock(g2, [S[0]]) (= g3Merge của kho-lon-do.mjs với một mục máy chủ); còn lại g2.
+//   a-top : S[0] ∈ PT và rawMatched(S[0]) ≥ 1 → [S[0], …phần còn lại] với phần còn lại = g2 bỏ S[0], giữ thứ tự, mục
+//           "off" tối đa OFF_MAX − (S[0] là mục "off" ? 1 : 0), mục vượt chỉ lấp chỗ trống, cắt 4 (như offPromote của
+//           mergeFront); S[0] ∈ PT nhưng rawMatched 0 → như a-off (chỉnh: đề xuất không nói nhánh này; chọn a-off để
+//           a-top chỉ khác a-off ở ca có từ khớp); còn lại g2.
+//   b2 / b3: ins = mục PT có vị trí trong S < 2 / < 3 (thứ tự S) → insertAfterLock(g2, ins) (chung 1 chỗ offMax, xem trên).
+//   c-srv : G2 bản sao g2Local với điểm mục máy chủ NGOÀI danh mục 1.452 = ref × (score máy chủ / score S[0]) (ref = điểm
+//           gợi ý 1 của T1, 0 nếu không có; score S[0] ≤ 0 → 0); matched = max(1, số từ khớp 1.452) (không mục nào bị bỏ
+//           vì khớp 0 từ); còn lại như G2 (offGap 1, lockTop 3, offMax 1, offPromote gap 3 / minWords 3 — mục máy chủ
+//           có điểm ≤ ref nên không bao giờ được đẩy; hòa: điểm trừ offGap giảm dần, hàng VN trước, T1 trước OFF, thứ
+//           tự vào). Mục máy chủ CÓ trong 1.452 chấm như G2. Chỉnh: nhân ref (đề xuất chỉ ghi "score / score S[0]")
+//           vì điểm chuẩn hóa ∈ [0, 1] còn điểm T1 BM25 cỡ 5–30, không nhân thì mọi mục máy chủ luôn đứng sau mọi mục
+//           danh mục và cách này trùng một dạng a-off.
+//   c-idf : g2Local với điểm mục máy chủ NGOÀI 1.452 = BM25 trên chính text ứng viên (offDoc) với found.query; từ không
+//           có trong từ vựng 1.452 dùng idf = idf lớn nhất của 1.452; k1, b, độ dài trung bình của chỉ mục 1.452;
+//           matched = số từ khác nhau khớp theo cách này; còn lại như G2 (bỏ mục matched 0, offGap 1, offMax 1, lockTop 3,
+//           offPromote gap 3 / minWords 3 với điểm / matched mới; hòa như G2). Mục máy chủ CÓ trong 1.452 chấm như G2.
+//   G3    : mergeByMethod(…, "G3") của kho-lon-do.mjs (CHỈ để so, không được chọn).
+// Cổng (từng ô; "nền" = nền của CHÍNH đường đó, cùng ca, cùng điều kiện, tính trong cùng lần chạy):
+//   L1a MÁY, bộ A + B, (i) + (ii): so vị trí mã đúng với nền MÁY: 0 ảnh mất vị trí 1, 0 ảnh rơi khỏi 5 (lossOf).
+//   L1b LÙI: danh sách 5 mã GIỐNG HỆT nền LÙI ở MỌI ca (mọi bộ), MỌI điều kiện.
+//   L2  7Up Diet 8934588752117 ở vị trí 1 ở 4 ô MÁY (chữ máy (i)(ii), câu gõ (i)(ii)), mỗi ca đo riêng (khóa có kind);
+//       (nền: 1 ở cả 4 ô). LÙI: theo L1b.
+//   L3  buldak.jpg: 8801073250574 ở vị trí 1 ở MÁY (i) và (ii) (nền: có).
+//   L4  muối Co.op: photoOutcome kind "open" ở cả 4 ô (MÁY / LÙI × (i)(ii)) và CONFIDENCE_RULE vẫn
+//       { feature: null, threshold: null } (luôn không chắc → luôn có khung "có thể nhầm"); mục 1 chỉ ghi tham khảo.
+//   L5  6 ca ngoại, MÁY, từng ô (6 ca × (i)(ii)): nền vị trí 1 → vẫn vị trí 1; nền trong 5 → vẫn trong 5 (so nền MÁY).
+//   L6  Câu tìm OFF (cleanQuery) và 10 ứng viên S (mã, theo thứ tự) của MỌI ca, tính lại khi chạy cách, TRÙNG nền từng ca
+//       (so mảng thật, với nền cùng lần chạy và với perCase của nen.json).
+//   L7  Không đổi danh mục / kho phụ / dependency / server / src: `git diff --quiet b588ed8 -- src server public
+//       package.json package-lock.json`; lúc chạy: CONFIDENCE_RULE null, STRANGE_MODE null, SERVER_MAX = SERVER_K = 10,
+//       SERVER_MERGE_OPTS và DEFAULT_GUARD như nền.
+// Mục tiêu (chỉ xét cách qua MỌI cổng, trừ G3), thứ tự ưu tiên (lớn hơn trước):
+//   (1) số ô ngoại MÁY trong 5 (12 ô = 6 ca × (i)(ii)); (2) số ô ngoại MÁY vị trí 1; (3) ruaypuan.jpg 8852052150101 MÁY
+//   (số ô vị trí 1, rồi số ô trong 5, trên (i)(ii)); hòa → cách đơn giản hơn: a-lap < a-off < a-top < b2 < b3 < c-srv <
+//   c-idf. Cách được chọn mà KHÔNG hơn nền ở ít nhất một trong (1), (2), (3) (nền: 4 / 12, 0 / 12, (0, 0)) → không
+//   giữ gì ("không cách nào cải thiện").
+// Chỉ báo (không là cổng, không dùng để chọn): 70 ca dò (MÁY vị trí 1 / trong 5); "ruaypuan giả định" (S = ứng viên
+//   a-c80+c-2 của dong-noi-bat-do.mjs, máy chủ thật không trả như vậy); bộ A / B: số ô đổi vị trí trong 5, số ô đổi mục 1,
+//   số ô kind "none" → "open" (ảnh đúng mã không có trong 5 mà nay mở một sản phẩm khác).
+// Cảnh báo: 6 ca ngoại và 70 ca dò dựng từ chính chữ danh mục (c) (tên + hãng) nên các cách chấm bằng text ứng viên (c-*)
+//   và mọi cách cho S[0] đi qua được lợi sẵn (S[0] đúng mã ở cả 6 ca ngoại); ở nền ruaypuan KHÔNG có trong 10 ứng viên
+//   (hạng 44) nên (3) gần như chắc = (0, 0) với mọi cách; chỉ 2 ảnh chụp màn hình thật (ruaypuan, buldak).
+// ===================================================================================================================
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -189,6 +257,87 @@ export function passThrough({ t1, rIndex, products }, found, S) {
   });
   return out;
 }
+
+// ---------------- khối luật: tên cách, phán, chọn ----------------
+/** Cách được chọn, theo thứ tự ưu tiên khi hòa (đơn giản trước). */
+export const METHOD_ORDER = Object.freeze(["a-lap", "a-off", "a-top", "b2", "b3", "c-srv", "c-idf"]);
+/** Mọi cách được đo (G3 chỉ để so, không được chọn). */
+export const METHOD_NAMES = Object.freeze([...METHOD_ORDER, "G3"]);
+/** Nền ở mục tiêu (ghi ở PLAN.md, nền P2): ô ngoại MÁY trong 5 / vị trí 1, ruaypuan MÁY (vị trí 1, trong 5). */
+export const BASE_TARGET = Object.freeze({ f5: 4, f1: 0, ru1: 0, ru5: 0 });
+
+/**
+ * Phán một cách. r = {
+ *   loss: { "B|i": { lostTop1: [mã], out5: [mã] }, … "A|ii" } (MÁY so nền MÁY),
+ *   luiDiff: [khóa ca|đk] (ô LÙI khác nền LÙI), s7: { "may|i": vị trí | null, "may|ii", "go|i", "go|ii" } (MÁY),
+ *   buldak: { i: mã mục 1 | null, ii }, salt: { "may|i": kind, "may|ii", "lui|i", "lui|ii" }, confidenceNull: bool,
+ *   foreign: { [mã]: { i: { base, got }, ii: { base, got } } } (vị trí MÁY, null = ngoài 5),
+ *   qsDiff: [khóa ca] (câu OFF hoặc S khác nền), l7: bool }.
+ * Trả { gates: { L1a … L7 }: bool, fails: [câu], pass }.
+ */
+export function judge(r) {
+  const fails = [];
+  const g = {};
+  let ok = true;
+  for (const s of ["B", "A"]) for (const c of CONDS) {
+    const l = r?.loss?.[`${s}|${c}`];
+    if (!l) { ok = false; fails.push(`L1a ${s}-${c}: thiếu số`); continue; }
+    for (const code of l.lostTop1 || []) { ok = false; fails.push(`L1a ${s}-${c}: mất vị trí 1 ${code}`); }
+    for (const code of l.out5 || []) { ok = false; fails.push(`L1a ${s}-${c}: rơi khỏi 5 ${code}`); }
+  }
+  g.L1a = ok;
+  g.L1b = Array.isArray(r?.luiDiff) && r.luiDiff.length === 0;
+  if (!g.L1b) fails.push(`L1b LÙI khác nền: ${Array.isArray(r?.luiDiff) ? r.luiDiff.slice(0, 5).join(", ") : "thiếu số"}`);
+  g.L2 = true;
+  for (const k of ["may|i", "may|ii", "go|i", "go|ii"]) {
+    if (r?.s7?.[k] !== 1) { g.L2 = false; fails.push(`L2 7Up ${k}: vị trí ${r?.s7?.[k] ?? "ngoài 5"}`); }
+  }
+  g.L3 = true;
+  for (const c of CONDS) if (r?.buldak?.[c] !== BULDAK_CODE) { g.L3 = false; fails.push(`L3 buldak ${c}: mục 1 ${r?.buldak?.[c] ?? "rỗng"}`); }
+  g.L4 = r?.confidenceNull === true;
+  if (!g.L4) fails.push("L4: CONFIDENCE_RULE đã đổi");
+  for (const k of ["may|i", "may|ii", "lui|i", "lui|ii"]) {
+    if (r?.salt?.[k] !== "open") { g.L4 = false; fails.push(`L4 muối ${k}: kind ${r?.salt?.[k]}`); }
+  }
+  g.L5 = true;
+  for (const code of FOREIGN_CODES) for (const c of CONDS) {
+    const v = r?.foreign?.[code]?.[c];
+    if (!v) { g.L5 = false; fails.push(`L5 ${code} ${c}: thiếu số`); continue; }
+    if (v.base === 1 && v.got !== 1) { g.L5 = false; fails.push(`L5 ${code} ${c}: mất vị trí 1`); }
+    if (v.base != null && v.got == null) { g.L5 = false; fails.push(`L5 ${code} ${c}: rơi khỏi 5`); }
+  }
+  g.L6 = Array.isArray(r?.qsDiff) && r.qsDiff.length === 0;
+  if (!g.L6) fails.push(`L6 câu OFF / ứng viên khác nền: ${Array.isArray(r?.qsDiff) ? r.qsDiff.slice(0, 5).join(", ") : "thiếu số"}`);
+  g.L7 = r?.l7 === true;
+  if (!g.L7) fails.push("L7: src / server / public / dependency hoặc hằng số đã đổi");
+  return { gates: g, fails, pass: Object.values(g).every(Boolean) };
+}
+
+/** Mục tiêu từ vị trí MÁY: foreign { [mã]: { i, ii } }, ru { i, ii } → { f5, f1, ru1, ru5 }. */
+export function targetOf(foreign, ru) {
+  const f = Object.values(foreign || {}).flatMap((v) => CONDS.map((c) => v?.[c] ?? null));
+  const r = CONDS.map((c) => ru?.[c] ?? null);
+  return { f5: f.filter((x) => x != null).length, f1: f.filter((x) => x === 1).length, ru1: r.filter((x) => x === 1).length, ru5: r.filter((x) => x != null).length };
+}
+
+/** Hơn nền ở ít nhất một trong (1) f5, (2) f1, (3) ru (vị trí 1, rồi trong 5). */
+export function improvesOver(t, base = BASE_TARGET) {
+  return t.f5 > base.f5 || t.f1 > base.f1 || t.ru1 > base.ru1 || t.ru5 > base.ru5;
+}
+
+/**
+ * Chọn: list = [{ name, pass, t: { f5, f1, ru1, ru5 } }] → { name | null, improves }. Chỉ cách trong METHOD_ORDER và
+ * qua mọi cổng; xếp f5, f1, ru1, ru5 giảm dần, hòa → METHOD_ORDER. Không hơn nền → improves false (không giữ gì).
+ */
+export function pickMethod(list, base = BASE_TARGET) {
+  const ok = (list || []).filter((m) => m.pass && METHOD_ORDER.includes(m.name));
+  ok.sort((a, b) => b.t.f5 - a.t.f5 || b.t.f1 - a.t.f1 || b.t.ru1 - a.t.ru1 || b.t.ru5 - a.t.ru5 || METHOD_ORDER.indexOf(a.name) - METHOD_ORDER.indexOf(b.name));
+  const best = ok[0] ?? null;
+  return { name: best?.name ?? null, improves: !!best && improvesOver(best.t, base) };
+}
+// ===================================================================================================================
+// HẾT KHỐI LUẬT
+// ===================================================================================================================
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const argv = process.argv.slice(2);
