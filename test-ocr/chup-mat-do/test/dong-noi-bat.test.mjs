@@ -7,8 +7,21 @@ import * as t1 from "../../../public/chup-mat-do/t1.mjs";
 import { buildRankIndex, rankFromItems, rankFromText } from "../../../src/front-rank.js";
 import {
   isUrlLine, isOddLine, isUiLine, isCapsLine, filterRows, prominentRows, rrfFuse, rowWeights, weightedSearch, methodRank,
-  rowsOf, injectJunk, judge, pickMethod, l4Score, methodGrid, METHOD_ORDER, A_VARIANTS, JUNK_LINES, SERVER_K,
+  rowsOf, injectJunk, judge, pickMethod, l4Score, methodGrid, METHOD_ORDER, A_VARIANTS, JUNK_LINES, SERVER_K, keyOf,
+  CODE_7UP_DIET,
 } from "../dong-noi-bat-do.mjs";
+
+test("keyOf (g2-di-qua vòng 1): 2 ca 7Up chữ máy / câu gõ ra 2 khóa khác nhau; ca không mã dùng kind", () => {
+  const may = { set: "7up", kind: "may", code: CODE_7UP_DIET };
+  const go = { set: "7up", kind: "go", code: CODE_7UP_DIET };
+  assert.notEqual(keyOf(may), keyOf(go));
+  assert.equal(keyOf(may), `7up|${CODE_7UP_DIET}|may`);
+  assert.equal(keyOf({ set: "muoi", kind: "muoi", code: null }), "muoi|muoi|muoi");
+  assert.equal(keyOf({ set: "B", kind: "anh", code: "8934563163150" }), "B|8934563163150|anh");
+  const out = {};
+  for (const c of [may, go]) out[keyOf(c)] = c.kind;
+  assert.equal(Object.keys(out).length, 2);
+});
 
 const PRODUCTS = [
   { code: "8850000000001", text: "Ruaypuan rice noodle tom yum Thailand" },

@@ -415,6 +415,14 @@ export function rankIn(codes, code, n = 5) {
   return i < 0 ? null : i + 1;
 }
 
+/**
+ * Khóa một ca trong kết quả (đợt g2-di-qua vòng 1, Việc để sau (v) của dong-noi-bat): có kind như kho-lon-do.mjs, để 2
+ * ca 7Up (chữ máy "may", câu gõ "go") cùng mã không ghi đè nhau. Trước: `${set}|${code ?? kind}` (trùng khóa).
+ */
+export function keyOf(c) {
+  return `${c.set}|${c.code ?? c.kind}|${c.kind}`;
+}
+
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const argv = process.argv.slice(2);
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -514,7 +522,6 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     }),
   });
   const codesOf = (list) => list.map((x) => x.code);
-  const keyOf = (c) => `${c.set}|${c.code ?? c.kind}`;
 
   /** Chạy một cách trên mọi ca → { [caKey]: { foundCodes, S, may: { i, ii }, lui: { i, ii }, kind } }. */
   const runMethod = (m) => {
