@@ -6,10 +6,20 @@
 // cleanQuery / createOffSearch / strangeWords (off-search.js), rankFromItems / rankFromText (front-rank.js).
 // OFF CHỈ đọc cache đĩa (0 lượt OFF thật), 0 lượt Azure, không chạy lại OCR (bộ A / B, ruaypuan, buldak).
 //
-//   node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs --chi-nen [--out D:\tmp\g2-di-qua\ket-qua]
-//        [--cache D:\tmp\tu-dong\cache-off] [--ocr D:\tmp\dong-noi-bat\ocr] [--danh-muc <c.jsonl.gz>] [--ghi-de]
+//   node --max-old-space-size=6144 test-ocr/chup-mat-do/g2-di-qua-do.mjs (--chi-nen | --do-cach) [--out <thư mục>] [--cache <thư mục>]
+//        [--ocr <thư mục>] [--danh-muc <c.jsonl.gz>] [--kho-lon <json>] [--dong-noi-bat <json>] [--mo-rong <json>] [--ghi-de]
+//   --chi-nen       chỉ nền + kiểm chéo (1)–(4) → <out>/nen.json.
+//   --do-cach       nền + kiểm chéo, rồi đo MỌI cách theo luật → <out>/do.json (cần <out>/nen.json). Trước khi đo tự kiểm:
+//                   khối luật so từng byte với commit 1d56860 (git show), worktree sạch, mục tiêu nền MÁY = BASE_TARGET;
+//                   lệch / thiếu git → thoát mã 3. Phải có đúng một trong hai cờ (không cờ → thoát mã 2).
+//   --out           thư mục ra (mặc định D:\tmp\g2-di-qua\ket-qua). --cache: cache OFF đĩa (D:\tmp\tu-dong\cache-off).
+//   --ocr           chữ OCR 2 ảnh chụp màn hình (D:\tmp\dong-noi-bat\ocr). --danh-muc: danh mục (c) (server/catalog/c.jsonl.gz).
+//   --kho-lon       file từng ca kho-lon v2 (kiểm chéo 3). --dong-noi-bat: v1-nen.json của dong-noi-bat (kiểm chéo 2).
+//   --mo-rong       bản mở rộng OFF dựng 6 ca ngoại (MO_RONG của tu-dong-v42-do.mjs). --ghi-de: cho ghi đè file ra đã có.
 //
-// Vòng 1 P2: chỉ có NỀN (cờ --chi-nen) + kiểm chéo (1)–(4). P3: khối luật dưới. P4: các cách (cờ chạy riêng).
+// Vòng 1 P2: chỉ có NỀN (cờ --chi-nen) + kiểm chéo (1)–(4). P3: khối luật dưới. P4: các cách (cờ --do-cach).
+// Vòng 2: sửa code cho đúng luật (ngoài khối luật): c-srv / c-idf chấm mục máy chủ trùng mã OFF theo bản máy chủ,
+// passThrough của các cách dùng tài liệu như mergeFront (S' chữ OFF khi trùng mã); tự kiểm trước khi đo; in none → open.
 //
 // ===================================================================================================================
 // LUẬT CHỐT TRƯỚC — commit riêng "test(g2-di-qua): luật đo chốt trước", SAU khi đo nền (P2, chưa có cách nào; nền ghi ở
@@ -84,8 +94,6 @@ import { pathToFileURL } from "node:url";
 import { bm25DocScore, offDoc } from "../../src/front-merge.js";
 import { joinExtra } from "../../src/front-extra.js";
 import { frontImageUrl } from "../../src/front-search.js";
-import { serverMerge } from "../../src/front-server.js";
-import { mergeByMethod } from "./kho-lon-do.mjs";
 
 // ---------------- hằng số ----------------
 export const SERVER_K = 10;
@@ -341,6 +349,34 @@ export function pickMethod(list, base = BASE_TARGET) {
 // HẾT KHỐI LUẬT
 // ===================================================================================================================
 
+// Vòng 2: 2 dòng import của các cách (c384282 đặt nhầm trong khối luật, ngay sau các import cũ) dời ra đây để khối
+// luật trùng từng byte commit 1d56860; import ES được nâng lên đầu module nên chạy không đổi.
+import { serverMerge } from "../../src/front-server.js";
+import { mergeByMethod } from "./kho-lon-do.mjs";
+
+// ---------------- tự kiểm khối luật (vòng 2) ----------------
+/** Commit luật và đường dẫn file (so từng byte khối luật trước khi đo các cách). */
+export const RULE_SHA = "1d56860";
+export const RULE_FILE = "test-ocr/chup-mat-do/g2-di-qua-do.mjs";
+
+/**
+ * Khối luật của một bản file: từ ĐẦU dòng có dấu mở (lần gặp đầu tiên) đến HẾT dòng có dấu đóng (lần gặp đầu tiên sau
+ * dấu mở), kể cả ký tự xuống dòng. Không có một trong hai dấu → null. Dấu ghép từ mảnh để chính hàm này (nằm sau khối)
+ * không chứa nguyên văn hai dấu.
+ */
+export function ruleBlockOf(text) {
+  if (typeof text !== "string") return null;
+  const open = ["LUẬT", "CHỐT", "TRƯỚC"].join(" ");
+  const close = ["HẾT", "KHỐI", "LUẬT"].join(" ");
+  const i = text.indexOf(open);
+  if (i < 0) return null;
+  const j = text.indexOf(close, i + open.length);
+  if (j < 0) return null;
+  const start = text.lastIndexOf("\n", i) + 1;
+  const nl = text.indexOf("\n", j);
+  return text.slice(start, nl < 0 ? text.length : nl + 1);
+}
+
 // ---------------- các cách (P4, viết SAU commit luật; cài đúng định nghĩa trong khối luật) ----------------
 /**
  * Chèn sau phần khóa: giữ lockTop mục đầu của base, rồi ins (bỏ mã đã có), rồi base[lockTop..]; mục source "off" tối đa
@@ -498,6 +534,35 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const { readLevel, pickProbes } = await import("./kho-lon-do.mjs");
   const dnb = await import("./dong-noi-bat-do.mjs");
   const dmFile = arg("--danh-muc", path.join(ROOT, "server", "catalog", "c.jsonl.gz"));
+  // ---- vòng 2: tự kiểm TRƯỚC khi đo (--do-cach): khối luật trùng từng byte commit luật; worktree sạch ----
+  const startedAt = new Date().toISOString();
+  const cp = await import("node:child_process");
+  const git = (c) => { try { return cp.execSync(c, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }).toString().trim(); } catch { return null; } };
+  const sha = git("git rev-parse HEAD");
+  const porcelain = git("git status --porcelain");
+  const dirty = porcelain === null ? null : porcelain !== "";
+  let ruleCheck = null;
+  if (runMethods) {
+    let now = null;
+    let old = null;
+    try { now = ruleBlockOf(fs.readFileSync(new URL(import.meta.url), "utf8")); } catch (e) { console.error(`Tự kiểm: không đọc được file khung đo: ${e.message}`); process.exit(3); }
+    try {
+      old = ruleBlockOf(cp.execSync(`git show ${RULE_SHA}:${RULE_FILE}`, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 }).toString("utf8"));
+    } catch (e) { console.error(`Tự kiểm: không đọc được khối luật ở commit ${RULE_SHA} (thiếu git?): ${e.message}`); process.exit(3); }
+    if (!now || !old) { console.error(`Tự kiểm: không tìm thấy khối luật (file hiện tại ${!!now}, commit ${RULE_SHA} ${!!old}).`); process.exit(3); }
+    if (now !== old) {
+      const a = now.split("\n");
+      const b = old.split("\n");
+      let k = 0;
+      while (k < Math.min(a.length, b.length) && a[k] === b[k]) k++;
+      console.error(`Tự kiểm: KHỐI LUẬT ĐÃ ĐỔI so với ${RULE_SHA} (dòng ${k + 1} của khối):\n  ${RULE_SHA}: ${JSON.stringify(b[k] ?? "(hết)")}\n  hiện tại: ${JSON.stringify(a[k] ?? "(hết)")}`);
+      process.exit(3);
+    }
+    ruleCheck = { sha: RULE_SHA, same: true, bytes: Buffer.byteLength(now, "utf8"), lines: now.split("\n").length - 1 };
+    if (!sha || dirty === null) { console.error("Tự kiểm: không đọc được sha / trạng thái git."); process.exit(3); }
+    if (dirty) { console.error(`Tự kiểm: worktree KHÔNG sạch (dirty), không đo:\n${porcelain}`); process.exit(3); }
+    console.log(`Tự kiểm: khối luật trùng từng byte ${RULE_SHA} (${ruleCheck.bytes} B, ${ruleCheck.lines} dòng); sha ${sha} dirty ${dirty}; bắt đầu ${startedAt}`);
+  }
   const nenFile = path.join(outDir, "nen.json");
   const outFile = runMethods ? path.join(outDir, "do.json") : nenFile;
   const nenSaved = runMethods ? (fs.existsSync(nenFile) ? JSON.parse(fs.readFileSync(nenFile, "utf8")) : null) : null;
@@ -510,10 +575,6 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     process.exit(2);
   }
   fs.mkdirSync(outDir, { recursive: true });
-  const cp = await import("node:child_process");
-  const git = (c) => { try { return cp.execSync(c, { cwd: ROOT }).toString().trim(); } catch { return null; } };
-  const sha = git("git rev-parse HEAD");
-  const dirty = git("git status --porcelain") !== "";
   let srcSame = false;
   try { cp.execSync(`git diff --quiet ${BASE_SHA} -- src server public package.json package-lock.json`, { cwd: ROOT }); srcSame = true; } catch { srcSame = false; }
 
@@ -739,7 +800,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
 
   // ---- in ----
   const f = (v) => (v == null ? "-" : v);
-  console.log(`sha ${sha} dirty ${dirty}; src/server/public trùng ${BASE_SHA}: ${srcSame}; hằng số ${JSON.stringify(consts)}`);
+  console.log(`sha ${sha} dirty ${dirty}; bắt đầu ${startedAt}; src/server/public trùng ${BASE_SHA}: ${srcSame}; hằng số ${JSON.stringify(consts)}`);
   console.log(`Độ phủ (đủ câu / có câu / số ca): ${Object.entries(coverage).map(([s, v]) => `${s} ${v.duCau}/${v.coCau}/${v.n}`).join(" | ")}`);
   console.log(`NỀN: ${Object.entries(sum).map(([k, v]) => `${k} ${v.top1}/${v.top5}`).join(" | ")}`);
   for (const [k, v] of Object.entries(special)) {
@@ -754,6 +815,16 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   console.log(`Kiểm chéo (4) ${check4.ok ? "ĐẠT" : "LỆCH"}: buldak MÁY vị trí 1 ${JSON.stringify({ i: check4.i, ii: check4.ii })}`);
   console.log(`OFF: ${JSON.stringify(disk.stats)}${runMethods ? "" : `; Ghi: ${outFile}`}`);
   if (!allOk) { console.error("KIỂM CHÉO LỆCH: dừng báo, không sửa src/."); process.exit(3); }
+
+  // ---- vòng 2: mục tiêu của NỀN MÁY tính trong cùng lần chạy, so BASE_TARGET (không đổi BASE_TARGET) ----
+  const baseTarget = targetOf(
+    Object.fromEntries(cases.filter((x) => x.set === "ngoai").map((c) => [c.code, Object.fromEntries(CONDS.map((cond) => [cond, pos(c, "may", cond)]))])),
+    Object.fromEntries(CONDS.map((cond) => [cond, pos(ru, "may", cond, RUAYPUAN_CODE)])),
+  );
+  const baseTargetOk = JSON.stringify(baseTarget) === JSON.stringify(BASE_TARGET);
+  console.log(`Mục tiêu nền MÁY (cùng lần chạy) ${JSON.stringify(baseTarget)} ${baseTargetOk ? "TRÙNG" : "LỆCH"} BASE_TARGET ${JSON.stringify(BASE_TARGET)}`);
+  Object.assign(out, { startedAt, ruleCheck, baseTarget, baseTargetOk });
+  if (runMethods && !baseTargetOk) { console.error("Tự kiểm: mục tiêu nền lệch BASE_TARGET: dừng báo, không đo."); process.exit(3); }
 
   // ---- ĐO CÁC CÁCH (chỉ --do-cach; sau commit luật; phán đúng khối luật) ----
   if (runMethods) {
@@ -793,7 +864,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       const posM = (c, cond, code = c.code) => (code ? rankIn(res[keyOf(c)].may[cond], code) : null);
       const loss = {};
       const abInfo = { moved5: 0, top1Changed: 0, noneToOpen: 0 };
+      const noneToOpen = {};
       for (const s of ["B", "A"]) for (const cond of CONDS) {
+        noneToOpen[`${s}|${cond}`] = [];
         const rs = cases.filter((c) => c.set === s);
         const rows = rs.map((c) => ({ code: c.code, base: pos(c, "may", cond), got: posM(c, cond) }));
         loss[`${s}|${cond}`] = { lostTop1: rows.filter((x) => x.base === 1 && x.got !== 1).map((x) => x.code), out5: rows.filter((x) => x.base != null && x.got == null).map((x) => x.code) };
@@ -802,7 +875,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
           const g = posM(c, cond);
           if (b != null && g != null && b !== g) abInfo.moved5++;
           if ((c.may[cond][0]?.code ?? null) !== (res[keyOf(c)].may[cond][0] ?? null)) abInfo.top1Changed++;
-          if (c.kind2[`may|${cond}`] === "none" && res[keyOf(c)].kind[`may|${cond}`] === "open") abInfo.noneToOpen++;
+          if (c.kind2[`may|${cond}`] === "none" && res[keyOf(c)].kind[`may|${cond}`] === "open") {
+            abInfo.noneToOpen++;
+            noneToOpen[`${s}|${cond}`].push({ code: c.code, top1: res[keyOf(c)].may[cond][0] ?? null, rank: posM(c, cond) });
+          }
         }
       }
       const s7 = {};
@@ -825,13 +901,18 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         probe.top5[cond] = rs.filter((c) => posM(c, cond) != null).length;
       }
       const sums = {};
+      const sumsLui = {};
+      const s7lui = {};
       for (const s of ["B", "A"]) for (const cond of CONDS) {
         const rs = cases.filter((c) => c.set === s);
         sums[`${s}|${cond}`] = { top1: rs.filter((c) => posM(c, cond) === 1).length, top5: rs.filter((c) => posM(c, cond) != null).length };
+        const posL = (c) => rankIn(res[keyOf(c)].lui[cond], c.code);
+        sumsLui[`${s}|${cond}`] = { top1: rs.filter((c) => posL(c) === 1).length, top5: rs.filter((c) => posL(c) != null).length };
       }
+      for (const c of cases.filter((x) => x.set === "7up")) for (const cond of CONDS) s7lui[`${c.kind}|${cond}`] = rankIn(res[keyOf(c)].lui[cond], CODE_7UP_DIET);
       const verdict = judge({ loss, luiDiff, s7, buldak, salt, confidenceNull: consts.confidenceNull, foreign: foreignJ, qsDiff, l7 });
       const t = targetOf(foreignPos, ruPos);
-      methods[name] = { sums, loss, s7, buldak, salt, saltTop1, foreignPos, ruPos, ruHypo: res.__ruHypo ?? null, probe, abInfo, t, verdict, luiDiffN: luiDiff.length, qsDiffN: qsDiff.length };
+      methods[name] = { sums, sumsLui, s7lui, loss, s7, buldak, salt, saltTop1, foreignPos, ruPos, ruHypo: res.__ruHypo ?? null, probe, abInfo, noneToOpen, t, verdict, luiDiffN: luiDiff.length, qsDiffN: qsDiff.length };
       process.stdout.write(".");
     }
     console.log("");
@@ -843,8 +924,17 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
     for (const [name, v] of Object.entries(methods)) {
       const s = (k) => `${v.sums[k].top1}/${v.sums[k].top5}`;
-      console.log(`${name.padEnd(6)} MÁY B ${s("B|i")} ${s("B|ii")} A ${s("A|i")} ${s("A|ii")} | 7Up ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7[k])).join("")} | buldak ${CONDS.map((c) => (v.buldak[c] === BULDAK_CODE ? "=" : "≠")).join("")} | muối ${JSON.stringify(v.salt)} | ngoại trong 5 ${v.t.f5}/12 vị trí 1 ${v.t.f1}/12 | ruaypuan ${f(v.ruPos.i)}/${f(v.ruPos.ii)} (giả định ${f(v.ruHypo?.i)}/${f(v.ruHypo?.ii)}) | dò ${v.probe.top1.i}/${v.probe.top5.i} | A/B đổi ${JSON.stringify(v.abInfo)} | ${v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
+      const sl = (k) => `${v.sumsLui[k].top1}/${v.sumsLui[k].top5}`;
+      console.log(`${name.padEnd(6)} LÙI B ${sl("B|i")} ${sl("B|ii")} A ${sl("A|i")} ${sl("A|ii")} | 7Up LÙI ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7lui[k])).join("")} | muối mục 1 ${JSON.stringify(v.saltTop1)} | ngoại MÁY ${JSON.stringify(v.foreignPos)}`);
+      console.log(`${name.padEnd(6)} MÁY B ${s("B|i")} ${s("B|ii")} A ${s("A|i")} ${s("A|ii")} | 7Up ${["may|i", "may|ii", "go|i", "go|ii"].map((k) => f(v.s7[k])).join("")} | buldak ${CONDS.map((c) => (v.buldak[c] === BULDAK_CODE ? "=" : "≠")).join("")} | muối ${JSON.stringify(v.salt)} | ngoại trong 5 ${v.t.f5}/12 vị trí 1 ${v.t.f1}/12 | ruaypuan ${f(v.ruPos.i)}/${f(v.ruPos.ii)} (giả định ${f(v.ruHypo?.i)}/${f(v.ruHypo?.ii)}) | dò ${v.probe.top1.i}/${v.probe.top5.i} ${v.probe.top1.ii}/${v.probe.top5.ii} | A/B đổi ${JSON.stringify(v.abInfo)} | ${v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
     }
+    // chỉ báo none → open (không là cổng): ảnh nền MÁY "none" (5 rỗng) nay tự mở một sản phẩm
+    console.log("none → open (chỉ báo; ảnh: mã đúng → mục 1 mới, vị trí mã đúng):");
+    for (const [name, v] of Object.entries(methods)) {
+      console.log(`  ${name.padEnd(6)} ${Object.entries(v.noneToOpen).map(([k, l]) => `${k} ${l.length}${l.length ? ` [${l.map((x) => `${x.code}→${x.top1}${x.rank ? ` (đúng ở ${x.rank})` : ""}`).join(", ")}]` : ""}`).join(" | ")}`);
+    }
+    for (const [name, v] of Object.entries(methods)) if (v.verdict.fails.length) console.log(`  ${name} trượt: ${v.verdict.fails.join("; ")}`);
+    console.log(`pickMethod: ${JSON.stringify(pick)}`);
     console.log(`== Kết luận: ${conclusion}`);
     console.log(`OFF: ${JSON.stringify(disk.stats)}; Ghi: ${outFile}`);
   }

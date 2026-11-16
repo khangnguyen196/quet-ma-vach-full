@@ -12,6 +12,7 @@ import { bm25DocScore, offDoc } from "../../../src/front-merge.js";
 import {
   g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
   METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE, methodMerge, insertAfterLock, capList, idfScorer, srvScorer,
+  ruleBlockOf, RULE_SHA,
 } from "../g2-di-qua-do.mjs";
 import { mergeByMethod } from "../kho-lon-do.mjs";
 
@@ -234,8 +235,31 @@ test("luật: đủ cổng → qua; từng cổng hỏng → trượt đúng c�
     assert.equal(v.gates[gate], false, gate);
     assert.equal(Object.values(v.gates).filter((x) => !x).length, 1, gate);
   }
-  // L5: nền ngoài 5 → được bất kỳ; nền 4 → 3 vẫn trong 5 (không đòi giữ đúng vị trí, chỉ vị trí 1 / trong 5)
-  assert.equal(judge(goodR()).gates.L5, true);
+  // hai cổng hỏng cùng lúc (L2 + L6) → đúng hai cổng false, câu lỗi nêu từng cổng (vòng 2: thay dòng lặp lại test đầu)
+  const r2 = goodR();
+  r2.s7["go|ii"] = 3;
+  r2.qsDiff = ["B|8934563163150|anh"];
+  const v2 = judge(r2);
+  assert.equal(v2.pass, false);
+  assert.deepEqual(Object.entries(v2.gates).filter(([, ok]) => !ok).map(([g]) => g), ["L2", "L6"]);
+  assert.ok(v2.fails.includes("L2 7Up go|ii: vị trí 3"), v2.fails.join("; "));
+  assert.ok(v2.fails.some((s) => s.startsWith("L6 ") && s.includes("B|8934563163150|anh")), v2.fails.join("; "));
+  assert.equal(v2.fails.length, 2);
+});
+
+test("ruleBlockOf: lấy khối từ đầu dòng dấu mở đến hết dòng dấu đóng; thiếu dấu → null; đổi một ký tự → khác", () => {
+  const open = ["LUẬT", "CHỐT", "TRƯỚC"].join(" ");
+  const close = ["HẾT", "KHỐI", "LUẬT"].join(" ");
+  const txt = `a\n// ${open} x\nb\n// ${close}\nc\n// ${close}\n`;
+  assert.equal(ruleBlockOf(txt), `// ${open} x\nb\n// ${close}\n`);
+  assert.equal(ruleBlockOf("a\nb\n"), null);
+  assert.equal(ruleBlockOf(`// ${open}\n`), null);
+  assert.equal(ruleBlockOf(null), null);
+  assert.notEqual(ruleBlockOf(txt.replace("b\n", "B\n")), ruleBlockOf(txt));
+  // file khung đo hiện tại có khối luật, mở ở dòng đầu khối (không phải trong hàm này)
+  const self = ruleBlockOf(fs.readFileSync(new URL("../g2-di-qua-do.mjs", import.meta.url), "utf8"));
+  assert.ok(self && self.startsWith("// LU") && self.includes("export function pickMethod"));
+  assert.equal(RULE_SHA, "1d56860");
 });
 
 test("luật: mục tiêu, chọn (f5 > f1 > ruaypuan > thứ tự), G3 không được chọn, không hơn nền → không giữ", () => {
