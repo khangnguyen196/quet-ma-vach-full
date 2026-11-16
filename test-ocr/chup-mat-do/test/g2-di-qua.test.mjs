@@ -14,7 +14,7 @@ import { bm25DocScore, offDoc, mergeFront } from "../../../src/front-merge.js";
 import {
   g2Local, passThrough, keyOf, applyGuard, rankIn, joinServer, judge, pickMethod, targetOf, improvesOver, METHOD_ORDER,
   METHOD_NAMES, BASE_TARGET, FOREIGN_CODES, BULDAK_CODE, methodMerge, insertAfterLock, capList, idfScorer, srvScorer,
-  ruleBlockOf, RULE_SHA, RULE_SHA256, sha256Of,
+  ruleBlockOf, RULE_SHA, RULE_SHA256, sha256Of, kiemAppVerdict,
 } from "../g2-di-qua-do.mjs";
 import { mergeByMethod } from "../kho-lon-do.mjs";
 
@@ -268,6 +268,22 @@ test("ruleBlockOf: lấy khối từ đầu dòng dấu mở đến hết dòng 
   // vòng 3: khối luật hiện tại trùng từng byte khối ở 1d56860 (sha256 ghi cứng); sửa một ký tự → khác
   assert.equal(sha256Of(self), RULE_SHA256);
   assert.notEqual(sha256Of(self.replace("L1a", "L1A")), RULE_SHA256);
+});
+
+test("kiemAppVerdict (vòng 4): khối luật khác / không tìm thấy → thoát 3 dù (a)(c) đạt; mọi thứ đạt → 0", () => {
+  const good = { ok: true, rowOk: true, blockSha256: RULE_SHA256 };
+  const pass = kiemAppVerdict(good);
+  assert.equal(pass.exitCode, 0);
+  assert.ok(pass.lines.some((l) => l.includes("KIỂM APP ĐẠT")));
+  const other = kiemAppVerdict({ ...good, blockSha256: sha256Of("khối khác") });
+  assert.equal(other.exitCode, 3);
+  assert.ok(!other.lines.some((l) => l.includes("KIỂM APP ĐẠT")));
+  assert.ok(other.lines.some((l) => l.includes("khối luật")));
+  const none = kiemAppVerdict({ ...good, blockSha256: null });
+  assert.equal(none.exitCode, 3);
+  assert.ok(!none.lines.some((l) => l.includes("KIỂM APP ĐẠT")));
+  assert.equal(kiemAppVerdict({ ...good, ok: false }).exitCode, 3);
+  assert.equal(kiemAppVerdict({ ...good, rowOk: false }).exitCode, 3);
 });
 
 test("luật: mục tiêu, chọn (f5 > f1 > ruaypuan > thứ tự), G3 không được chọn, không hơn nền → không giữ", () => {
