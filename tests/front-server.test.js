@@ -273,7 +273,8 @@ describe("mergeFront tắt serverIdf (phần G2 của serverMerge) trùng mergeB
     }
     console.log(`c-idf: ${rowsC.length - diff}/${rowsC.length} ca trùng khung đo; khác G2-g3-w3 ở ${differsFromG2} ca`);
     assert.equal(diff, 0);
-    assert.ok(differsFromG2 > 0, "c-idf phải khác G2-g3-w3 ở ít nhất 1 ca (test bắt được thay đổi)");
+    // vòng 4: ghim đúng số đã đo ở vòng 3 (30 ca), không chỉ > 0
+    assert.equal(differsFromG2, 30, "c-idf khác G2-g3-w3 ở đúng 30 ca (số đo vòng 3)");
   });
 });
 

@@ -1,6 +1,7 @@
 // Đợt dong-noi-bat vòng 1: KHUNG ĐO "bỏ dòng rác / ưu tiên dòng nổi bật" cho Chụp mặt trước khi ảnh có nhiều chữ thừa
 // (chụp màn hình có chữ trình duyệt / Windows). CHỈ đo trong Node, KHÔNG sửa src/ server/ public/: các cách (a)(b)(c)
-// cài trong file này; phần gộp gọi ĐÚNG hàm src/ (serverMerge của front-server.js = G2-g3-w3, photoMerge của
+// cài trong file này; phần gộp gọi ĐÚNG hàm src/ (serverMerge của front-server.js = G2-g3-w3 + c-idf (từ đợt
+// g2-di-qua; dòng "G2-g3-w3" trong khối luật dưới giữ nguyên chữ lúc chốt, không sửa), photoMerge của
 // front-extra.js, photoOutcome của front-photo.js, cleanQuery / createOffSearch của off-search.js, serverCandidates).
 // OFF CHỈ đọc cache đĩa (0 lượt OFF thật), không gọi Azure thật, không chạy lại OCR bộ A / B.
 //

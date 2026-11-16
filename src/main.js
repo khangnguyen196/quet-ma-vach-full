@@ -916,7 +916,7 @@ window.addEventListener("pageshow", (e) => {
 // (showPhotoResult). OFF lỗi / hết giờ / bị giới hạn → kết quả danh mục.
 // Vòng 7: thêm kho phụ 893 (loadFrontExtra, src/front-extra.js) và gộp qua photoMerge (hàm thuần dùng chung với khung đo).
 // Đợt kho-lon vòng 4: máy chủ OCR trả thêm ứng viên (r.candidates, danh mục lớn trên máy chủ) = NGUỒN CHÍNH: có ứng viên
-// thì gộp T1 + ứng viên + OFF bằng serverMerge (src/front-server.js, cách G2-g3-w3), KHÔNG tải kho phụ; không có ứng
+// thì gộp T1 + ứng viên + OFF bằng serverMerge (src/front-server.js, cách G2-g3-w3 + c-idf), KHÔNG tải kho phụ; không có ứng
 // viên (máy chủ cũ / danh mục không nạp / tìm lỗi) thì đường cũ (photoMerge + kho phụ 893 + OFF), kho phụ bắt đầu tải
 // SAU khi máy chủ trả. "Tìm lại" luôn đi đường cũ (chưa tìm theo chữ trên máy chủ).
 let offSearchOne = null;
@@ -1120,8 +1120,8 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
     if (id === frontTurn) sayFront(); // bỏ vì đã tra mã khác: xóa câu "Đang tìm…"
     return;
   }
-  // Gộp bằng hàm thuần dùng chung với khung đo: có ứng viên máy chủ → serverMerge (src/front-server.js, G2-g3-w3, trùng
-  // mergeByMethod của kho-lon-do.mjs); không → photoMerge (src/front-extra.js: lớp chặn mặc định, kho phụ nếu có). Lỗi
+  // Gộp bằng hàm thuần dùng chung với khung đo: có ứng viên máy chủ → serverMerge (src/front-server.js, G2-g3-w3 + c-idf,
+  // trùng methodMerge("c-idf") của g2-di-qua-do.mjs); không → photoMerge (src/front-extra.js: lớp chặn mặc định, kho phụ nếu có). Lỗi
   // giá trị chặn → kết quả T1 (lỗi khác ném tiếp cho nơi gọi). offFailed tính trên kết quả OFF gốc.
   const { merged, offFailed } = useServer
     ? serverMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products }, found, off, server, { called: queries.length > 0 })

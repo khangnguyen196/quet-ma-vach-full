@@ -304,6 +304,7 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
         : bm25DocScore(index, doc, query);
       if (matched < Math.max(1, minMatch)) {
         // P2: khớp 0 từ câu tìm T1 nhưng chứa từ lạ → hạng 2 (sau mọi mục danh mục, chỉ lấp chỗ trống, vẫn qua offMax)
+        // Khi serverIdf bật, matched tính trên serverText còn kiểm từ lạ dùng chữ OFF (doc); vô hại vì STRANGE_MODE tắt.
         if (matched === 0 && !extra && strange.some((w) => doc.m.has(w))) {
           cands.set(o.h.code, { item: offItem(o.h, 0), score: 0, rankScore: 0, tier: 2, vn: o.h.vn === true, src: 1, order: order++, matched: 0, extra });
         }
