@@ -471,3 +471,69 @@ describe("từ lạ (strangeFill, P2)", () => {
     assert.deepEqual(a, b);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Đợt g2-di-qua vòng 3 (P1): serverIdf (cách c-idf của khung đo test-ocr/chup-mat-do/g2-di-qua-do.mjs). Mục có
+// serverText (serverMerge gắn cho mục mã có trong ứng viên máy chủ) KHÔNG có trong danh mục: điểm BM25 trên chữ
+// serverText, từ ngoài từ vựng danh mục nhận idf lớn nhất của chỉ mục. Hiển thị vẫn theo mục (bản OFF khi trùng mã).
+// ---------------------------------------------------------------------------
+
+describe("serverIdf (c-idf, g2-di-qua vòng 3)", () => {
+  // danh mục mini 7 sp (như test-ocr/chup-mat-do/test/g2-di-qua.test.mjs): "mi" / "tom" ở 6 tài liệu nên idf thấp
+  const MINI = [["8930000000001", "Mi tom chua cay Hao Hao"], ["8930000000002", "Mi tom Omachi"], ["8930000000003", "Mi tom Kokomi"],
+    ["8930000000004", "Mi tom Gau do"], ["8930000000005", "Mi tom Vifon"], ["8930000000006", "Mi tom Miliket"], ["8930000000007", "Sua tuoi"]]
+    .map(([code, text]) => ({ code, name: text, brand: "", text }));
+  const mI = fr.buildRankIndex(t1, MINI);
+  const f3 = fr.rankFromItems(t1, mI, itemsOf(["Mi tom", "Ruaypuan Hanami Prawn"])); // T1 đủ 5 mục, 3 từ lạ
+  const SRV_TEXT = "Hanami Ruaypuan Prawn crackers";
+  const RU = { code: "8852052150101", name: "Hanami OFF", brand: "Ruaypuan", img: "https://images.openfoodfacts.org/x.jpg", vn: false, text: "Zzz", serverText: SRV_TEXT };
+  const PROMOTE = { offPromote: { gap: 3, minWords: 3 } };
+  let maxIdf = 0;
+  for (const v of mI.index.idf.values()) maxIdf = Math.max(maxIdf, v);
+
+  test("ca dựng: 3 từ lạ (ruaypuan, hanami, prawn) không có trong từ vựng danh mục; chữ OFF của mục khớp 0 từ", () => {
+    for (const w of ["ruaypuan", "hanami", "prawn"]) { assert.ok(f3.query.includes(w), w); assert.equal(mI.index.idf.has(w), false, w); }
+    assert.equal(f3.hits.length, 5);
+    assert.equal(mod.bm25DocScore(mI.index, mod.offDoc(t1, RU.text), f3.query).matched, 0);
+  });
+
+  test("tắt (mặc định / false): serverText bị bỏ qua, kết quả như cũ (mục khớp 0 từ bị bỏ)", () => {
+    const base = mod.mergeFront(t1, mI, MINI, f3, null);
+    for (const opts of [PROMOTE, { ...PROMOTE, serverIdf: false }, { ...PROMOTE, serverIdf: undefined }]) {
+      assert.deepEqual(mod.mergeFront(t1, mI, MINI, f3, { ok: true, hits: [RU] }, opts), base, JSON.stringify(opts));
+    }
+    // không có serverText: như mục OFF thường dù bật
+    const { serverText, ...plain } = RU;
+    assert.deepEqual(mod.mergeFront(t1, mI, MINI, f3, { ok: true, hits: [plain] }, { ...PROMOTE, serverIdf: true }), base);
+  });
+
+  test("bật: mục máy chủ ngoài danh mục có 3 từ lạ → điểm idf lớn nhất, offPromote đẩy lên vị trí 1; hiển thị theo mục, không lộ serverText", () => {
+    const got = mod.mergeFront(t1, mI, MINI, f3, { ok: true, hits: [RU] }, { ...PROMOTE, serverIdf: true });
+    assert.equal(got[0].code, RU.code, got.map((x) => x.code).join(","));
+    assert.deepEqual(got.slice(1).map((x) => x.code), f3.hits.slice(0, 4).map((h) => h.code));
+    const doc = mod.offDoc(t1, SRV_TEXT);
+    const tf = (1 * (mI.index.k1 + 1)) / (1 + mI.index.k1 * (1 - mI.index.b + mI.index.b * (doc.len / mI.index.avgdl)));
+    assert.ok(Math.abs(got[0].score - 3 * maxIdf * tf) < 1e-9, `điểm ${got[0].score}`);
+    assert.deepEqual(got[0], { code: RU.code, name: "Hanami OFF", brand: "Ruaypuan", img: RU.img, source: "off", vn: false, score: got[0].score });
+    // không offPromote: vẫn qua lớp chặn (sau 3 vị trí khóa, chỗ offMax)
+    const g2 = mod.mergeFront(t1, mI, MINI, f3, { ok: true, hits: [RU] }, { serverIdf: true });
+    assert.equal(g2[3].code, RU.code);
+  });
+
+  test("serverDocScore: từ có trong từ vựng dùng idf của chỉ mục, từ lạ dùng idf lớn nhất; đếm matched", () => {
+    const doc = { m: new Map([["ruaypuan", 1], ["mi", 1]]), len: 2 };
+    const { score, matched } = mod.serverDocScore(mI.index, doc, ["ruaypuan", "mi", "khac", "mi"], mod.maxIdfOf(mI.index));
+    assert.equal(mod.maxIdfOf(mI.index), maxIdf);
+    assert.equal(matched, 2);
+    const tf = (1 * (mI.index.k1 + 1)) / (1 + mI.index.k1 * (1 - mI.index.b + mI.index.b * (2 / mI.index.avgdl)));
+    assert.ok(Math.abs(score - (maxIdf + mI.index.idf.get("mi")) * tf) < 1e-9);
+  });
+
+  test("serverIdf không phải boolean → GuardValueError nêu tên (kể cả khi OFF lỗi); true / false / không truyền hợp lệ", () => {
+    for (const bad of [null, "x", 1, 0, "true", {}, []]) for (const off of [{ ok: true, hits: [RU] }, { ok: false, kind: "network" }, null]) {
+      assert.throws(() => mod.mergeFront(t1, mI, MINI, f3, off, { serverIdf: bad }),
+        (e) => mod.isGuardError(e) && e.message.includes("serverIdf"), JSON.stringify(bad));
+    }
+    for (const okv of [true, false, undefined]) assert.doesNotThrow(() => mod.mergeFront(t1, mI, MINI, f3, { ok: true, hits: [RU] }, { serverIdf: okv }));
+  });
+});

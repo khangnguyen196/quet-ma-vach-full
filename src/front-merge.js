@@ -24,6 +24,12 @@
 //               của T1 + gap → vị trí 1 (tính vào offMax), các mục khác lùi giữ thứ tự. null = tắt (mặc định).
 //   strangeFill (vòng 6, P2, chỉ f1; mặc định theo STRANGE_MODE của off-search.js = tắt): ứng viên OFF khớp 0 từ câu
 //               tìm T1 nhưng chứa từ lạ của ảnh (strangeWords) → hạng 2 (sau mọi mục danh mục, chỉ lấp chỗ trống).
+//   serverIdf (đợt g2-di-qua vòng 3, chỉ f1; mặc định false = tắt): ứng viên chỉ có trên OFF mang trường serverText
+//               (serverMerge của src/front-server.js gắn cho mục có mã trong ứng viên máy chủ) được chấm BM25 trên chữ
+//               serverText thay chữ của mục, từ KHÔNG có trong từ vựng danh mục nhận idf lớn nhất của chỉ mục (serverDocScore;
+//               = cách c-idf của test-ocr/chup-mat-do/g2-di-qua-do.mjs); matched đếm theo cách này (0 → bỏ như cũ). Hiển
+//               thị vẫn theo mục (bản OFF khi mã có ở cả OFF và máy chủ), điểm theo chữ bản máy chủ. Mã có trong danh mục
+//               không đổi. Không phải boolean → GuardValueError.
 //   Mặc định DEFAULT_GUARD (chọn ở vòng 3 theo luật P3e, xem comment ở đó); { lockTop: 0, offMax: k, offGap: 0 } = không chặn.
 //   Giá trị sai (null, NaN, Infinity, số âm / lẻ, chuỗi) → báo lỗi (vòng 4), không bao giờ lặng lẽ tắt lớp chặn.
 //
@@ -87,6 +93,33 @@ export function bm25DocScore(index, doc, queryWords) {
     const idf = index.idf.get(w);
     const f = doc.m.get(w);
     if (!idf || !f) continue;
+    matched++;
+    score += idf * (f * (index.k1 + 1)) / (f + index.k1 * (1 - index.b + index.b * (doc.len / (index.avgdl || 1))));
+  }
+  return { score, matched };
+}
+
+/** idf lớn nhất của chỉ mục (0 nếu chỉ mục rỗng). */
+export function maxIdfOf(index) {
+  let max = 0;
+  for (const v of index.idf.values()) if (v > max) max = v;
+  return max;
+}
+
+/**
+ * Điểm c-idf (đợt g2-di-qua vòng 3, tùy chọn serverIdf): như bm25DocScore nhưng từ KHÔNG có trong từ vựng chỉ mục dùng
+ * idf = unknownIdf (app truyền maxIdfOf(index)); k1, b, avgdl của chỉ mục. Trả { score, matched } (matched = số từ khác
+ * nhau của câu tìm có trong tài liệu và có idf khác 0). Trùng idfScorer của test-ocr/chup-mat-do/g2-di-qua-do.mjs.
+ */
+export function serverDocScore(index, doc, queryWords, unknownIdf) {
+  let score = 0;
+  let matched = 0;
+  for (const w of new Set(queryWords || [])) {
+    const f = doc.m.get(w);
+    if (!f) continue;
+    const known = index.idf.get(w);
+    const idf = known === undefined ? unknownIdf : known;
+    if (!idf) continue;
     matched++;
     score += idf * (f * (index.k1 + 1)) / (f + index.k1 * (1 - index.b + index.b * (doc.len / (index.avgdl || 1))));
   }
@@ -169,8 +202,9 @@ function applyGuard(ranked, base, { k, lockTop, offMax }) {
  * Gộp T1 + OFF → tối đa k mục { code, name, brand, img, source: "catalog" | "off", vn, score }.
  * t1Result: kết quả rankFromItems / rankFromText ({ query, hits: [{ code, score, i }] }); products: danh mục (cùng thứ
  * tự với chỉ mục rIndex); offResult: kết quả off-search search() hoặc gộp nhiều câu ({ ok, hits }).
- * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule, offPromote, strangeFill }
- * (offPromote / strangeFill sai → GuardValueError; f2 / f3 bỏ qua offPromote / strangeFill)
+ * opts: { method: "f1" | "f2" | "f3", k, offGap, minMatch, rrfK, rrfDepth, lockTop, offMax, offTopRule, offPromote, strangeFill,
+ *   serverIdf }
+ * (offPromote / strangeFill / serverIdf sai → GuardValueError; f2 / f3 bỏ qua offPromote / strangeFill / serverIdf)
  * Mục ra từ kho phụ (hit.extra === true) có thêm extra: true (vòng 7); giao diện vẽ như mục OFF.
  * (lockTop / offMax / offGap / offTopRule thiếu thì lấy DEFAULT_GUARD; lockTop / offMax / offGap không phải số nguyên
  * ≥ 0 thì báo lỗi, không tự tắt lớp chặn).
@@ -179,14 +213,16 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
   const {
     method = "f1", k = MERGE_K, offGap = DEFAULT_GUARD.offGap, minMatch = 1, rrfK = RRF_K, rrfDepth = RRF_DEPTH,
     lockTop = DEFAULT_GUARD.lockTop, offMax = DEFAULT_GUARD.offMax, offTopRule = DEFAULT_GUARD.offTopRule,
-    offPromote = DEFAULT_GUARD.offPromote, strangeFill = STRANGE_MODE !== null,
+    offPromote = DEFAULT_GUARD.offPromote, strangeFill = STRANGE_MODE !== null, serverIdf = false,
   } = opts;
   if (!MERGE_METHODS.includes(method)) throw new Error(`front-merge: cách gộp không hỗ trợ: ${method}`);
   const promote = checkPromote(offPromote);
   // Vòng 7 (gợi ý 3 reviewer vòng 6): strangeFill phải đúng boolean (như offPromote: sai → GuardValueError, không tự
-  // hiểu "x1" / 1 là bật hay null là tắt).
-  if (typeof strangeFill !== "boolean") {
-    throw new GuardValueError(`front-merge: strangeFill phải là true hoặc false (nhận ${typeof strangeFill === "string" ? JSON.stringify(strangeFill) : String(strangeFill)})`);
+  // hiểu "x1" / 1 là bật hay null là tắt). g2-di-qua vòng 3: serverIdf cũng vậy (undefined = tắt).
+  for (const [name, v] of [["strangeFill", strangeFill], ["serverIdf", serverIdf]]) {
+    if (typeof v !== "boolean") {
+      throw new GuardValueError(`front-merge: ${name} phải là true hoặc false (nhận ${typeof v === "string" ? JSON.stringify(v) : String(v)})`);
+    }
   }
   // Vòng 4: giá trị chặn sai (null, NaN, Infinity, số âm, số lẻ, chuỗi…) → báo lỗi ngay, kể cả khi OFF lỗi. Trước đây
   // null / NaN làm lớp chặn tự TẮT (lockTop | 0 = 0, offMax null = không giới hạn). Chọn báo lỗi thay vì lặng lẽ dùng
@@ -244,6 +280,8 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
   const query = Array.isArray(t1Result?.query) ? t1Result.query : [];
   // vòng 6 (P2): từ lạ của ảnh (chỉ khi strangeFill bật)
   const strange = strangeFill ? strangeWords(Array.isArray(t1Result?.lines) ? t1Result.lines : [], { idf: index.idf }) : [];
+  // g2-di-qua vòng 3 (serverIdf): idf cho từ ngoài từ vựng = idf lớn nhất của chỉ mục (tính một lần mỗi lượt gộp)
+  const unknownIdf = serverIdf ? maxIdfOf(index) : 0;
   // code → { item, score, rankScore, tier, vn, src: 0 T1 / 1 OFF, order, matched, extra }
   const cands = new Map();
   let order = 0;
@@ -260,7 +298,10 @@ export function mergeFront(t1, rIndex, products, t1Result, offResult, opts = {})
       if (cands.has(o.h.code)) continue;
       const extra = o.h.extra === true; // mục kho phụ (src/front-extra.js): không offPromote, không luật từ lạ
       const doc = offDoc(t1, o.h.text || `${o.h.name ?? ""} ${o.h.brand ?? ""}`);
-      const { score, matched } = bm25DocScore(index, doc, query);
+      // serverIdf (c-idf): hiển thị theo mục (bản OFF khi mã có ở cả OFF và máy chủ), điểm theo chữ bản máy chủ (serverText)
+      const { score, matched } = serverIdf && typeof o.h.serverText === "string"
+        ? serverDocScore(index, offDoc(t1, o.h.serverText), query, unknownIdf)
+        : bm25DocScore(index, doc, query);
       if (matched < Math.max(1, minMatch)) {
         // P2: khớp 0 từ câu tìm T1 nhưng chứa từ lạ → hạng 2 (sau mọi mục danh mục, chỉ lấp chỗ trống, vẫn qua offMax)
         if (matched === 0 && !extra && strange.some((w) => doc.m.has(w))) {

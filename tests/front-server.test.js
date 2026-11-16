@@ -123,11 +123,15 @@ describe("serverCandidates: kiểm dạng", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-describe("serverMerge trùng mergeByMethod G2-g3-w3 của khung đo", () => {
-  test("SERVER_MERGE_OPTS = offPromote { gap 3, minWords 3 } (đúng cách G2-g3-w3 đã chốt), đóng băng", () => {
+// g2-di-qua vòng 3: serverMerge = G2-g3-w3 + c-idf (serverIdf). Bộ 180 ca cũ GIỮ, đổi mốc so: mergeFront với
+// SERVER_MERGE_OPTS TẮT serverIdf (trên serverJoin) = mergeByMethod G2-g3-w3 (phần G2 không đổi); serverMerge mới so
+// methodMerge("c-idf") của khung đo g2-di-qua-do.mjs ở describe sau.
+const G2_OPTS = () => ({ ...mod.SERVER_MERGE_OPTS, serverIdf: false });
+describe("mergeFront tắt serverIdf (phần G2 của serverMerge) trùng mergeByMethod G2-g3-w3 của khung đo", () => {
+  test("SERVER_MERGE_OPTS = offPromote { gap 3, minWords 3 } (đúng cách G2-g3-w3 đã chốt) + serverIdf true (c-idf), đóng băng", () => {
     const g = methodGrid()["G2-g3-w3"];
     assert.deepEqual(g, { kind: "g2", gap: 3, minWords: 3 });
-    assert.deepEqual(mod.SERVER_MERGE_OPTS, { offPromote: { gap: g.gap, minWords: g.minWords } });
+    assert.deepEqual(mod.SERVER_MERGE_OPTS, { offPromote: { gap: g.gap, minWords: g.minWords }, serverIdf: true });
     assert.ok(Object.isFrozen(mod.SERVER_MERGE_OPTS) && Object.isFrozen(mod.SERVER_MERGE_OPTS.offPromote));
   });
 
@@ -160,12 +164,12 @@ describe("serverMerge trùng mergeByMethod G2-g3-w3 của khung đo", () => {
     for (const [fName, found] of Object.entries(FOUND)) for (const [oName, off] of Object.entries(OFFS)) rows.push({ sName, S, fName, found, oName, off });
   }
 
-  test(`${rows.length} ca (${Object.keys(S_CASES).length} S × ${Object.keys(FOUND).length} chữ × ${Object.keys(OFFS).length} OFF): merged trùng từng trường, 0 lệch`, () => {
+  test(`${rows.length} ca (${Object.keys(S_CASES).length} S × ${Object.keys(FOUND).length} chữ × ${Object.keys(OFFS).length} OFF): mergeFront(serverJoin, tắt serverIdf) trùng từng trường, 0 lệch`, () => {
     let diff = 0;
     for (const r of rows) {
       assert.equal(r.S.length, S_CASES[r.sName].length, `S ${r.sName} giữ đủ mục`);
       const want = mergeByMethod({ t1, rIndex, products, found: r.found, off: r.off, S: r.S, method: "G2-g3-w3" });
-      const got = mod.serverMerge({ t1, rIndex, products }, r.found, r.off, r.S, { called: true }).merged;
+      const got = mergeFront(t1, rIndex, products, r.found, mod.serverJoin(r.off, r.S), G2_OPTS());
       try { assert.deepStrictEqual(got, want); } catch { diff++; console.error(`lệch: ${r.sName} | ${r.fName} | ${r.oName}`); }
     }
     assert.equal(diff, 0);
@@ -228,5 +232,39 @@ describe("serverMerge trùng mergeByMethod G2-g3-w3 của khung đo", () => {
     const f = FOUND["7up câu gõ"];
     const got = mod.serverMerge({ t1, rIndex, products }, f, OFFS["OFF lỗi"], [], { called: true }).merged;
     assert.deepEqual(got, mergeFront(t1, rIndex, products, f, null));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Đợt g2-di-qua vòng 3 (P1): serverMerge = G2 + c-idf (SERVER_MERGE_OPTS.serverIdf). Dữ liệu giả nhỏ.
+describe("serverMerge c-idf (g2-di-qua vòng 3): dữ liệu giả", () => {
+  const MINI = [["8930000000001", "Mi tom chua cay Hao Hao"], ["8930000000002", "Mi tom Omachi"], ["8930000000003", "Mi tom Kokomi"],
+    ["8930000000004", "Mi tom Gau do"], ["8930000000005", "Mi tom Vifon"], ["8930000000006", "Mi tom Miliket"], ["8930000000007", "Sua tuoi"]]
+    .map(([code, text]) => ({ code, name: text, brand: "", text }));
+  const mI = fr.buildRankIndex(t1, MINI);
+  const mctx = { t1, rIndex: mI, products: MINI };
+  const f3 = fr.rankFromItems(t1, mI, itemsOf(["Mi tom", "Ruaypuan Hanami Prawn"]));
+  const RU3 = { code: "8852052150101", name: "Hanami Ruaypuan Prawn crackers", brand: "", img: "front_en.3", text: "Hanami Ruaypuan Prawn crackers", grp: "th", score: 30 };
+
+  test("mục máy chủ ngoài danh mục có 3 từ lạ → vị trí 1 (G2 cũ bỏ vì khớp 0 từ với danh mục)", () => {
+    const S = mod.serverCandidates({ candidates: [RU3] });
+    for (const off of [{ ok: false, kind: "network" }, { ok: true, hits: [] }]) {
+      const got = mod.serverMerge(mctx, f3, off, S, { called: true }).merged;
+      assert.equal(got[0].code, RU3.code, got.map((x) => x.code).join(","));
+      assert.equal(got[0].source, "off");
+      assert.ok(!("serverText" in got[0]) && !("extra" in got[0]));
+    }
+  });
+
+  test("mã có ở cả OFF và S: hiển thị theo bản OFF, điểm theo chữ bản S", () => {
+    const S = mod.serverCandidates({ candidates: [RU3] });
+    const off = { ok: true, hits: [{ code: RU3.code, name: "Ten OFF", brand: "Hang OFF", img: "https://images.openfoodfacts.org/off.jpg", vn: false, text: "Zzz qqq" }] };
+    const got = mod.serverMerge(mctx, f3, off, S, { called: true }).merged;
+    assert.equal(got[0].code, RU3.code);
+    assert.deepEqual([got[0].name, got[0].brand, got[0].img], ["Ten OFF", "Hang OFF", "https://images.openfoodfacts.org/off.jpg"]);
+    const alone = mod.serverMerge(mctx, f3, { ok: false, kind: "network" }, S, { called: true }).merged;
+    assert.equal(got[0].score, alone[0].score);
+    // không đổi dữ liệu đầu vào
+    assert.ok(!("serverText" in off.hits[0]) && !("serverText" in S[0]));
   });
 });

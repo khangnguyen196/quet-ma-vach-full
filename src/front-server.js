@@ -23,11 +23,15 @@ export const SERVER_TEXT_MAX = 2500;
 export const SERVER_NAME_MAX = 250;
 
 /**
- * Tùy chọn gộp G2-g3-w3 (đã chốt ở đợt kho-lon vòng 3, luật chọn trong test-ocr/chup-mat-do/kho-lon-do.mjs): lớp chặn
- * mặc định + offPromote { gap: 3, minWords: 3 } chỉ cho mục máy chủ (mục OFF không trùng mã máy chủ mang extra: true nên
- * không bao giờ được đẩy). Đây là chỗ DUY NHẤT trong app truyền tùy chọn cho mergeFront (luật đọc nguồn (5)).
+ * Tùy chọn gộp của đường máy chủ = G2-g3-w3 + c-idf.
+ * G2-g3-w3 (đã chốt ở đợt kho-lon vòng 3, luật chọn trong test-ocr/chup-mat-do/kho-lon-do.mjs): lớp chặn mặc định +
+ * offPromote { gap: 3, minWords: 3 } chỉ cho mục máy chủ (mục OFF không trùng mã máy chủ mang extra: true nên không bao giờ
+ * được đẩy).
+ * serverIdf: true (đợt g2-di-qua vòng 3, cách c-idf được luật chốt trước chọn, test-ocr/chup-mat-do/g2-di-qua-do.mjs): mục
+ * máy chủ KHÔNG có trong danh mục 1.452 chấm BM25 trên chữ của bản máy chủ, từ ngoài từ vựng 1.452 nhận idf lớn nhất.
+ * Đây là chỗ DUY NHẤT trong app truyền tùy chọn cho mergeFront (luật đọc nguồn (5)).
  */
-export const SERVER_MERGE_OPTS = Object.freeze({ offPromote: Object.freeze({ gap: 3, minWords: 3 }) });
+export const SERVER_MERGE_OPTS = Object.freeze({ offPromote: Object.freeze({ gap: 3, minWords: 3 }), serverIdf: true });
 
 const CODE_RE = /^\d{8,14}$/;
 
@@ -76,10 +80,33 @@ export function serverCandidates(body) {
 }
 
 /**
- * Gộp T1 (danh mục 1.452 trong app) + ứng viên máy chủ S + OFF theo cách G2-g3-w3 = ĐÚNG phép gộp kind "g2" của
- * mergeByMethod (test-ocr/chup-mat-do/kho-lon-do.mjs; test so trùng ở tests/front-server.test.js):
- * mục OFF có mã KHÔNG nằm trong S mang extra: true (không được offPromote đẩy); mục có mã trong S (kể cả trùng OFF) là
- * mục máy chủ (không extra); joinExtra(OFF đã đánh dấu, S) rồi mergeFront(…, SERVER_MERGE_OPTS).
+ * Nối OFF + ứng viên máy chủ S cho mergeFront (đường máy chủ): mục OFF có mã KHÔNG nằm trong S mang extra: true (không
+ * được offPromote đẩy); mục có mã trong S (kể cả trùng OFF) là mục máy chủ (không extra) và mang serverText = chữ của BẢN S
+ * cùng mã (text, rỗng thì name + brand) cho tùy chọn serverIdf (c-idf); joinExtra(OFF đã đánh dấu, S) (OFF trước: mã có ở
+ * cả hai thì hiển thị theo bản OFF). Không đổi off / S truyền vào. Trả kết quả joinExtra (null / off nguyên vẹn khi không
+ * có gì để nối, như joinExtra).
+ */
+export function serverJoin(off, S) {
+  const server = Array.isArray(S) ? S : [];
+  const sText = new Map();
+  for (const h of server) if (h && typeof h.code === "string" && !sText.has(h.code)) sText.set(h.code, h.text || `${h.name ?? ""} ${h.brand ?? ""}`);
+  const offMarked = off && off.ok === true && Array.isArray(off.hits)
+    ? {
+      ...off,
+      hits: off.hits.map((h) => {
+        const { extra, serverText, ...rest } = h;
+        return sText.has(h.code) ? { ...rest, serverText: sText.get(h.code) } : { ...rest, extra: true };
+      }),
+    }
+    : off;
+  return joinExtra(offMarked, server.map(({ extra, serverText, ...h }) => (sText.has(h.code) ? { ...h, serverText: sText.get(h.code) } : h)));
+}
+
+/**
+ * Gộp T1 (danh mục 1.452 trong app) + ứng viên máy chủ S + OFF theo cách G2-g3-w3 + c-idf (đợt g2-di-qua vòng 3) = ĐÚNG
+ * methodMerge("c-idf") của test-ocr/chup-mat-do/g2-di-qua-do.mjs (test so trùng ở tests/front-server.test.js; tắt
+ * serverIdf thì = mergeByMethod G2-g3-w3 của kho-lon-do.mjs): serverJoin(off, S) rồi mergeFront(…, SERVER_MERGE_OPTS).
+ * Mục máy chủ ngoài danh mục 1.452: hiển thị theo bản OFF nếu mã có ở OFF, điểm theo chữ bản S.
  * ctx = { t1, rIndex, products }; found = rankFromItems; off = joinOffResults(…) ({ ok: false, kind: "none" } khi không
  * có câu tìm); S = serverCandidates(…) có ≥ 1 mục (S rỗng thì main.js KHÔNG gọi hàm này mà đi đường cũ photoMerge).
  * opts.called: đã gọi mạng tìm OFF chưa (như photoMerge).
@@ -90,12 +117,7 @@ export function serverCandidates(body) {
  * Lỗi giá trị chặn (GuardValueError) → console.error rồi kết quả T1; lỗi khác ném tiếp.
  */
 export function serverMerge({ t1, rIndex, products }, found, off, S, { called } = {}) {
-  const server = Array.isArray(S) ? S : [];
-  const sCodes = new Set(server.map((h) => h.code));
-  const offMarked = off && off.ok === true && Array.isArray(off.hits)
-    ? { ...off, hits: off.hits.map((h) => { const { extra, ...rest } = h; return sCodes.has(h.code) ? rest : { ...rest, extra: true }; }) }
-    : off;
-  const joined = joinExtra(offMarked, server.map(({ extra, ...h }) => h));
+  const joined = serverJoin(off, S);
   const didCall = typeof called === "boolean" ? called : !!(off && typeof off === "object" && off.kind !== "none");
   const offFailed = didCall && !(off && off.ok === true);
   let merged;
