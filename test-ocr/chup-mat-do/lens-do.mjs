@@ -212,10 +212,9 @@ import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.m
 
 /**
  * Commit của khối luật đang dùng (LỆCH LUẬT 2, "test(lens): LỆCH LUẬT 2 — ẩn mã bị loại theo hàng, R6 1.600 px, override
- * bộ P chỉ mức a"); tự kiểm so từng byte khối luật bằng git show. null ở chính commit LỆCH LUẬT 2 (chưa biết sha của nó),
- * đặt ở commit ngay sau.
+ * bộ P chỉ mức a", 2026-11-21 00:01:51 +0700); tự kiểm so từng byte khối luật bằng git show.
  */
-export const RULE_SHA = null;
+export const RULE_SHA = "a7b1208";
 export const RULE_FILE = "test-ocr/chup-mat-do/lens-do.mjs";
 /** sha256 (hex) của khối luật (ruleBlockOf) — bản LỆCH LUẬT 2. */
 export const RULE_SHA256 = "10ec71685d573a62562f33fd224c6ba722b3bb9664c81866f24b7b3c9cfeb11a";
