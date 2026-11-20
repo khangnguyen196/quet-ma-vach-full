@@ -6,7 +6,13 @@
 #       10 anh catalog ngau nhien, cung file ONNX): cos >= 0,999 moi anh, moi model.
 #   python -I lens-vec.py gio   [--model-dir ...] [--anh D:\tmp\lens\anh] [--out D:\tmp\lens\ket-qua\gio-ram.json]
 #       Thoi gian 1 luong (20 anh catalog: doc + tien xu ly + vector + tim tren ma tran co muc (b)), trung vi / p95 / lon
-#       nhat; RAM them khi nap model (working set Windows truoc / sau nap + sau 20 anh).
+#       nhat; RAM them khi nap model (working set Windows truoc / sau nap + sau 20 anh). Khong --chi: moi model mot tien
+#       trinh con (RAM khong lan), gop ve --out.
+#   python -I lens-vec.py vec --model clip-fp32 --pre cat [--vao D:\tmp\lens\vec-vao-a.json] [--vec D:\tmp\lens\vec]
+#        [--threads 4] [--phut 7.5] [--gio D:\tmp\lens\ket-qua\gio-ram-clip-fp32.json]
+#       Dung chi muc anh + sims tu danh sach TUONG MINH (lens-tai.mjs --vao-vec); chay noi theo phan; kiem 10 anh
+#       cos(1 luong, nhieu luong) >= 0,9999; meta.json mang cac truong chong an gian (lens-chay.mjs kiem).
+# EXIF: moi lenh xoay theo EXIF (ImageOps.exif_transpose) cho ca anh chi muc lan anh truy van.
 #
 # Tien xu ly (giong ImageProcessor cua transformers.js tren Node, dung sharp):
 #   resize = sharp affine voi noi suy bicubic (KHONG khu rang cua khi thu nho), roi lam tron ve uint8;
@@ -19,8 +25,10 @@ import argparse
 import ctypes
 import json
 import os
+import hashlib
 import random
 import statistics
+import subprocess
 import sys
 import time
 
@@ -181,11 +189,12 @@ def to_tensor(arr, cfg):
     return np.ascontiguousarray(x.transpose(2, 0, 1)[None])
 
 
-def read_rgb(path, exif=True):
+def read_rgb(path):
+    """MOT cach EXIF cho moi lenh (chi muc, truy van, kiem, gio): xoay theo EXIF bang ImageOps.exif_transpose roi RGB
+    (goi y 8 cua code-reviewer vong 1). 10 anh tham chieu cua lenh kiem khong co the Orientation (da kiem) nen ket qua
+    kiem vong 1 khong doi."""
     from PIL import ImageOps
-    im = Image.open(path)
-    if exif:
-        im = ImageOps.exif_transpose(im)
+    im = ImageOps.exif_transpose(Image.open(path))
     return np.asarray(im.convert("RGB"))
 
 
@@ -272,7 +281,7 @@ def cmd_kiem(a):
         for center in (True, False):
             coss, pxd, ortc = [], [], []
             for i, fpath in enumerate(ref["files"]):
-                x = preprocess(read_rgb(fpath, exif=False), cfg, "goc", center=center)
+                x = preprocess(read_rgb(fpath), cfg, "goc", center=center)
                 v = embed(sess, name, x)
                 coss.append(float(np.dot(v, js_vec[i])))
                 pxd.append(float(np.abs(x[0] - js_px[i]).max()))
@@ -289,6 +298,26 @@ def cmd_kiem(a):
 
 
 def cmd_gio(a):
+    if not a.chi:
+        # mac dinh MOI MODEL MOT TIEN TRINH (goi y 8 cua code-reviewer vong 1): RAM / working set khong lan giua model
+        merged = None
+        base, ext = os.path.splitext(a.out)
+        for name in MODELS:
+            part = f"{base}-{name}{ext}"
+            cmd = [sys.executable, "-I", os.path.abspath(__file__), "gio", "--chi", name, "--model-dir", a.model_dir,
+                   "--anh", a.anh, "--out", part]
+            r = subprocess.run(cmd)
+            if r.returncode != 0:
+                sys.exit(r.returncode)
+            with open(part, encoding="utf-8") as f:
+                j = json.load(f)
+            if merged is None:
+                merged = {**j, "models": {}, "perProcess": True}
+            merged["models"].update(j["models"])
+        os.makedirs(os.path.dirname(a.out), exist_ok=True)
+        with open(a.out, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=1)
+        return
     files = sorted(os.path.join(a.anh, n) for n in os.listdir(a.anh) if n.endswith(".jpg"))
     rnd = random.Random(20261120)
     pick = rnd.sample(files, 20)
@@ -333,18 +362,145 @@ def cmd_gio(a):
         json.dump(out, f, ensure_ascii=False, indent=1)
 
 
+CHUNK = 256          # so anh chi muc moi phan (luu rieng de chay noi nhieu lan)
+THREAD_CHECK_N = 10  # so anh kiem cos(1 luong, nhieu luong)
+THREAD_COS_MIN = 0.9999
+GUARD_KEYS = ("antiCheatSha256", "boPSha256", "excluded", "override", "indexKey", "indexImgid")
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def embed_files(sess, name, cfg, mode, files):
+    return np.stack([embed(sess, name, preprocess(read_rgb(p), cfg, mode)) for p in files]).astype(np.float32)
+
+
+def cmd_vec(a):
+    """Dung chi muc anh + do giong cho MOT bien the (model x tien xu ly) tu danh sach TUONG MINH (lens-tai.mjs --vao-vec):
+    anh chi muc = vin["index"] (da ap excluded / override chong an gian + bo P), truy van = vin["queries"]. Khong quet thu
+    muc anh. Ra <vec>/<model>-<pre>/<muc>/: index.npy (vector chi muc fp32), sims.npy [truy van x san pham], codes.json,
+    queries.json, meta.json (gom cac truong chong an gian de lens-chay.mjs kiem). Chay noi: vector chi muc luu theo phan
+    (phan/idx-<k>.npy); het --phut thi thoat ma 10 (chay lai de lam tiep). Phan cu khac dau vao / model -> dung, thoat ma 3."""
+    with open(a.vao, encoding="utf-8") as f:
+        vin = json.load(f)
+    name, mode = a.model, a.pre
+    if name not in MODELS or mode not in ("cat", "vien"):
+        sys.exit(f"model / tien xu ly la: {name} {mode}")
+    level = vin["level"]
+    out_dir = os.path.join(a.vec, f"{name}-{mode}", level)
+    if not os.path.abspath(out_dir).upper().startswith("D:"):
+        sys.exit("Chi ghi vao o D.")
+    part_dir = os.path.join(out_dir, "phan")
+    os.makedirs(part_dir, exist_ok=True)
+    sig = {"vaoSha256": file_sha256(a.vao), "model": name, "pre": mode, "onnxSha256": MODELS[name]["sha256"], "chunk": CHUNK}
+    sig_file = os.path.join(part_dir, "dau.json")
+    if os.path.exists(sig_file):
+        with open(sig_file, encoding="utf-8") as f:
+            old = json.load(f)
+        if old != sig:
+            print(f"Phan cu khac dau vao / model ({sig_file}): xoa thu muc phan roi chay lai.", file=sys.stderr)
+            sys.exit(3)
+    else:
+        with open(sig_file, "w", encoding="utf-8") as f:
+            json.dump(sig, f)
+    cfg = load_cfg(a.model_dir, name)
+    onnx_path = os.path.join(a.model_dir, MODELS[name]["dir"], MODELS[name]["onnx"])
+    if file_sha256(onnx_path) != MODELS[name]["sha256"]:
+        sys.exit(f"sha256 file ONNX khac ban ghim: {onnx_path}")
+    sess = session(a.model_dir, name, threads=a.threads)
+    index = vin["index"]
+    files = [x["file"] for x in index]
+    for p in files:
+        if not os.path.exists(p):
+            sys.exit(f"thieu file anh chi muc: {p}")
+    deadline = time.time() + a.phut * 60
+    nchunks = (len(files) + CHUNK - 1) // CHUNK
+    t0 = time.time()
+    done_now = 0
+    for k in range(nchunks):
+        pf = os.path.join(part_dir, f"idx-{k:04d}.npy")
+        if os.path.exists(pf):
+            continue
+        if time.time() > deadline:
+            left = sum(1 for j in range(nchunks) if not os.path.exists(os.path.join(part_dir, f"idx-{j:04d}.npy")))
+            print(f"Het gio: con {left}/{nchunks} phan, chay lai de lam tiep.")
+            sys.exit(10)
+        X = embed_files(sess, name, cfg, mode, files[k * CHUNK:(k + 1) * CHUNK])
+        np.save(pf, X)
+        done_now += X.shape[0]
+        print(f"phan {k + 1}/{nchunks} ({X.shape[0]} anh), {time.time() - t0:.0f}s", flush=True)
+    X = np.concatenate([np.load(os.path.join(part_dir, f"idx-{k:04d}.npy")) for k in range(nchunks)])
+    if X.shape[0] != len(files):
+        sys.exit(f"so vector chi muc {X.shape[0]} != {len(files)}")
+    qs = [q for q in vin["queries"] if q.get("file") and os.path.exists(q["file"])]
+    q_missing = [q["qid"] for q in vin["queries"] if not (q.get("file") and os.path.exists(q["file"]))]
+    Q = embed_files(sess, name, cfg, mode, [q["file"] for q in qs]) if qs else np.zeros((0, X.shape[1]), np.float32)
+    sims = (Q @ X.T).astype(np.float32)
+    # kiem nhieu luong: THREAD_CHECK_N anh chi muc dau tinh lai bang 1 luong
+    s1 = session(a.model_dir, name, threads=1)
+    n_chk = min(THREAD_CHECK_N, len(files))
+    X1 = embed_files(s1, name, cfg, mode, files[:n_chk])
+    cos = [float(np.dot(X1[i], X[i])) for i in range(n_chk)]
+    thread_check = {"n": n_chk, "threads": a.threads, "cosMin": min(cos) if cos else None,
+                    "pass": bool(cos) and min(cos) >= THREAD_COS_MIN}
+    timing, ram_add = None, None
+    if a.gio and os.path.exists(a.gio):
+        with open(a.gio, encoding="utf-8") as f:
+            g = json.load(f)
+        gm = g.get("models", {}).get(name)
+        if gm:
+            timing = gm["time"].get(mode)
+            ram_add = gm.get("ramAddAfter20MiB")
+    np.save(os.path.join(out_dir, "index.npy"), X)
+    np.save(os.path.join(out_dir, "sims.npy"), sims)
+    with open(os.path.join(out_dir, "codes.json"), "w", encoding="utf-8") as f:
+        json.dump([x["code"] for x in index], f)
+    with open(os.path.join(out_dir, "queries.json"), "w", encoding="utf-8") as f:
+        json.dump([q["qid"] for q in qs], f)
+    m = MODELS[name]
+    meta = {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "model": name, "pre": mode, "level": level,
+        **{k: m[k] for k in ("repo", "revision", "sha256", "license", "onnx")}, "onnxBytes": os.path.getsize(onnx_path),
+        "dims": int(X.shape[1]), "nIndex": int(X.shape[0]), "nQueries": len(qs), "queriesMissing": q_missing,
+        "exif": "ImageOps.exif_transpose (chi muc + truy van)", "threads": a.threads, "threadCheck": thread_check,
+        "vaoFile": os.path.abspath(a.vao), "vaoSha256": sig["vaoSha256"], "missingIndexFiles": len(vin.get("missing", [])),
+        "timing": timing, "ramAddMiB": ram_add, "gioFile": a.gio,
+        **{k: vin[k] for k in GUARD_KEYS},
+    }
+    with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=1)
+    print(f"{name}-{mode} muc {level}: {X.shape[0]} anh chi muc, {len(qs)} truy van (thieu {len(q_missing)}), "
+          f"kiem {a.threads} luong vs 1 luong cos min {thread_check['cosMin']} -> {'DAT' if thread_check['pass'] else 'TRUOT'}. Ghi {out_dir}")
+    if not thread_check["pass"]:
+        sys.exit(3)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["kiem", "gio"])
+    ap.add_argument("cmd", choices=["kiem", "gio", "vec"])
     ap.add_argument("--model-dir", default=r"D:\tmp\lens\model")
     ap.add_argument("--ref", default=r"D:\tmp\lens\ref")
     ap.add_argument("--anh", default=r"D:\tmp\lens\anh")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--chi", default=None, choices=list(MODELS), help="gio: chi do mot model (moi model mot tien trinh)")
+    ap.add_argument("--chi", default=None, choices=list(MODELS), help="gio: chi do mot model (mac dinh moi model mot tien trinh)")
+    ap.add_argument("--vao", default=r"D:\tmp\lens\vec-vao-a.json", help="vec: dau vao tu lens-tai.mjs --vao-vec")
+    ap.add_argument("--vec", default=r"D:\tmp\lens\vec", help="vec: thu muc ra")
+    ap.add_argument("--model", default=None, choices=list(MODELS), help="vec: model")
+    ap.add_argument("--pre", default="cat", choices=["cat", "vien"], help="vec: tien xu ly")
+    ap.add_argument("--threads", type=int, default=4, help="vec: so luong ORT khi dung chi muc")
+    ap.add_argument("--phut", type=float, default=7.5, help="vec: gioi han thoi gian moi lan chay (phut)")
+    ap.add_argument("--gio", default=None, help="vec: file gio-ram (thoi gian / RAM cua model) chep vao meta")
     a = ap.parse_args()
     if a.out is None:
         a.out = r"D:\tmp\lens\ket-qua\kiem-tien-xu-ly.json" if a.cmd == "kiem" else r"D:\tmp\lens\ket-qua\gio-ram.json"
-    {"kiem": cmd_kiem, "gio": cmd_gio}[a.cmd](a)
+    if a.cmd == "vec" and not a.model:
+        ap.error("vec can --model")
+    {"kiem": cmd_kiem, "gio": cmd_gio, "vec": cmd_vec}[a.cmd](a)
 
 
 if __name__ == "__main__":
