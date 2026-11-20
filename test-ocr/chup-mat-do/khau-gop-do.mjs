@@ -218,6 +218,7 @@ export function paramsOf(name) {
 // ---------------- gộp tham số (bản sao nhánh f1 của mergeFront với tùy chọn của serverMerge) ----------------
 // mergeLocal(…, BASE_PARAMS) PHẢI trùng serverMerge(…).merged của src từng mục (kiểm chéo (0) lúc chạy + test).
 
+// WeakMap theo products: sai nếu sửa mảng products tại chỗ sau lần gọi đầu (lúc đo không xảy ra).
 /** Bảng mã → chỉ số trong products (mã đầu tiên), dựng một lần cho mỗi mảng products (WeakMap), dùng chung. */
 const CODE_INDEX = new WeakMap();
 export function codeIndexOf(products) {
