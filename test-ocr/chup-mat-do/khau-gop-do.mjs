@@ -10,6 +10,7 @@
 // khối này sau khi thấy số của bất kỳ cách / ngưỡng nào; buộc phải sửa thì ghi "LỆCH LUẬT" ở PLAN.md và dừng báo.
 // Lúc viết khối này ĐÃ thấy: chẩn đoán khâu gộp 22 ảnh thật + bảng đặc trưng mục 1 ở nền (D:\tmp\khau-gop\chan-doan-gop.*,
 // ngoài git); CHƯA thấy số của cách / ngưỡng nào.
+// Sửa luật 2026-11-20 vòng 2 (LỆCH LUẬT, TRƯỚC mọi số của cách / ngưỡng; luật gốc b954513): cách chỉ để tham khảo không được chọn; nền G4 = mergeLocal tham số nền.
 // ===================================================================================================================
 // Nền = mã ở 36c5fd7 (BASE_SHA): đường MÁY = serverMerge (G2 + c-idf: lockTop 3, offMax 1, offGap 1, offPromote
 //   { gap 3, minWords 3 }, serverIdf true); đường LÙI = photoMerge + kho phụ 893 ("Tìm lại" cũng đi LÙI).
@@ -66,7 +67,9 @@
 //   G3 7Up Diet vị trí 1 ở 4 ô (chữ máy / câu gõ × (i)(ii)); buldak vị trí 1 ở (i)(ii); muối Co.op photoOutcome kind
 //      "open" ở MÁY (i)(ii) và LÙI (i)(ii); 6 ca ngoại: tổng số ô vị trí 1 và tổng số ô trong 5 (trên 12 ô) không giảm.
 //   G4 thời gian gộp MÁY mỗi ô (Node): mỗi ô của A/B (120) + ảnh thật (44) chạy hàm gộp 20 lần lấy trung bình, sau 2 lượt
-//      làm nóng; p95 nearest rank; nền đo trong cùng lần chạy, ngay trước cách. Qua khi p95 cách ≤ 50 ms VÀ ≤ 2 × p95 nền.
+//      làm nóng; p95 nearest rank; nền đo bằng mergeLocal tham số nền (BASE_PARAMS) trong cùng lần chạy, ngay trước cách
+//      (mergeLocal nền = serverMerge src từng mục, kiểm chéo (0)); p95 serverMerge src ghi chỉ báo. Qua khi p95 cách
+//      ≤ 50 ms VÀ ≤ 2 × p95 nền.
 //   G5 không đổi server/, public/ (danh mục, kho phụ), package.json, package-lock.json, src/off-search.js so với
 //      36c5fd7 (git diff --quiet); lúc chạy: CONFIDENCE_RULE null / null, STRANGE_MODE null, SERVER_MERGE_OPTS,
 //      DEFAULT_GUARD, SERVER_MAX như nền; câu OFF từng ca trùng nền; LÙI từng ô trùng nền.
@@ -76,9 +79,11 @@
 //   M3 = số ô ảnh thật có nhãn mã ở nửa CHỈNH có mã đúng ở vị trí 1.
 //   GIỮ cách khi: M1 > M1 nền (= 0) VÀ nửa GIỮ RIÊNG (ảnh thật có nhãn mã) 0 ô mất vị trí 1, 0 ô rơi khỏi 5 so với nền.
 //   Chọn trong các cách được giữ theo M1 > M2 > M3 (lớn trước); hòa → cách đứng trước trong STEP3_GRID.
-//   Cách được chọn mà M1 hơn nền CHỈ nhờ 1 ảnh, hoặc chỉ nhờ ảnh thư mục 2 (bỏ ô thư mục 2 thì M1 không hơn nền), hoặc
-//   chỉ nhờ ảnh preset → vẫn chọn theo luật nhưng ghi rõ "chỉ để tham khảo". Mọi số thư mục 2 ghi "chỉ để tham khảo
-//   (n ≤ 2)".
+//   Cách được giữ mà M1 hơn nền chỉ nhờ 1 ảnh, hoặc chỉ nhờ ảnh thư mục 2 (bỏ ô thư mục 2 thì M1 không hơn nền), hoặc
+//   chỉ nhờ ảnh preset, thì là "chỉ để tham khảo": KHÔNG được chọn, vẫn ghi số / tên / lý do (chỉ báo), không sửa src/,
+//   không làm nền bước 4. Chọn trong các cách được giữ và KHÔNG chỉ để tham khảo theo M1 > M2 > M3; hòa → thứ tự
+//   STEP3_GRID. Không còn cách nào → "không cách nào đạt ở bước 3", bước 4 đo trên nền serverMerge. Các cách chỉ để tham
+//   khảo ghi PLAN.md để chủ dự án quyết ở đợt sau. Mọi số thư mục 2 ghi "chỉ để tham khảo (n ≤ 2)".
 //
 // ---- BƯỚC 4: ngưỡng "chưa chắc" (đo SAU bước 3, trên kết quả gộp MÁY của cách bước 3 được chọn; không có cách nào được
 //   chọn → trên nền serverMerge; gọi là "nền bước 4") ----
@@ -171,7 +176,7 @@ import { splitHalves, lossRows } from "./may-chu-loc-do.mjs";
 export const RULE_SHA = "b954513";
 export const RULE_FILE = "test-ocr/chup-mat-do/khau-gop-do.mjs";
 /** sha256 (hex) của khối luật ở commit RULE_SHA. */
-export const RULE_SHA256 = "530a08ae4475cc3ab6271548c924daa8ed800145d61e1c79bb324d465fdef8b2";
+export const RULE_SHA256 = "8ef14602ba7d3cf5ae675794567d3b20be431a63c5a99b4de98baefc945e2965";
 /** Ba chế độ chạy (đúng một cờ) → tên file ra. */
 export const MODES = Object.freeze({ "--chi-nen": "nen", "--do-cach": "do", "--do-nguong": "nguong" });
 
