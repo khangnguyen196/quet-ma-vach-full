@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { frontImageUrl } from "../../../src/front-search.js";
 import {
   imageUrl, fileNameOf, planList, existingOf, isRetryable, backoffMs, createBreaker, createGap, estimateRemaining, budgetOk,
-  fetchOne, USER_AGENT, BUDGET_BYTES, DEFAULT_AVG_BYTES, MAX_CONN, GAP_MS, BREAKER_LIMIT,
+  fetchOne, USER_AGENT, BUDGET_BYTES, DEFAULT_AVG_BYTES, MAX_CONN, GAP_MS, BREAKER_LIMIT, productUrl, candidatesFrom, imgidFromUrl, APP_NAME,
 } from "../lens-tai.mjs";
 
 test("imageUrl trùng frontImageUrl của src (400 / 200), sai dạng → rỗng", () => {
@@ -104,6 +104,24 @@ test("fetchOne: .400 lỗi 404 → .200; 503 thử lại có lùi rồi được
   r = await fetchOne({ code: "12345678", img: "front_en.4" }, d);
   assert.equal(r.breaker, true);
   assert.equal(d.breaker.open, true);
+});
+
+test("chống ăn gian (chuẩn bị): URL API có app_name; ứng viên = khóa danh mục trước, rồi front_xx (vi → en → tên); rev lệch → không biết imgid", () => {
+  assert.equal(productUrl("8934588752117"), "https://world.openfoodfacts.org/api/v2/product/8934588752117?fields=code,images&app_name=quet-ma-vach-lens");
+  assert.equal(productUrl("x"), "");
+  assert.equal(APP_NAME, "quet-ma-vach-lens");
+  const product = { images: { 1: { uploaded_t: 1 }, front_en: { imgid: "2", rev: "9" }, front_vi: { imgid: "3", rev: "12" }, front_th: { imgid: "5", rev: "20" }, ingredients_vi: { imgid: "4", rev: "7" }, front: { imgid: "8", rev: "1" } } };
+  assert.deepEqual(candidatesFrom(product, "front_en.9"), [
+    { key: "front_en.9", imgid: "2", fromCatalog: true }, { key: "front_vi.12", imgid: "3", fromCatalog: false }, { key: "front_th.20", imgid: "5", fromCatalog: false },
+  ]);
+  const lag = candidatesFrom(product, "front_vi.10");
+  assert.equal(lag[0].imgid, null);
+  assert.match(lag[0].note, /rev danh mục 10/);
+  assert.deepEqual(lag.slice(1).map((x) => x.key), ["front_vi.12", "front_en.9", "front_th.20"]);
+  assert.equal(candidatesFrom(product, "front_fr.3")[0].note, "khóa danh mục không còn trên OFF");
+  assert.deepEqual(candidatesFrom(null, ""), []);
+  assert.equal(imgidFromUrl("https://images.openfoodfacts.org/images/products/893/457/226/0543/3.jpg"), "3");
+  assert.equal(imgidFromUrl("https://x/front_vi.3.400.jpg"), null);
 });
 
 test("cổng 5 GB: hiện có + ước còn lại", () => {
