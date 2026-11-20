@@ -75,6 +75,7 @@ test("A''1 lens-vec.py vec: chữ ký chạy nối KHÔNG có gitHead (commit fi
     const r2 = runVecPy(repo.file, args);
     assert.notEqual(r2.status, 3, `commit file khác giữa 2 lượt KHÔNG được làm hỏng chạy nối (${r2.err})`);
     assert.doesNotMatch(r2.err, /Phan cu khac/);
+    assert.equal(r2.status, 1, `lượt 2 dừng đúng chỗ như lượt 1 (nạp cấu hình model, mã 1), không phải lỗi khác (${r2.err})`);
     assert.deepEqual(JSON.parse(fs.readFileSync(sigFile, "utf8")), sig, "chữ ký giữ nguyên");
     const hs = heads();
     assert.equal(hs.length, 2, "mỗi lượt một dòng heads.jsonl");

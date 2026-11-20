@@ -95,7 +95,7 @@ test("lens-chay ghi gio1600Sha256 vào MỌI file kết quả (đặt trong out 
 });
 
 test("lens-vec.py (gợi ý 2): chữ ký chạy nối có số luồng; file phần ghi tạm rồi đổi tên; hideByRow vào meta; không còn đọc file giờ 400 px", () => {
-  assert.match(SRC, /sig = \{[^}]*"threads": a\.threads,/s); // vòng 3 A': sau threads còn vecPySha256 + gitHead
+  assert.match(SRC, /sig = \{[^}]*"threads": a\.threads,/s); // vòng 3 A': sau threads còn vecPySha256
   assert.match(SRC, /atomic_npy\(pf, X\)/);
   assert.doesNotMatch(SRC, /np\.save\(pf/);
   // mọi .npy ghi qua atomic_npy (np.save chỉ có MỘT chỗ: vào file tạm, rồi os.replace)
