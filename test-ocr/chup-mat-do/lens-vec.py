@@ -16,6 +16,10 @@
 #   python -I lens-vec.py gio1600 [--anh-that D:\tmp\may-chu-loc\anh] [--out D:\tmp\lens\gio-1600.json] [--nb 42208]
 #       R6 (LECH LUAT 2 (ii)): 20 anh that thu canh dai 1.600 px JPEG 90 trong bo nho; 1 luong; 3 model x cat / vien,
 #       moi model mot tien trinh. Chi do gio, khong ghi vector.
+#   python -I lens-vec.py int8 --model clip-fp32 --pre cat [--muc b] [--vec D:\tmp\lens\vec]
+#       (vong 3) Tu bo fp32 <vec>/<model>-<pre>/<muc> tao <muc>-int8 (luong tu int8 doi xung theo tung vector, thang
+#       float16; cach cai o muc "chi muc int8" cuoi file), meta co quant / fp32Sha256 / indexBytes / int8Loss.
+# vec va int8 ghi vao meta: vecPySha256 (sha256 file nay), gitHead, gitDirty (lens-chay --do kiem).
 # EXIF: moi lenh xoay theo EXIF (ImageOps.exif_transpose) cho ca anh chi muc lan anh truy van.
 #
 # Tien xu ly (giong ImageProcessor cua transformers.js tren Node, dung sharp):
@@ -400,17 +404,20 @@ def atomic_json(path, obj, indent=None):
     os.replace(tmp, path)
 
 
-def save_vec_outputs(out_dir, X, sims, codes, qids, meta):
+def save_vec_outputs(out_dir, X, sims, codes, qids, meta, qvec=None):
     """Ghi bo sim cua MOT bien the (NEN SUA 2 cua code-reviewer truoc do). meta.json CHI ghi khi
     meta["threadCheck"]["pass"] is True; truot -> khong ghi gi, tra False (nguoi goi thoat ma 3). Dat: xoa meta.json cu
     TRUOC (bo sim dang ghi do khong bao gio co meta hop le), ghi index.npy / sims.npy / codes.json / queries.json qua file
-    tam + doi ten, meta.json ghi CUOI cung. Tra True."""
+    tam + doi ten, meta.json ghi CUOI cung. Tra True. qvec (vong 3): vector truy van fp32 chuan L2 -> qvec.npy (lenh int8
+    can de tinh sims int8)."""
     if not (isinstance(meta.get("threadCheck"), dict) and meta["threadCheck"].get("pass") is True):
         return False
     mp = os.path.join(out_dir, "meta.json")
     if os.path.exists(mp):
         os.remove(mp)
     atomic_npy(os.path.join(out_dir, "index.npy"), X)
+    if qvec is not None:
+        atomic_npy(os.path.join(out_dir, "qvec.npy"), np.asarray(qvec, np.float32))
     atomic_npy(os.path.join(out_dir, "sims.npy"), sims)
     atomic_json(os.path.join(out_dir, "codes.json"), list(codes))
     atomic_json(os.path.join(out_dir, "queries.json"), list(qids))
@@ -499,8 +506,9 @@ def cmd_vec(a):
         "vaoFile": os.path.abspath(a.vao), "vaoSha256": sig["vaoSha256"], "missingIndexFiles": len(vin.get("missing", [])),
         "simsNote": "hang DAY DU; an theo hang (hideByRow) ap o lens-do.mjs simsFrom",
         **{k: vin[k] for k in GUARD_KEYS},
+        **provenance(),  # vong 3 (NEN SUA 3 sau cong): sha256 lens-vec.py dang chay + git HEAD + ban / sach
     }
-    if not save_vec_outputs(out_dir, X, sims, [x["code"] for x in index], [q["qid"] for q in qs], meta):
+    if not save_vec_outputs(out_dir, X, sims, [x["code"] for x in index], [q["qid"] for q in qs], meta, qvec=Q):
         sys.exit(3)
     print(f"{name}-{mode} muc {level}: {X.shape[0]} anh chi muc, {len(qs)} truy van (thieu {len(q_missing)}), "
           f"kiem {a.threads} luong vs 1 luong cos min {thread_check['cosMin']} -> DAT. Ghi {out_dir}")
@@ -578,6 +586,14 @@ def git_state(cwd):
         return head, st.strip() != ""
     except Exception:
         return None, None
+
+
+def provenance():
+    """Chung cu ban code cho meta bo vector (vong 3, NEN SUA 3 sau cong): sha256 lens-vec.py DANG CHAY + git HEAD + ban /
+    sach cua repo chua file nay. lens-chay --do doi vecPySha256 = sha lens-vec.py hien tai va gitDirty False."""
+    here = os.path.abspath(__file__)
+    head, dirty = git_state(os.path.dirname(here))
+    return {"vecPySha256": file_sha256(here), "gitHead": head, "gitDirty": dirty}
 
 
 def cmd_gio1600(a):
@@ -668,9 +684,148 @@ def cmd_gio1600(a):
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     atomic_json(a.out, out, indent=1)
 
+
+# ---------------- chi muc int8 (vong 3, chot TRUOC sims (b)) ----------------
+# Luat (khoi luat lens-do.mjs): "vector int8 doi xung theo tung vector, thang float16". Cach cai:
+#   q = clip(round(v * 127 / max|v|), -127, 127) kieu int8 (round = np.rint, lam tron nua ve so chan; tinh v * 127 / max|v|
+#   bang float64); c = float16(1 / ||q||_2); sims[truy van, sp] = (truy van fp32 chuan L2 . q) x float32(c), tinh bang float32.
+#   Co chi muc = nIndex x (dims + 2) + nIndex x 14 byte (indexBytesInt8 cua lens-do.mjs).
+INT8_QUANT = "int8-sym-perVector-scaleF16-invNorm"
+QVEC_SIMS_TOL = 1e-4  # qvec.npy . index.npy phai trung sims.npy fp32 (dung vector truy van cua chinh bo do)
+
+
+def quantize_int8(X):
+    """X [n, d] float -> (q int8 [n, d], c float16 [n]) theo luat tren. Vector 0 -> q = 0, c = float16(1)."""
+    X = np.asarray(X, np.float64)
+    mx = np.abs(X).max(axis=1, keepdims=True)
+    mx = np.where(mx > 0, mx, 1.0)
+    q = np.clip(np.rint(X * 127.0 / mx), -127, 127).astype(np.int8)
+    nq = np.linalg.norm(q.astype(np.float64), axis=1)
+    c = (1.0 / np.where(nq > 0, nq, 1.0)).astype(np.float16)
+    return q, c
+
+
+def int8_sims(Q, q, c):
+    """sims [truy van, sp] = (Q fp32 . q) x float32(c), float32."""
+    Q = np.asarray(Q, np.float32)
+    return ((Q @ q.astype(np.float32).T) * c.astype(np.float32)[None, :]).astype(np.float32)
+
+
+def _order(s):
+    """Thu tu hang nhu rowView cua lens-do.mjs: sim giam dan, hoa -> thu tu codes (sap xep on dinh)."""
+    return np.argsort(-s, kind="stable")
+
+
+def int8_loss(S32, S8, codes, qids, truth, hide_by_row):
+    """Mat mat top-k cua int8 so fp32 (chi bao). Chi tinh truy van co ma dung thay duoc tren hang SAU KHI AN (ma co trong
+    chi muc va khong bi an tren hang do). Tra n, so truy van hang 1 / trong 5 / trong 10 o fp32 va int8, so truy van doi
+    trang thai o tung muc, trung binh phan chung top 10 (|top10 fp32 giao top10 int8| / 10), |sim int8 - sim fp32| lon
+    nhat tren moi o cua ma tran (hang day du)."""
+    pos = {c: j for j, c in enumerate(codes)}
+    ks = (1, 5, 10)
+    cnt = {"fp32": {f"top{k}": 0 for k in ks}, "int8": {f"top{k}": 0 for k in ks}}
+    changed = {f"top{k}": 0 for k in ks}
+    overlaps = []
+    for i, qid in enumerate(qids):
+        hid = set((hide_by_row or {}).get(qid) or [])
+        code = (truth or {}).get(qid)
+        if code is None or code not in pos or code in hid:
+            continue
+        keep = np.array([c not in hid for c in codes]) if hid else None
+        ranks, tops = {}, {}
+        for name, S in (("fp32", S32), ("int8", S8)):
+            s = np.asarray(S[i], np.float32).copy()
+            if keep is not None:
+                s[~keep] = -np.inf
+            o = _order(s)
+            ranks[name] = int(np.nonzero(o == pos[code])[0][0]) + 1
+            tops[name] = set(int(x) for x in o[:10])
+        for k in ks:
+            a, b = ranks["fp32"] <= k, ranks["int8"] <= k
+            cnt["fp32"][f"top{k}"] += int(a)
+            cnt["int8"][f"top{k}"] += int(b)
+            changed[f"top{k}"] += int(a != b)
+        overlaps.append(len(tops["fp32"] & tops["int8"]) / 10)
+    return {"n": len(overlaps), **cnt, "changed": changed,
+            "top10OverlapMean": float(np.mean(overlaps)) if overlaps else 0.0,
+            "maxAbsSimDiff": float(np.abs(np.asarray(S8, np.float64) - np.asarray(S32, np.float64)).max()) if np.size(S32) else 0.0,
+            "note": "chi tinh truy van co ma dung thay duoc tren hang sau khi an; maxAbsSimDiff tren moi o (hang day du)"}
+
+
+def cmd_int8(a):
+    """Tu bo fp32 <vec>/<model>-<pre>/<muc> (index.npy chuan L2 + qvec.npy + sims.npy + meta.json) tao
+    <vec>/<model>-<pre>/<muc>-int8: index-int8.npy, scale-f16.npy, sims.npy (hang DAY DU, an theo hang do lens-chay ap),
+    codes.json, queries.json, meta.json (ghi CUOI). Thieu file / qvec khong khop sims / thieu truth -> thoat ma 3."""
+    src = os.path.join(a.vec, f"{a.model}-{a.pre}", a.muc)
+    dst = src + "-int8"
+    if not os.path.abspath(dst).upper().startswith("D:"):
+        sys.exit("Chi ghi vao o D.")
+
+    def fail(msg):
+        print(f"int8: {msg}", file=sys.stderr)
+        sys.exit(3)
+
+    need = ["meta.json", "index.npy", "qvec.npy", "sims.npy", "codes.json", "queries.json"]
+    miss = [f for f in need if not os.path.exists(os.path.join(src, f))]
+    if miss:
+        fail(f"bo fp32 {src} thieu {miss}")
+    with open(os.path.join(src, "meta.json"), encoding="utf-8") as f:
+        meta = json.load(f)
+    if meta.get("model") != a.model or meta.get("pre") != a.pre or meta.get("level") != a.muc:
+        fail("meta bo fp32 khac --model / --pre / --muc")
+    if not (isinstance(meta.get("threadCheck"), dict) and meta["threadCheck"].get("pass") is True):
+        fail("bo fp32 chua dat kiem nhieu luong")
+    with open(os.path.join(src, "codes.json"), encoding="utf-8") as f:
+        codes = json.load(f)
+    with open(os.path.join(src, "queries.json"), encoding="utf-8") as f:
+        qids = json.load(f)
+    X = np.load(os.path.join(src, "index.npy"))
+    Q = np.load(os.path.join(src, "qvec.npy"))
+    S32 = np.load(os.path.join(src, "sims.npy"))
+    if X.shape != (len(codes), meta.get("dims")) or Q.shape != (len(qids), X.shape[1]) or S32.shape != (len(qids), len(codes)):
+        fail(f"co mang lech: index {X.shape}, qvec {Q.shape}, sims {S32.shape}, codes {len(codes)}, queries {len(qids)}")
+    if np.size(S32) and float(np.abs((Q @ X.T).astype(np.float32) - S32).max()) > QVEC_SIMS_TOL:
+        fail("qvec.npy . index.npy khong trung sims.npy (khong phai vector truy van cua bo nay)")
+    vao = meta.get("vaoFile")
+    if not vao or not os.path.exists(vao) or file_sha256(vao) != meta.get("vaoSha256"):
+        fail("file vao (vaoFile) khong co / sha256 khac meta.vaoSha256")
+    with open(vao, encoding="utf-8") as f:
+        truth = json.load(f).get("truth")
+    if not isinstance(truth, dict):
+        fail("file vao khong co 'truth' (chay lai lens-tai.mjs --vao-vec)")
+    fp32_sha = file_sha256(os.path.join(src, "index.npy"))
+    q, c = quantize_int8(X)
+    S8 = int8_sims(Q, q, c)
+    loss = int8_loss(S32, S8, codes, qids, truth, meta.get("hideByRow"))
+    os.makedirs(dst, exist_ok=True)
+    mp = os.path.join(dst, "meta.json")
+    if os.path.exists(mp):
+        os.remove(mp)
+    atomic_npy(os.path.join(dst, "index-int8.npy"), q)
+    atomic_npy(os.path.join(dst, "scale-f16.npy"), c)
+    atomic_npy(os.path.join(dst, "sims.npy"), S8)
+    atomic_json(os.path.join(dst, "codes.json"), list(codes))
+    atomic_json(os.path.join(dst, "queries.json"), list(qids))
+    n, d = int(q.shape[0]), int(q.shape[1])
+    meta8 = {
+        **meta, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "quant": INT8_QUANT,
+        "quantNote": "q = clip(rint(v*127/max|v|), -127, 127) int8; c = float16(1/||q||); sims = (truy van fp32 . q) * float32(c), float32",
+        "fp32Dir": os.path.abspath(src), "fp32Sha256": fp32_sha,
+        "fp32Meta": {k: meta.get(k) for k in ("at", "vecPySha256", "gitHead", "gitDirty")},
+        "indexBytes": n * (d + 2) + n * 14, "int8Loss": loss,
+        "simsNote": "hang DAY DU (int8); an theo hang (hideByRow) ap o lens-do.mjs simsFrom",
+        **provenance(),
+    }
+    atomic_json(mp, meta8, indent=1)
+    print(f"int8 {a.model}-{a.pre} muc {a.muc}: {n} x {d}, indexBytes {meta8['indexBytes']}, int8Loss n {loss['n']} "
+          f"fp32 {loss['fp32']} int8 {loss['int8']} doi {loss['changed']} chung top10 {loss['top10OverlapMean']:.4f} "
+          f"|dsim| max {loss['maxAbsSimDiff']:.6f}. Ghi {dst}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["kiem", "gio", "vec", "gio1600"])
+    ap.add_argument("cmd", choices=["kiem", "gio", "vec", "gio1600", "int8"])
+    ap.add_argument("--muc", default="b", choices=["a", "b"], help="int8: muc cua bo fp32 nguon")
     ap.add_argument("--model-dir", default=r"D:\tmp\lens\model")
     ap.add_argument("--ref", default=r"D:\tmp\lens\ref")
     ap.add_argument("--anh", default=r"D:\tmp\lens\anh")
@@ -688,13 +843,13 @@ def main():
     if a.out is None:
         a.out = {"kiem": r"D:\tmp\lens\ket-qua\kiem-tien-xu-ly.json", "gio1600": r"D:\tmp\lens\gio-1600.json"}.get(
             a.cmd, r"D:\tmp\lens\ket-qua\gio-ram.json")
-    if a.cmd == "vec" and not a.model:
-        ap.error("vec can --model")
+    if a.cmd in ("vec", "int8") and not a.model:
+        ap.error(f"{a.cmd} can --model")
     if a.cmd == "gio1600" and a.chi and a.chi not in R6_MODELS:
         ap.error(f"gio1600 chi do {R6_MODELS}")
     if a.cmd in ("gio", "gio1600") and not os.path.abspath(a.out).upper().startswith("D:"):
         sys.exit("Chi ghi vao o D.")
-    {"kiem": cmd_kiem, "gio": cmd_gio, "vec": cmd_vec, "gio1600": cmd_gio1600}[a.cmd](a)
+    {"kiem": cmd_kiem, "gio": cmd_gio, "vec": cmd_vec, "gio1600": cmd_gio1600, "int8": cmd_int8}[a.cmd](a)
 
 
 if __name__ == "__main__":

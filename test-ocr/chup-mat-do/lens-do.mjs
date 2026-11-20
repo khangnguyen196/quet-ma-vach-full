@@ -224,7 +224,7 @@ export const PREV_RULE_SHA256 = "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e
 /** Khối luật GỐC (trước LỆCH LUẬT 1): commit 81d04e5 (2026-11-20 22:44:37 +0700), sha256 dưới đây; test kiểm bằng git show. */
 export const OLD_RULE_SHA = "81d04e5";
 export const OLD_RULE_SHA256 = "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a";
-export const MODES = Object.freeze({ "--chi-nen": "nen", "--chon-model": "chon-model", "--cong": "cong", "--do": "do" });
+export const MODES = Object.freeze({ "--chi-nen": "nen", "--chon-model": "chon-model", "--cong": "cong", "--cong-chi-bao": "cong-chi-bao", "--do": "do" });
 
 /** Tự kiểm (thuần): now = khối luật hiện tại, old = khối ở commit luật (RULE_SHA null → không so), dirty. */
 export function selfCheck({ now, old, dirty }, { ruleSha = RULE_SHA, ruleSha256 = RULE_SHA256 } = {}) {
@@ -762,9 +762,14 @@ export const R6_JPEG_QUALITY = 0.9;
  * (cỡ mức (b)), sha256 file ONNX thật sự đã đo (models[variant].onnxSha256) trùng bản ghim trong file và trùng
  * onnxSha256 truyền vào (sha256 trong meta.json của bộ sim; bỏ trống = không so). Trả { p95, median, max, n, ramAddMiB,
  * peakMiB, at, vecPySha256, gitHead, nSearch, onnxSha256 }.
+ * Vòng 3 (theo review sau cổng): opts.requireOnnx (lens-chay luôn bật, gợi ý 1) → onnxSha256 PHẢI là chuỗi 64 hex,
+ * undefined / sai dạng → ném (trước đây bỏ qua so sánh lặng lẽ); opts.vecPySha256 (sha lens-vec.py đang chạy, --do truyền)
+ * → file giờ phải đo bằng đúng bản đó; opts.requireClean → file giờ phải có gitDirty === false (NÊN SỬA 3).
  */
-export function r6From(gio, variant, pre, onnxSha256 = null) {
+export function r6From(gio, variant, pre, onnxSha256 = null, { requireOnnx = false, vecPySha256 = null, requireClean = false } = {}) {
   const g = gio || {};
+  if (requireOnnx && !HEX64.test(onnxSha256 ?? "")) throw new Error(`lens: sha256 ONNX của bộ sim (${onnxSha256}) không phải chuỗi 64 hex`);
+  if (vecPySha256 != null && !HEX64.test(vecPySha256)) throw new Error(`lens: sha256 lens-vec.py hiện tại (${vecPySha256}) không phải chuỗi 64 hex`);
   if (g.longEdge !== R6_LONG_EDGE || g.jpegQuality !== R6_JPEG_QUALITY || g.threads !== 1) throw new Error(`lens: file giờ không phải số đo ${R6_LONG_EDGE} px JPEG ${R6_JPEG_QUALITY} 1 luồng`);
   if (typeof g.at !== "string" || !g.at || !/^[0-9a-f]{64}$/.test(g.vecPySha256 ?? "")) throw new Error("lens: file giờ thiếu chứng cứ (at / vecPySha256): đo lại bằng lens-vec.py gio1600");
   if (!(Number.isInteger(g.nSearch) && g.nSearch >= R6_N_SEARCH)) throw new Error(`lens: file giờ đo trên ma trận tìm ${g.nSearch} hàng < ${R6_N_SEARCH} (mức (b))`);
@@ -774,7 +779,95 @@ export function r6From(gio, variant, pre, onnxSha256 = null) {
   if (!Number.isFinite(m.ramAddAfter20MiB)) throw new Error(`lens: thiếu RAM thêm (1.600 px) của ${variant}`);
   if (!/^[0-9a-f]{64}$/.test(m.onnxSha256 ?? "") || m.onnxSha256 !== m.sha256) throw new Error(`lens: sha256 ONNX đã đo của ${variant} (${m.onnxSha256}) khác bản ghim ${m.sha256}`);
   if (onnxSha256 != null && m.onnxSha256 !== onnxSha256) throw new Error(`lens: sha256 ONNX đo giờ của ${variant} (${m.onnxSha256}) khác meta bộ sim ${onnxSha256}`);
+  if (vecPySha256 != null && g.vecPySha256 !== vecPySha256) throw new Error(`lens: file giờ đo bằng lens-vec.py ${g.vecPySha256} khác lens-vec.py hiện tại ${vecPySha256}: đo lại gio1600`);
+  if (requireClean && g.gitDirty !== false) throw new Error(`lens: file giờ đo khi worktree không chắc sạch (gitDirty ${g.gitDirty}): đo lại gio1600 trên worktree sạch`);
   return { p95: t.p95, median: t.median, max: t.max, n: t.n, ramAddMiB: m.ramAddAfter20MiB, peakMiB: m.peakWsMiB ?? null, at: g.at, vecPySha256: g.vecPySha256, gitHead: g.gitHead ?? null, nSearch: g.nSearch, onnxSha256: m.onnxSha256 };
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/**
+ * Chứng cứ bản code của một bộ vector (NÊN SỬA 3 của code-reviewer sau cổng): meta.vecPySha256 === sha256 lens-vec.py
+ * đang chạy (vecPySha256) VÀ meta.gitDirty === false. Chỉ áp cho bộ (b) và bộ int8 (--do); bộ (a) đã chốt không áp.
+ * vecPySha256 sai dạng → ném. Trả mảng lỗi (rỗng = đạt).
+ */
+export function vecMetaErrors(meta, { vecPySha256, what }) {
+  if (!HEX64.test(vecPySha256 ?? "")) throw new Error(`lens: sha256 lens-vec.py hiện tại (${vecPySha256}) không phải chuỗi 64 hex`);
+  const m = meta || {};
+  const errs = [];
+  if (!HEX64.test(m.vecPySha256 ?? "")) errs.push(`bộ ${what}: meta.vecPySha256 thiếu / sai dạng (${m.vecPySha256}): dựng lại bằng lens-vec.py hiện tại`);
+  else if (m.vecPySha256 !== vecPySha256) errs.push(`bộ ${what}: meta.vecPySha256 ${m.vecPySha256} khác lens-vec.py hiện tại ${vecPySha256}`);
+  if (m.gitDirty !== false) errs.push(`bộ ${what}: meta.gitDirty ${m.gitDirty} (phải false: dựng trên worktree sạch)`);
+  return errs;
+}
+
+/** Cách lượng tử của chỉ mục sẽ đóng gói (khối luật: "vector int8 đối xứng theo từng vector, thang float16"; cài ở vòng 3). */
+export const INT8_QUANT = "int8-sym-perVector-scaleF16-invNorm";
+/** Khóa bắt buộc của meta.int8Loss (lens-vec.py int8). */
+export const INT8_LOSS_KEYS = Object.freeze(["n", "fp32", "int8", "changed", "top10OverlapMean", "maxAbsSimDiff"]);
+
+/**
+ * Kiểm meta bộ int8 (A4): quant đúng chuỗi, indexBytes === indexBytesInt8(nIndex, dims), int8Loss đủ khóa và số hữu hạn,
+ * fp32Sha256 === sha256 index.npy của bộ (b) (fp32Sha256 truyền vào, tính trên file thật). Trả mảng lỗi.
+ */
+export function int8MetaErrors(meta, { fp32Sha256 }) {
+  const m = meta || {};
+  const errs = [];
+  if (m.quant !== INT8_QUANT) errs.push(`int8: meta.quant ${m.quant} ≠ ${INT8_QUANT}`);
+  if (!Number.isInteger(m.nIndex) || !Number.isInteger(m.dims) || m.nIndex <= 0 || m.dims <= 0) errs.push(`int8: meta.nIndex / dims sai (${m.nIndex} / ${m.dims})`);
+  else if (!Number.isInteger(m.indexBytes)) errs.push(`int8: thiếu meta.indexBytes (${m.indexBytes})`);
+  else if (m.indexBytes !== indexBytesInt8(m.nIndex, m.dims)) errs.push(`int8: meta.indexBytes ${m.indexBytes} ≠ indexBytesInt8(${m.nIndex}, ${m.dims}) = ${indexBytesInt8(m.nIndex, m.dims)}`);
+  const L = m.int8Loss;
+  const fin = (x) => Number.isFinite(x);
+  const tri = (o) => o && typeof o === "object" && ["top1", "top5", "top10"].every((k) => Number.isInteger(o[k]));
+  if (!L || typeof L !== "object") errs.push("int8: thiếu meta.int8Loss");
+  else {
+    const miss = INT8_LOSS_KEYS.filter((k) => !Object.hasOwn(L, k) || L[k] == null);
+    if (miss.length) errs.push(`int8: meta.int8Loss thiếu ${miss.join(" ")}`);
+    else if (!Number.isInteger(L.n) || !tri(L.fp32) || !tri(L.int8) || !tri(L.changed) || !fin(L.top10OverlapMean) || !fin(L.maxAbsSimDiff)) errs.push("int8: meta.int8Loss có số sai dạng / không hữu hạn");
+  }
+  if (!HEX64.test(fp32Sha256 ?? "")) errs.push(`int8: không có sha256 index.npy của bộ fp32 (${fp32Sha256})`);
+  else if (m.fp32Sha256 !== fp32Sha256) errs.push(`int8: meta.fp32Sha256 ${m.fp32Sha256} ≠ sha256 index.npy của bộ fp32 ${fp32Sha256}`);
+  return errs;
+}
+
+/**
+ * Kiểm đầu vào của --do (A1 + A4, chạy TRƯỚC τ / μ và mọi phán): bộ (b) fp32 và bộ int8 cùng đúng bản lens-vec.py hiện
+ * tại + worktree sạch (vecMetaErrors), bộ int8 đủ khóa (int8MetaErrors), int8 dựng từ đúng bộ (b) (model / pre / level /
+ * sha256 ONNX / vaoSha256 / nIndex / dims trùng). Trả { exitCode (0 | 3), errs }.
+ */
+export function doInputCheck({ bMeta, int8Meta, fp32Sha256, vecPySha256 }) {
+  const errs = [...vecMetaErrors(bMeta, { vecPySha256, what: "(b) fp32" }), ...vecMetaErrors(int8Meta, { vecPySha256, what: "int8" }), ...int8MetaErrors(int8Meta, { fp32Sha256 })];
+  for (const k of ["model", "pre", "level", "sha256", "vaoSha256", "nIndex", "dims"]) if ((int8Meta || {})[k] !== (bMeta || {})[k]) errs.push(`int8: meta.${k} ${(int8Meta || {})[k]} ≠ bộ fp32 ${(bMeta || {})[k]}`);
+  if ((bMeta || {}).level !== "b") errs.push(`bộ fp32: meta.level ${(bMeta || {}).level} ≠ b`);
+  return { exitCode: errs.length ? 3 : 0, errs };
+}
+
+/** 5 ảnh thật của G1 có mã đúng trong chỉ mục (a) (cong.json: #11, #16 không có trong (a)); chỉ dùng cho --cong-chi-bao. */
+export const G1_IMGS = Object.freeze([2, 4, 5, 10, 15]);
+
+/**
+ * Chỉ báo cổng (A5, NÊN SỬA 2 (e)): row = rowView (hàng SAU KHI ẨN), code = mã đúng. Trả { rank, sim, sim5, sim6, ties
+ * (số mã KHÁC có sim bằng đúng sim mã đúng), rankMin / rankMax (khoảng hạng của mã đúng nếu xếp hòa theo mọi thứ tự),
+ * tieCrosses5 (rankMin ≤ 5 < rankMax), note }. Mã không có trên hàng → rank null.
+ */
+export function tieInfo(row, code) {
+  const ranked = row?.ranked || [];
+  const simOf = row?.simOf || new Map();
+  const at = (k) => (ranked.length >= k ? simOf.get(ranked[k - 1]) : null);
+  const base = { sim5: at(5), sim6: at(6) };
+  if (!simOf.has(code)) return { rank: null, sim: null, ...base, ties: null, rankMin: null, rankMax: null, tieCrosses5: false, note: "mã đúng không có trên hàng (không có trong chỉ mục / bị ẩn)" };
+  const s = simOf.get(code);
+  let gt = 0;
+  let eq = 0;
+  for (const v of simOf.values()) { if (v > s) gt++; else if (v === s) eq++; }
+  const rankMin = gt + 1;
+  const rankMax = gt + eq;
+  const tieCrosses5 = rankMin <= 5 && rankMax > 5;
+  return {
+    rank: ranked.indexOf(code) + 1, sim: s, ...base, ties: eq - 1, rankMin, rankMax, tieCrosses5,
+    note: tieCrosses5 ? "cổng phụ thuộc thứ tự hòa (luật cho phép: hòa theo codes.json)" : null,
+  };
 }
 /** Số hàng tối thiểu của ma trận tìm khi đo R6 (số sản phẩm có ảnh ở mức (b), planList của lens-tai.mjs). */
 export const R6_N_SEARCH = 42208;

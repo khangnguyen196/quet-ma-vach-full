@@ -303,3 +303,31 @@ test("bộ P tải ảnh theo imgid CHỈ ghi vào D:\\tmp\\lens (gợi ý 4); �
   assert.match(bo, /const pDir = path\.join\(lensDir, "anh-p"\)/);
   assert.doesNotMatch(bo, /writeFileSync\(path\.join\(looAnh/, "không ghi vào thư mục chup-mat-do");
 });
+
+test("A3 (gợi ý 2): catalogImgMap đứng TRÊN chú thích JSDoc của buildVecInput (chú thích liền ngay trước hàm)", async () => {
+  const src = (await import("node:fs")).readFileSync(new URL("../lens-tai.mjs", import.meta.url), "utf8");
+  const iMap = src.indexOf("export function catalogImgMap(");
+  const iBuild = src.indexOf("export function buildVecInput(");
+  const doc = src.lastIndexOf("/**", iBuild);
+  assert.ok(iMap > 0 && iMap < doc, "catalogImgMap trước chú thích của buildVecInput");
+  assert.match(src.slice(doc, iBuild), /^\/\*\*\n \* Danh sách đầu vào cho lens-vec\.py[\s\S]*\*\/\n$/, "giữa chú thích và hàm không có gì khác");
+});
+
+test("queryTruth (A4 int8Loss): qid → mã đúng từ ca.json (A / B, ảnh thật có nhãn mã, buldak, ruaypuan) + bộ P mức (a); mâu thuẫn → ném", async () => {
+  const { queryTruth } = await import("../lens-tai.mjs");
+  const ca = { cases: [
+    { key: "B|1111111111111|anh", set: "B", qid: "ab-1111111111111", label: null },
+    { key: "A|1111111111111|anh", set: "A", qid: "ab-1111111111111", label: null },
+    { key: "that|2222222222222|that-1", set: "that", qid: "that-1", label: "ma" },
+    { key: "that|that-2|that-2", set: "that", qid: "that-2", label: "null" },
+    { key: "that|that-3|that-3", set: "that", qid: "that-3", label: "none" },
+    { key: "buldak|3333333333333|man-hinh", set: "buldak", qid: "buldak", label: null },
+    { key: "7up|4444444444444|may", set: "7up", qid: null, label: null },
+  ] };
+  const bop = { items: [{ qid: "p-5555555555555", code: "5555555555555" }] };
+  assert.deepEqual(queryTruth(ca, bop, "b"), { "ab-1111111111111": "1111111111111", "that-1": "2222222222222", buldak: "3333333333333" });
+  assert.deepEqual(queryTruth(ca, bop, "a")["p-5555555555555"], "5555555555555");
+  assert.throws(() => queryTruth({ cases: [...ca.cases, { key: "A|9999999999999|anh", set: "A", qid: "ab-1111111111111" }] }, bop, "b"), /mâu thuẫn/);
+  const src = (await import("node:fs")).readFileSync(new URL("../lens-tai.mjs", import.meta.url), "utf8");
+  assert.match(src.slice(src.indexOf("function runVecInput(")), /truth: queryTruth\(ca, bop, level\)/, "--vao-vec ghi truth cho lệnh int8");
+});

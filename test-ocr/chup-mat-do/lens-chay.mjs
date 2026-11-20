@@ -9,7 +9,7 @@ import {
   selfCheck, modeOf, methodGrid, serverTier, isUnsureU, appTier, cellOf, judgeR, targetsM, pickMethod, pickModel, earlyGate,
   percentiles, loadSims, qidOf, indexBytesInt8, guardWant, checkIndexGuard, RULE_SHA, RULE_FILE, RULE_SHA256, METHOD_COUNT,
   SERVER_K, FOUND_K, CONDS, FOLDERS, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, GOOD_IMGS, WRONG_IMGS,
-  R6_P95_MS, variantPlan, r6From, rowCheck, NO_VEC_VARIANTS,
+  R6_P95_MS, variantPlan, r6From, rowCheck, NO_VEC_VARIANTS, doInputCheck, tieInfo, G1_IMGS,
 } from "./lens-do.mjs";
 
 /** File code của khung đo: sha256 của từng file ghi vào MỌI file kết quả (gợi ý 1 của code-reviewer vòng 1). */
@@ -35,7 +35,7 @@ export async function runMain(argv, selfUrl) {
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
   const mode = modeOf(argv);
   if (!mode) {
-    console.error("Cần đúng một cờ: --chi-nen, --chon-model, --cong hoặc --do.");
+    console.error("Cần đúng một cờ: --chi-nen, --chon-model, --cong, --cong-chi-bao hoặc --do.");
     process.exit(2);
   }
   const outDir = arg("--out", "D:\\tmp\\lens\\ket-qua");
@@ -301,8 +301,9 @@ export async function runMain(argv, selfUrl) {
   /** R6 1.600 px (LỆCH LUẬT 2 (ii), NÊN SỬA 5): file đo P4; thiếu file / số → dừng mã 3. */
   const gio1600 = gio1600Text === null ? null : JSON.parse(gio1600Text);
   /** onnxSha256 = sha256 ONNX trong meta.json của bộ sim đang dùng (phải trùng sha ONNX đã đo giờ). */
-  const r6Of = (variant, pre, onnxSha256) => {
-    try { return r6From(gio1600, variant, pre, onnxSha256); } catch (e) { return stop(`THIẾU SỐ R6 1.600 px (${gio1600File})`, [String(e.message)]); }
+  /** opts: requireOnnx (luôn bật từ lens-chay, gợi ý 1 sau cổng), vecPySha256 + requireClean (chỉ --do, NÊN SỬA 3). */
+  const r6Of = (variant, pre, onnxSha256, opts) => {
+    try { return r6From(gio1600, variant, pre, onnxSha256, opts); } catch (e) { return stop(`THIẾU SỐ R6 1.600 px (${gio1600File})`, [String(e.message)]); }
   };
 
   if (mode === "chon-model") {
@@ -321,7 +322,7 @@ export async function runMain(argv, selfUrl) {
       const P = pOf(sims);
       const pTop5 = P.filter((x) => x.pos != null).length;
       const m = sims.meta;
-      const r6 = r6Of(vd.variant, vd.pre, m.sha256);
+      const r6 = r6Of(vd.variant, vd.pre, m.sha256, { requireOnnx: true });
       vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: r6.p95, r6, ramMiB: r6.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), realTop5, realCh: realCh.length, realImgs: realCh.map((c) => c.img), pTop5, pN: P.length });
     }
     const pick0 = pickModel(vs);
@@ -350,14 +351,49 @@ export async function runMain(argv, selfUrl) {
     console.log(`Cổng dừng sớm (${cm.pick.name}, mức a): G3 ${g3s}, G1 ${g.G1} (${g.detail.g1n}/${g.detail.wrongInIndex} ảnh sai có mã trong chỉ mục), G2 ${g.G2} (${g.detail.g2n}/6 dưới ${g.detail.minGood}${g.detail.g2Why ? `; ${g.detail.g2Why}` : ""}) → ${g.pass ? "ĐI TIẾP (b)" : "DỪNG, không tải (b)"}`);
   }
 
+  if (mode === "cong-chi-bao") {
+    // CHỈ BÁO (A5, NÊN SỬA 2 (e) của code-reviewer sau cổng): hạng / sim / hòa của mã đúng trên hàng bộ P và 5 ảnh G1, mức
+    // (a), biến thể đã chọn. KHÔNG gọi earlyGate, KHÔNG ghi / sửa cong.json; kết luận cổng giữ nguyên.
+    const cm = JSON.parse(fs.readFileSync(path.join(outDir, "chon-model.json"), "utf8"));
+    if (cm.ruleSha256 !== RULE_SHA256 || !cm.pick?.name) { console.error("chon-model.json khác RULE_SHA256 hoặc chưa chọn biến thể."); process.exit(3); }
+    const [vname, pre] = cm.pick.name.split("|");
+    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, "a"), { model: vname, pre, level: "a" });
+    needRows(sims, { withP: true, withAb: true });
+    const byImg = new Map(real.map((c) => [c.img, c]));
+    const rowsP = bop.items.map((x) => ({ id: x.qid, kind: "P", ...tieInfo(sims.rowOf(x.qid), x.code) }));
+    const rowsG1 = G1_IMGS.map((n) => { const c = byImg.get(n); return { id: `#${n}`, kind: "G1", ...tieInfo(sims.rowOf(c.qid), c.code) }; });
+    const all = [...rowsP, ...rowsG1];
+    const tieNotes = all.filter((x) => x.tieCrosses5).map((x) => x.id);
+    Object.assign(out, {
+      variant: cm.pick.name, level: "a", note: "chỉ báo; không gọi earlyGate, không đổi kết luận cổng (cong.json giữ nguyên)", p: rowsP, g1: rowsG1,
+      tieCrosses5: tieNotes, tieNote: tieNotes.length ? "cổng phụ thuộc thứ tự hòa (luật cho phép: hòa theo codes.json)" : null,
+    });
+    const f = (x) => (x == null ? "–" : x.toFixed(4));
+    for (const x of all) console.log(`${x.kind} ${x.id.startsWith("p-") ? `P${rowsP.indexOf(x) + 1}` : x.id}: hạng ${x.rank ?? "–"} sim ${f(x.sim)} | hạng 5 ${f(x.sim5)} hạng 6 ${f(x.sim6)} | hòa ${x.ties ?? "–"} khoảng hạng [${x.rankMin ?? "–"}, ${x.rankMax ?? "–"}]${x.note && x.tieCrosses5 ? ` ${x.note}` : ""}`);
+    console.log(`Hàng có khoảng hạng vượt mốc 5: ${tieNotes.length ? tieNotes.length : "không"}.`);
+  }
+
   if (mode === "do") {
     const level = arg("--muc", "b");
     const cm = JSON.parse(fs.readFileSync(path.join(outDir, "chon-model.json"), "utf8"));
     const cg = JSON.parse(fs.readFileSync(path.join(outDir, "cong.json"), "utf8"));
     if (cm.ruleSha256 !== RULE_SHA256 || cg.ruleSha256 !== RULE_SHA256 || !cg.gate?.pass) { console.error("Chưa qua cổng dừng sớm / khác RULE_SHA256: không đo."); process.exit(3); }
     const [vname, pre] = cm.pick.name.split("|");
+    // A1 + A4 (vòng 3): bộ (b) fp32 và bộ int8 phải dựng bằng đúng lens-vec.py hiện tại trên worktree sạch; bộ int8 đủ khóa
+    const vecPySha = codeSha256s()["lens-vec.py"];
+    const bDir = path.join(vecDir, `${vname}-${pre}`, level);
+    let bMeta = null;
+    let fp32Sha256 = null;
+    try {
+      bMeta = JSON.parse(fs.readFileSync(path.join(bDir, "meta.json"), "utf8"));
+      fp32Sha256 = crypto.createHash("sha256").update(fs.readFileSync(path.join(bDir, "index.npy"))).digest("hex");
+      const bErrs = checkIndexGuard(bMeta, JSON.parse(fs.readFileSync(path.join(bDir, "codes.json"), "utf8")), wantOf(level), { model: vname, pre, level });
+      if (bErrs.length) stop(`BỘ (b) fp32 CHƯA ÁP ĐÚNG CHỐNG ĂN GIAN (${bDir})`, bErrs, { indexDir: bDir });
+    } catch (e) { stop(`KHÔNG ĐỌC ĐƯỢC BỘ (b) fp32 (${bDir})`, [String(e.message)]); }
     const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`), { model: vname, pre, level });
     const meta = sims.meta;
+    const dc = doInputCheck({ bMeta, int8Meta: sims.meta, fp32Sha256, vecPySha256: vecPySha });
+    if (dc.exitCode) stop("BỘ VECTOR (b) / int8 KHÔNG ĐÚNG BẢN CODE HOẶC THIẾU KHÓA", dc.errs);
     // NÊN SỬA 3: mọi ca có ảnh có hàng, đủ 60 ô A / B có lens (sau khi ẩn); không .filter(Boolean) làm mất ô lặng lẽ
     const { tops } = needRows(sims, { withP: false, withAb: true });
     const taus = percentiles(tops.map((l) => l.top1));
@@ -416,8 +452,9 @@ export async function runMain(argv, selfUrl) {
       const res = evalCells({ s, a: { id: "A0" }, u: { id: "U0" } });
       r5yBy.set(s, verdictOf(res, { r5x: true, r5y: { pass: true }, r6: { p95: 0, ramMiB: 0 }, r7: { bytes: 0 } }));
     }
-    const r6s = r6Of(vname, pre, meta.sha256); // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px
-    const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + (meta.indexBytes ?? Infinity) / 1048576 };
+    // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px; vòng 3: file giờ phải đo bằng lens-vec.py hiện tại, worktree sạch
+    const r6s = r6Of(vname, pre, meta.sha256, { requireOnnx: true, vecPySha256: vecPySha, requireClean: true });
+    const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + meta.indexBytes / 1048576 };
     const r7 = { bytes: meta.indexBytes };
     const methods = [];
     for (const g of grid) {
@@ -434,7 +471,7 @@ export async function runMain(argv, selfUrl) {
       variant: cm.pick.name, level, taus, mus, methodCount: grid.length, r6, r7, baseTarget: { M1: baseT.M1, M2: baseT.M2, M3: baseT.M3 }, pick,
       passCount: methods.filter((x) => x.verdict.pass).length,
       methods: methods.map((x) => ({ name: x.name, pass: x.verdict.pass, gates: x.verdict.gates, M: [x.t.M1, x.t.M2, x.t.M3], holdOk: x.t.holdOk, refOnly: x.t.refOnly })),
-      int8Loss: meta.int8Loss ?? null,
+      int8Loss: meta.int8Loss, bVecPySha256: bMeta.vecPySha256, int8VecPySha256: meta.vecPySha256, fp32Sha256,
     });
     console.log(`τ ${JSON.stringify(taus)} μ ${JSON.stringify(mus)}; ${grid.length} cách; qua R1–R7 ${out.passCount}; nền M ${JSON.stringify(out.baseTarget)}; R6 ${JSON.stringify(r6)} (p95 ≤ ${R6_P95_MS}); R7 ${r7.bytes} B`);
     console.log(`== Kết luận: ${pick.name ? `CHỌN ${pick.name}` : "KHÔNG CÁCH NÀO ĐẠT"}; chỉ để tham khảo: ${JSON.stringify(pick.refOnly.slice(0, 10))}`);

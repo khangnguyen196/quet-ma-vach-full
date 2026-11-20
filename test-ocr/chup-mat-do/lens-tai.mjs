@@ -333,14 +333,6 @@ export function decidePIndex({ queryImgid, catalogKey, catalogImgid, catalogDist
 }
 
 /**
- * Danh sách đầu vào cho lens-vec.py (lệnh vec) — ẢNH CHỈ MỤC CHỌN TƯỜNG MINH, không quét thư mục. level = "a" | "b";
- * rows = dòng danh mục của mức đó; fileOf(code, key) → đường dẫn ảnh hoặc null; ac / bop = chong-an-gian.json /
- * bo-p.json đã đọc; queries = [{ qid, file }]. LỆCH LUẬT 2: mã bị loại VẪN vào chỉ mục với khóa ảnh danh mục và bị ẩn
- * trên hàng ab-<mã> (hideByRow); override A / B mọi mức, override + truy vấn bộ P CHỈ ở mức (a). Mã có ảnh truy vấn
- * (mọi mã A / B, bộ P ở mức a) ghi imgid ảnh chỉ mục khi biết (meta.indexImgid). Trả { index: [{ code, key, file }],
- * indexKey, indexImgid, override, hideByRow, missing: [{ code, key }], queries }.
- */
-/**
  * Khóa ảnh danh mục theo mã, CÙNG LUẬT với buildVecInput (gợi ý 3 của code-reviewer trước đo lần 2): bỏ dòng mã sai dạng,
  * mã trùng thì giữ dòng ĐẦU (new Map(rows.map(...)) sẽ giữ dòng cuối). Trả Map mã → img (có thể không hợp lệ; người dùng
  * tự kiểm dạng khóa).
@@ -354,6 +346,35 @@ export function catalogImgMap(rows) {
   return m;
 }
 
+/**
+ * Mã đúng của từng truy vấn ảnh (cho int8Loss của lens-vec.py int8, vòng 3): từ ca.json (khóa ca `set|mã|kind`; ảnh thật
+ * chỉ khi nhãn "ma"; ca không có qid bỏ qua) + bộ P (chỉ mức a, như buildVecInput). Một qid hai mã khác nhau → ném.
+ * Trả { qid: mã }. File ra (vec-vao-<mức>.json) nằm ngoài git (có nhãn ảnh thật).
+ */
+export function queryTruth(ca, bop, level) {
+  const out = {};
+  const put = (qid, code) => {
+    if (!CODE_RE.test(String(code))) return;
+    if (Object.hasOwn(out, qid) && out[qid] !== code) throw new Error(`queryTruth: mâu thuẫn mã đúng cho ${qid}`);
+    out[qid] = code;
+  };
+  for (const c of ca?.cases || []) {
+    if (!c.qid) continue;
+    if (c.set === "that" && c.label !== "ma") continue;
+    put(c.qid, String(c.key).split("|")[1]);
+  }
+  if (level === "a") for (const p of bop?.items || []) put(p.qid, p.code);
+  return out;
+}
+
+/**
+ * Danh sách đầu vào cho lens-vec.py (lệnh vec) — ẢNH CHỈ MỤC CHỌN TƯỜNG MINH, không quét thư mục. level = "a" | "b";
+ * rows = dòng danh mục của mức đó; fileOf(code, key) → đường dẫn ảnh hoặc null; ac / bop = chong-an-gian.json /
+ * bo-p.json đã đọc; queries = [{ qid, file }]. LỆCH LUẬT 2: mã bị loại VẪN vào chỉ mục với khóa ảnh danh mục và bị ẩn
+ * trên hàng ab-<mã> (hideByRow); override A / B mọi mức, override + truy vấn bộ P CHỈ ở mức (a). Mã có ảnh truy vấn
+ * (mọi mã A / B, bộ P ở mức a) ghi imgid ảnh chỉ mục khi biết (meta.indexImgid). Trả { index: [{ code, key, file }],
+ * indexKey, indexImgid, override, hideByRow, missing: [{ code, key }], queries }.
+ */
 export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
   if (level !== "a" && level !== "b") throw new Error(`buildVecInput: mức lạ ${level}`);
   const P = level === "a" ? bop?.items || [] : [];
@@ -770,6 +791,7 @@ function runVecInput(arg) {
     at: new Date().toISOString(), level, antiCheatSha256: sha(acText), boPSha256: sha(bopText), excluded: ac.excluded,
     override: v.override, hideByRow: v.hideByRow,
     indexKey: v.indexKey, indexImgid: v.indexImgid, missing: v.missing, index: v.index, queries: v.queries,
+    truth: queryTruth(ca, bop, level), // mã đúng từng truy vấn, cho int8Loss (vòng 3); file ngoài git
   };
   const f = path.join(lensDir, `vec-vao-${level}.json`);
   fs.writeFileSync(f, JSON.stringify(out), "utf8");
