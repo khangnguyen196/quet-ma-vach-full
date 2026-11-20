@@ -1269,5 +1269,17 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
     - SigLIP không tính vector (R7 ước 33,1 MB > 25 MB), ghi trong dropped của --chon-model.
     - Truy vấn ảnh thật dùng ảnh gốc (xoay EXIF) để tính độ giống là có chủ ý (model thu ảnh về 224 px nên cỡ ảnh gốc gần như không đổi vector); R6 đo trên ảnh 1.600 px JPEG 0,9 như máy chủ nhận từ app (prepareImage).
     - Thử khói `D:\tmp\lens-tam\vec\dinov2-small-cat\thu` (2026-11-20 23:35, trước LỆCH LUẬT 1): chỉ 10 ảnh danh mục + 2 truy vấn giả, không có nhãn, không phải ca đo.
-    - Mốc trước đo 2 (commit "chore(lens): mốc trước đo 2", sha ghi ở commit bảng R6 ngay sau): sha256 lens-do.mjs = e3e1ab0598d0b42fc36bb94089b41fe05925e1bfae0991242dab5ddf2758c3da, lens-chay.mjs = 8782fb130a1e8f5619afaec36284b446c4fd28f9a96ef88a7bbe2711ecfe259a, lens-vec.py = 446d4386871aae3d080c9fe52c94f22962a7cd1ec9776a1ffd226167c9f88fca (thay mốc 9933ef4). Sau mốc này, sửa hàm phán / chọn / cổng = ghi LỆCH LUẬT ở đây và báo.
+    - Mốc trước đo 2 fa65c98 (2026-11-21 00:13:27 +0700): sha256 lens-do.mjs = e3e1ab0598d0b42fc36bb94089b41fe05925e1bfae0991242dab5ddf2758c3da, lens-chay.mjs = 8782fb130a1e8f5619afaec36284b446c4fd28f9a96ef88a7bbe2711ecfe259a, lens-vec.py = 446d4386871aae3d080c9fe52c94f22962a7cd1ec9776a1ffd226167c9f88fca (thay mốc 9933ef4). Sau mốc này, sửa hàm phán / chọn / cổng = ghi LỆCH LUẬT ở đây và báo.
+    - R6 ở ảnh 1.600 px (sau mốc 2, `lens-vec.py gio1600` → `D:\tmp\lens\gio-1600.json`, 2026-11-21 00:13–00:14, máy rảnh: tải CPU 7 % trước khi chạy, không chạy gì song song): 20 / 22 ảnh thật (chọn ngẫu nhiên seed 20261120; CHỈ để đo giờ, không tính / ghi vector, không so chỉ mục), mỗi ảnh thu cạnh dài 1.600 px + JPEG chất lượng 90 (Pillow, trong bộ nhớ; như prepareImage của app, không tính giờ); giờ = giải mã JPEG đó + xoay EXIF + tiền xử lý + vector + tìm trên ma trận ngẫu nhiên cỡ (b) 42.208 × số chiều float32; onnxruntime 1.31.1 1 luồng, mỗi model một tiến trình; Intel Core i7-6820HQ 2,7 GHz (8 luồng logic), Windows 10. RAM = working set Windows: "thêm" = sau 20 ảnh trừ trước khi nạp model, trừ ma trận tìm; "đỉnh" = working set đỉnh của tiến trình (gồm Python + numpy + ma trận tìm 62–82 MiB + ảnh 1.600 px đang tiền xử lý). Cả 6 biến thể qua R6 (p95 ≤ 1.500 ms):
+
+      | Biến thể | Trung vị (ms) | p95 (ms) | Max (ms) | RAM thêm (MiB) | RAM đỉnh tiến trình (MiB) |
+      |---|---|---|---|---|---|
+      | CLIP fp32 · cat | 286,6 | 301,6 | 304,5 | 354,3 | 656,6 |
+      | CLIP fp32 · vien | 308,4 | 324,7 | 329,3 | 354,3 | 656,6 |
+      | CLIP int8 · cat | 252,3 | 271,4 | 274,6 | 108,2 | 409,9 |
+      | CLIP int8 · vien | 277,9 | 290,7 | 295,5 | 108,2 | 409,9 |
+      | DINOv2-small · cat | 306,8 | 326,2 | 326,9 | 109,7 | 345,2 |
+      | DINOv2-small · vien | 333,4 | 352,2 | 353,0 | 109,7 | 345,2 |
+
+      So với số 400 px của vòng 1 (ảnh danh mục, đo lúc máy đang tải ảnh nền nên chỉ so thô): trung vị chậm hơn khoảng 45–100 ms / ảnh vì giải mã + thu ảnh 1.600 px, p95 lại thấp hơn vì máy rảnh; RAM đỉnh cao hơn vì tiền xử lý (thu ảnh kiểu libvips bằng số nguyên) chạy trên ảnh 1.600 px. `--chon-model` / `--do` đọc R6 từ file này (thiếu số thì thoát mã 3).
 
