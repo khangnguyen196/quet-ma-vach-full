@@ -1153,7 +1153,7 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
     - Việc để sau (chưa đo): chỗ nghẽn CÓ THỂ ở khâu gộp serverMerge / lớp chặn (mục "Việc để sau (CHƯA ĐO)" ở trên). Câu hỏi chờ chủ dự án 20/11/2026, mặc định: không làm trong đợt này; nếu muốn → đợt riêng, luật chốt trước, 22 ảnh thật + A/B.
     - Câu hỏi chờ chủ dự án: có chụp thêm ảnh loại thư mục 2 không (đề xuất ít nhất khoảng 17–25, tới khoảng 43 nếu muốn ước tỷ lệ ±15 điểm %).
     - Đợt **xong — không đổi code app / máy chủ** (chỉ docs + khung đo test-ocr lên main).
-- [ ] **Đợt `khau-gop`** (đang làm; 20/11/2026; nhánh khau-gop từ main 36c5fd7): sửa KHÂU GỘP đường máy chủ của app (serverMerge / lớp chặn) cho Chụp mặt trước và thêm ngưỡng "chưa chắc" (không tự mở, hiện "Chưa chắc chắn" + gợi ý + 3 nút), luật chốt trước, chỉ sửa src/ nếu có cách đạt. Ảnh thật, nhãn, kết quả NGOÀI git (`D:\tmp\may-chu-loc\`, `D:\tmp\khau-gop\`); repo chỉ ghi số đếm.
+- [x] **Đợt `khau-gop`** (xong 20/11/2026 — không đổi code app / máy chủ, chỉ docs + khung đo; nhánh khau-gop từ main 36c5fd7): sửa KHÂU GỘP đường máy chủ của app (serverMerge / lớp chặn) cho Chụp mặt trước và thêm ngưỡng "chưa chắc" (không tự mở, hiện "Chưa chắc chắn" + gợi ý + 3 nút), luật chốt trước, chỉ sửa src/ nếu có cách đạt. Ảnh thật, nhãn, kết quả NGOÀI git (`D:\tmp\may-chu-loc\`, `D:\tmp\khau-gop\`); repo chỉ ghi số đếm.
   - Vòng 0 (20/11/2026): điều phối duyệt kế hoạch 3 giai đoạn; bước 4 đo trên kết quả gộp của bước 3; muối Co.op là ca âm ở bước 4 (không phải cổng); ngưỡng chỉ giữ khi nửa giữ riêng giảm ≥ 1 / 3; thời gian gộp app thay H3.
   - Vòng 1: chẩn đoán (bảng nguyên nhân × thư mục, đếm bằng máy, `D:\tmp\khau-gop\chan-doan-gop.*`), luật chốt trước commit b954513 (2026-11-20 20:14:00 +0700, sha256 khối luật 530a08ae…f8b2), khung đo `test-ocr/chup-mat-do/khau-gop-do.mjs` commit 89bb4a5 (20:22:21), bảng nền + kiểm chéo.
     - Chẩn đoán (script ngoài repo gọi đúng hàm của src: serverJoin, serverMerge, mergeFront với tùy chọn để tách từng bước lớp chặn; ứng viên máy chủ đã lưu, OFF (i) lỗi / (ii) cache, (i) = (ii) ở mọi ảnh; top 5 + món tự mở + kind ở (ii) trùng kết quả vòng 1 của may-chu-loc 22 / 22; ca khác trùng nền may-chu-loc 142 / 142 ô). Nguyên nhân × thư mục (1 / 2 / 3; cột thư mục 2 chỉ để tham khảo, n ≤ 2): đúng 8 / 0 / 0; điểm thấp (bỏ hết lớp chặn vẫn không ở vị trí 1) 5 / 1 / 0; thiếu nguồn (không có trong T1 top 5, 10 ứng viên, OFF) 0 / 1 / 0; nhãn null 0 / 1 / 0; không có dữ liệu 0 / 0 / 6.
@@ -1165,3 +1165,64 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
   - Vòng 2 (20/11/2026):
     - LỆCH LUẬT (điều phối quyết, TRƯỚC mọi số của cách / ngưỡng; chưa có số của cách / ngưỡng nào, do.json / nguong.json chưa tồn tại): sửa khối luật commit 55fc738 (2026-11-20 20:37:32 +0700), sha256 khối mới 8ef14602…2965 (luật gốc b954513, 530a08ae…f8b2). Đúng 3 chỗ: (a) dòng ghi sửa luật ở đầu khối; (b) cách được giữ mà M1 hơn nền chỉ nhờ 1 ảnh / chỉ nhờ ảnh thư mục 2 / chỉ nhờ ảnh preset là "chỉ để tham khảo": KHÔNG được chọn (vẫn ghi số, tên, lý do), không sửa src/, không làm nền bước 4; chọn trong các cách được giữ và không chỉ để tham khảo theo M1 > M2 > M3; (c) G4: nền = mergeLocal tham số nền đo ngay trước cách (mergeLocal nền = serverMerge src từng mục, kiểm chéo (0)), p95 serverMerge src chỉ báo. Lý do: luật cũ cho phép chọn cách chỉ để tham khảo rồi đo bước 4 trên một cách không vào app; G4 so mergeLocal với serverMerge src nên tính cả chi phí riêng của khung đo. Code đo theo luật mới commit 02a6a35 (20:41:48): pickStep3 bỏ cách chỉ để tham khảo, nền G4 mergeLocal, bảng mã WeakMap + a-top một serverJoin (so cũ / mới trên dữ liệu giả 4.488 lần gộp, 0 lệch), judge4 ô thư mục 3 danh sách rỗng / kind khác open = không tự mở, --do-nguong kiểm 120 giá trị A/B mỗi đặc trưng.
     - Ghi chú sửa theo reviewer vòng 1: (GỢI Ý 1) câu "2 ảnh mục đúng đi vào từ T1" ở mục chẩn đoán đã sửa. (GỢI Ý 2) kết luận "điểm thấp: bỏ hết lớp chặn vẫn không ở vị trí 1" chỉ đúng với cách chấm c-idf hiện tại, không loại trừ cách chấm khác; ảnh thư mục 2 có bị lớp chặn đẩy 2 → 5 → 7 (chỉ để tham khảo, n ≤ 2). (GỢI Ý 3) d-lock-diem lấy ý từ 1 ảnh của nửa GIỮ RIÊNG, nên nửa giữ riêng không còn "mù" với cách này. (GỢI Ý 4) lưới bước 4 (5 đặc trưng × 5 phân vị) do đề bài cố định, khung đo chỉ cài cách tính; bảng đặc trưng nền đã thấy trước khi viết luật. (GỢI Ý 8) (i) = (ii) ở mọi ảnh thật (0/22 ảnh đủ cache mọi câu OFF) nên M đếm theo ô = 2 × số ảnh. Nếu b-mw1 được chọn thì vòng sau phải đổi kiểm minWords ≥ 2 của src.
+    - Đo (mỗi lệnh đúng một lần, worktree sạch ở e1e2496, sau commit luật 55fc738 và code đo 02a6a35): `--do-cach` chạy 20:42:28–20:44:10 (do.json `at` 2026-11-20T13:42:36Z), `--do-nguong` chạy 20:44:18–20:44:25 (nguong.json `at` 13:44:25Z). Cả hai: tự kiểm khối luật trùng + worktree sạch; kiểm chéo (0) mergeLocal nền = serverMerge src 186 / 186 ô, (1) A/B = nen.json may-chu-loc MÁY 120 / 120, LÙI 120 / 120, (2) 22 ảnh thật top 5 / tự mở / kind / ứng viên 22 / 22, (3) LÙI = photoMerge 186 / 186, (4) bảng nền = may-chu-loc: ĐẠT. 0 lượt OFF thật (87 câu cache, 73 thiếu = lỗi), 0 Azure, không chạy lại OCR / máy chủ. File ra `D:\tmp\khau-gop\ket-qua\do.json` + `do.log`, `nguong.json` + `nguong.log` (không commit).
+    - Bước 3 (21 cách; M1 / M2 / M3 đếm theo ô ở nửa chỉnh, nền 0 / 2 / 6; p95 thời gian gộp mỗi ô (Node, 164 ô × 20 lần): cách / nền mergeLocal đo ngay trước / serverMerge src chỉ báo, ms):
+
+      | cách | cổng | M1 / M2 / M3 | giữ riêng | p95 cách / nền / src |
+      |---|---|---|---|---|
+      | b-lock2 | QUA | 0 / 2 / 6 | ok | 0,240 / 0,316 / 0,660 |
+      | b-lock1 | QUA | 0 / 2 / 6 | ok | 0,181 / 0,204 / 0,544 |
+      | b-lock0 | TRƯỢT G1 (A/B mất vị trí 1: 4 ô) | 0 / 2 / 6 | ok | 0,169 / 0,196 / 0,512 |
+      | b-max2 | QUA | 0 / 4 / 6 | ok | 0,223 / 0,254 / 0,719 |
+      | b-max3 | QUA | 0 / 4 / 6 | ok | 0,203 / 0,221 / 0,570 |
+      | b-gap0 | TRƯỢT G1 (12 ô), G2 (2 ô) | 0 / 2 / 6 | MẤT | 0,250 / 0,214 / 0,501 |
+      | b-gap1 | QUA | 0 / 2 / 6 | ok | 0,257 / 0,275 / 0,561 |
+      | b-mw2 | QUA | 0 / 2 / 6 | ok | 0,274 / 0,238 / 0,566 |
+      | b-mw1 | QUA | 0 / 2 / 6 | ok | 0,309 / 0,239 / 0,548 |
+      | c-idf0.5 | QUA | 0 / 2 / 6 | ok | 0,257 / 0,285 / 0,661 |
+      | c-idf0.75 | QUA | 0 / 2 / 6 | ok | 0,268 / 0,299 / 0,826 |
+      | c-idf1.25 | QUA | 0 / 2 / 6 | ok | 0,193 / 0,216 / 0,642 |
+      | a-top1 | TRƯỢT G1 (12 ô), G2 (2 ô) | 0 / 2 / 4 | ok | 0,242 / 0,207 / 0,656 |
+      | a-top2 | TRƯỢT G1 (12 ô), G2 (2 ô) | 0 / 4 / 4 | ok | 0,308 / 0,262 / 0,570 |
+      | a-top3 | TRƯỢT G1 (12 ô), G2 (2 ô) | 0 / 2 / 4 | ok | 0,711 / 0,701 / 1,327 |
+      | c-rrf | TRƯỢT G1 (A rơi khỏi 5: 2 ô) | 0 / 2 / 6 | ok | 0,328 / 0,387 / 1,603 |
+      | d-srv-max | QUA | 0 / 4 / 6 | ok | 0,361 / 0,274 / 0,596 |
+      | d-lock-diem | TRƯỢT G1 (4 ô) | 0 / 2 / 6 | ok | 0,252 / 0,252 / 1,276 |
+      | d-s1-w2 | TRƯỢT G1 (10 ô), G2 (2 ô) | 0 / 2 / 4 | ok | 0,265 / 0,224 / 0,596 |
+      | g-max-lock | TRƯỢT G1 (mất 4 ô, rơi khỏi 5 6 ô) | 0 / 2 / 6 | ok | 0,278 / 0,347 / 0,939 |
+      | g-max-s1 | TRƯỢT G1 (10 ô), G2 (2 ô) | 0 / 4 / 4 | ok | 0,282 / 0,221 / 0,441 |
+
+      10 cách qua mọi cổng, 11 trượt (chỉ G1 / G2; G3, G4, G5 không cách nào trượt). Không cách nào có M1 > 0 nên không cách nào được giữ, không cách nào "chỉ để tham khảo". Khung đo kết luận nguyên văn: "KHÔNG CÁCH NÀO ĐẠT ở bước 3: không giữ gì (bước 4 đo trên nền serverMerge)". (Ô 2 ảnh thư mục 2 nằm trong số trên: chỉ để tham khảo, n ≤ 2.)
+    - Bước 4 (nền serverMerge; 120 giá trị A/B mỗi đặc trưng, kiểm ĐẠT; "chỉnh / giữ" = số ảnh thư mục 3 không tự mở ở cả (i)(ii) trên 3 ảnh mỗi nửa; A/B chuyển = số ô A/B thành "chưa chắc" (trong đó mục 1 sai); cổng trượt = số ô đang đúng bị chuyển):
+
+      | luật | ngưỡng | cổng | chỉnh | giữ | A/B chuyển (sai) | muối |
+      |---|---|---|---|---|---|---|
+      | diem-p10 | 8,10 | QUA | 0/3 | 0/3 | 8 (8) | 0 |
+      | diem-p20 | 10,10 | QUA | 0/3 | 0/3 | 20 (20) | 0 |
+      | diem-p30 | 14,49 | TRƯỢT (6 ô) | 0/3 | 2/3 | 32 (28) | 0 |
+      | diem-p40 | 14,62 | TRƯỢT (6 ô) | 1/3 | 2/3 | 44 (40) | 0 |
+      | diem-p50 | 18,66 | TRƯỢT (18 ô) | 1/3 | 2/3 | 58 (44) | 0 |
+      | ty-le-p10 | 1,015 | TRƯỢT (2 ô) | 0/3 | 0/3 | 8 (6) | 0 |
+      | ty-le-p20 | 1,068 | TRƯỢT (8 ô) | 0/3 | 0/3 | 22 (14) | 0 |
+      | ty-le-p30 | 1,181 | TRƯỢT (12 ô) | 0/3 | 0/3 | 32 (22) | 0 |
+      | ty-le-p40 | 1,228 | TRƯỢT (16 ô) | 0/3 | 1/3 | 44 (34) | 0 |
+      | ty-le-p50 | 1,261 | TRƯỢT (20 ô) | 0/3 | 1/3 | 56 (42) | 0 |
+      | khoang-cach-p10 | 0,326 | QUA | 0/3 | 0/3 | 10 (10) | 0 |
+      | khoang-cach-p20 | 0,516 | TRƯỢT (6 ô) | 0/3 | 0/3 | 20 (14) | 0 |
+      | khoang-cach-p30 | 2,452 | TRƯỢT (10 ô) | 0/3 | 1/3 | 34 (26) | 0 |
+      | khoang-cach-p40 | 3,174 | TRƯỢT (14 ô) | 0/3 | 1/3 | 46 (34) | 0 |
+      | khoang-cach-p50 | 3,797 | TRƯỢT (18 ô) | 0/3 | 1/3 | 56 (44) | 0 |
+      | ty-le-tu-p10 | 0,143 | TRƯỢT (2 ô, buldak) | 0/3 | 1/3 | 4 (4) | 0 |
+      | ty-le-tu-p20 | 0,167 | TRƯỢT (6 ô) | 0/3 | 1/3 | 16 (12) | 0 |
+      | ty-le-tu-p30 | 0,211 | TRƯỢT (20 ô) | 1/3 | 2/3 | 34 (22) | 0 |
+      | ty-le-tu-p40 | 0,273 | TRƯỢT (22 ô) | 2/3 | 2/3 | 44 (30) | 0 |
+      | ty-le-tu-p50 | 0,333 | TRƯỢT (28 ô) | 2/3 | 3/3 | 56 (36) | 2 |
+      | hang-may-chu-p10 | 11 | QUA | 0/3 | 0/3 | 0 (0) | 0 |
+      | hang-may-chu-p20 | 3 | TRƯỢT (4 ô) | 0/3 | 2/3 | 24 (20) | 0 |
+      | hang-may-chu-p30 | 2 | TRƯỢT (6 ô) | 0/3 | 2/3 | 26 (20) | 0 |
+      | hang-may-chu-p40 | 1 | TRƯỢT (14 ô) | 0/3 | 2/3 | 44 (32) | 0 |
+      | hang-may-chu-p50 | 1 | TRƯỢT (14 ô) | 0/3 | 2/3 | 44 (32) | 0 |
+
+      4 luật qua cổng nhưng 0/3 ảnh nửa chỉnh; mọi luật làm được ảnh thư mục 3 không tự mở đều làm mất tự mở ở ô đang đúng (A/B, ảnh thật đang đúng, buldak). Khung đo kết luận nguyên văn: "KHÔNG NGƯỠNG NÀO ĐẠT ở bước 4: không giữ gì".
+    - KẾT LUẬN ĐỢT (nhánh Y): không cách bước 3 nào và không ngưỡng bước 4 nào đạt → **không đổi code app / máy chủ** (git diff 36c5fd7 ở src, server, public, tests, package*.json, .github rỗng); chỉ docs + khung đo test-ocr. Muối Co.op vẫn tự mở ở mọi ô; 6 ảnh thư mục 3 vẫn tự mở.
+    - Đề xuất tiếp (chờ chủ dự án quyết, không làm trong đợt này): (1) cách CHẤM khác cho mục máy chủ (kết luận "điểm thấp" chỉ đúng với c-idf hiện tại), vì nới lớp chặn không đưa được ảnh sai nào lên vị trí 1 (M1 = 0 ở mọi cách) mà nhiều cách làm mất ô A/B đang đúng; (2) thêm ảnh thư mục 2 (ít nhất khoảng 17–25, như đề xuất may-chu-loc) và thư mục 3 ("không có dữ liệu") để đo ngưỡng "chưa chắc" có đủ ca âm; (3) đặc trưng tin cậy khác (VD ghép đặc trưng, hay dựa vào việc mã có trong danh mục) — mỗi việc cần luật chốt trước riêng. Không có cách nào "chỉ để tham khảo" chờ quyết.
