@@ -113,13 +113,21 @@
 //     P2 (lens-vec.py), không đổi sau khi thấy số.
 //   Tiền xử lý: "cat" (thu cạnh ngắn rồi cắt giữa, như bộ xử lý gốc) / "vien" (thêm viền cho vuông rồi thu); chọn MỘT theo
 //     cùng thứ tự với model (biến thể = model × tiền xử lý, 8 biến thể).
+//   BỘ P (LỆCH LUẬT 1): P = mã A / B đo được (có ảnh thay hợp lệ, có trong chỉ mục (a); đếm 1 lần mỗi mã; ảnh truy vấn =
+//     ảnh đo, ảnh chỉ mục = ảnh thay) ∪ cặp VN leave-one-out của D:\tmp\chup-mat-do\chi-muc\loo.json có mã trong danh mục
+//     (a) và không trùng mã A / B. Ảnh truy vấn của cặp = ảnh queryImgid. Ảnh chỉ mục của mã đó: giữ khóa danh mục nếu
+//     imgid KHÁC queryImgid và mã băm vùng giữa (cách của lens: sharp xám, cạnh 256, cropHashSet / compareHashSets) > 24
+//     bit; không thì dùng ảnh indexImgid (override), cũng phải > 24 bit; không đạt thì bỏ cặp. Truy vấn P chỉ dùng cho G3
+//     và chọn model, KHÔNG vào R1–R5 / M.
 //   Thứ tự chọn: (1) qua R6 (p95 1 luồng ≤ 1.500 ms) và R7 ước ở mức (b) (số sản phẩm có ảnh mức (b) × số chiều × 1 byte
-//     int8 + 2 byte thang / vector + mã ≤ 25.000.000 byte); (2) A / B top 5 chỉ ảnh: số mã A / B đo được (không bị loại,
-//     có trong chỉ mục) có mã đúng trong 5 hạng ảnh đầu — lớn; (3) ảnh thật top 5 chỉ ảnh, nửa CHỈNH (ảnh có nhãn mã thư
-//     mục 1 + 2) — lớn; (4) hòa → giấy phép Apache-2.0 trước, rồi model nhẹ hơn (cỡ file ONNX nhỏ), rồi "cat" trước "vien".
+//     int8 + 2 byte thang / vector + mã ≤ 25.000.000 byte); (2) ảnh thật nửa CHỈNH có nhãn mã (thư mục 1 + 2) mà mã có
+//     trong chỉ mục (a): số ảnh có mã đúng trong top 5 chỉ ảnh — lớn; (3) bộ P top 5 chỉ ảnh: số mã P có mã đúng trong 5
+//     hạng ảnh đầu — lớn; (4) hòa → giấy phép Apache-2.0 trước, rồi model nhẹ hơn (cỡ file ONNX nhỏ), rồi "cat" trước
+//     "vien".
 // ---- CỔNG DỪNG SỚM (sau chỉ mục (a) 6.930 sp, biến thể đã chọn, chỉ ảnh) ----
 //   Đi tiếp mức (b) khi G3 VÀ (G1 HOẶC G2):
-//   G3 A / B đo được: tỉ lệ mã có mã đúng trong 5 hạng ảnh đầu ≥ 50 %.
+//   G3 (LỆCH LUẬT 1) bộ P: |P| ≥ 10 → G3 = tỉ lệ mã P có mã đúng trong 5 hạng ảnh đầu ≥ 50 %. |P| < 10 → G3 = "không đủ
+//      mẫu", KHÔNG chặn (cổng = G1 HOẶC G2), ghi rõ.
 //   G1 trong 7 ảnh thật đang sai có nhãn (#2 #4 #5 #10 #11 #15 #16) mà mã đúng có trong chỉ mục ảnh (a) (có trong (a) + có
 //      ảnh OFF tải được), ≥ 2 ảnh có mã đúng trong 5 hạng ảnh đầu.
 //   G2 ≥ 2 / 6 ảnh thư mục 3 có lens.top1 < lens.top1 nhỏ nhất của 8 ảnh đang đúng.
@@ -130,6 +138,13 @@
 //   chọn.
 // Tự kiểm: khối luật kiểm bằng sha256 (RULE_SHA256, đặt ngoài khối) và (khi đã có RULE_SHA) so từng byte với commit luật;
 //   đo chỉ chạy khi worktree sạch và khối luật trùng; lệch → thoát mã 3.
+// ---- LỆCH LUẬT 1 (vòng 2, viết 2026-11-20 khoảng 23:4x +0700, TRƯỚC mọi phép tính độ giống ảnh trên ca có nhãn) ----
+//   Lý do: chống ăn gian loại gần cả bộ A / B (ảnh mặt trước duy nhất trên OFF chính là ảnh đo; vài mã có ảnh khác nhưng
+//   mã băm gần ảnh đo), nên G3 cũ ("≥ 50 % mã A / B đo được") và bước (2) chọn model cũ ("A / B top 5") chỉ còn dựa trên
+//   1–2 mã. dieu-phoi quyết ở vòng 2 sửa đúng 3 điểm: (i) thêm BỘ P (mục "Chọn model"); (ii) G3 tính trên bộ P, |P| < 10
+//   thì không chặn; (iii) thứ tự chọn model xét ảnh thật nửa chỉnh trước, bộ P sau. Mọi phần khác giữ nguyên (R1 cho cả
+//   60 ảnh với sản phẩm bị loại xóa khỏi chỉ mục; τ / μ theo phân vị trên 60 ô A / B; G1, G2; lưới 9.512 cách). Khối
+//   cũ: commit 81d04e5, sha256 d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a.
 // ===================================================================================================================
 export const SERVER_K = 10;
 export const MERGE_K = 5;
@@ -158,6 +173,8 @@ export const R6_RAM_MIB = 1536;
 export const R7_MAX_BYTES = 25000000;
 export const TIME_N = 20;
 export const G3_MIN_RATE = 0.5;
+export const G3_P_MIN = 10;
+export const G3_SMALL = "khong-du-mau";
 export const G1_MIN = 2;
 export const G2_MIN = 2;
 export const MODEL_VARIANTS = Object.freeze(["clip-fp32", "clip-int8", "siglip", "dinov2-small"]);
@@ -175,11 +192,17 @@ import { photoOutcome } from "../../src/front-photo.js";
 import { sha256Of, rankIn } from "./g2-di-qua-do.mjs";
 import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.mjs";
 
-/** Commit luật "test(lens): luật chốt trước" (2026-11-20 22:44:37 +0700); tự kiểm so từng byte khối luật bằng git show. */
-export const RULE_SHA = "81d04e5";
+/**
+ * Commit của khối luật đang dùng (LỆCH LUẬT 1, "test(lens): LỆCH LUẬT 1 — G3 và chọn model dùng bộ P"); tự kiểm so từng
+ * byte khối luật bằng git show. null ở chính commit LỆCH LUẬT 1 (chưa biết sha của nó), đặt ở commit ngay sau.
+ */
+export const RULE_SHA = null;
 export const RULE_FILE = "test-ocr/chup-mat-do/lens-do.mjs";
-/** sha256 (hex) của khối luật (ruleBlockOf). */
-export const RULE_SHA256 = "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a";
+/** sha256 (hex) của khối luật (ruleBlockOf) — bản LỆCH LUẬT 1. */
+export const RULE_SHA256 = "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a";
+/** Khối luật GỐC (trước LỆCH LUẬT 1): commit 81d04e5 (2026-11-20 22:44:37 +0700), sha256 dưới đây; test kiểm bằng git show. */
+export const OLD_RULE_SHA = "81d04e5";
+export const OLD_RULE_SHA256 = "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a";
 export const MODES = Object.freeze({ "--chi-nen": "nen", "--chon-model": "chon-model", "--cong": "cong", "--do": "do" });
 
 /** Tự kiểm (thuần): now = khối luật hiện tại, old = khối ở commit luật (RULE_SHA null → không so), dirty. */
@@ -413,7 +436,9 @@ export function indexBytesInt8(n, dims) {
 }
 
 /**
- * Chọn biến thể model. vs = [{ variant (MODEL_VARIANTS), pre, license, onnxBytes, p95, ramMiB, r7Bytes, abTop5, realTop5 }].
+ * Chọn biến thể model (LỆCH LUẬT 1 (iii)). vs = [{ variant (MODEL_VARIANTS), pre, license, onnxBytes, p95, ramMiB, r7Bytes,
+ * realTop5 (ảnh thật nửa chỉnh có nhãn mã, mã trong chỉ mục (a), mã đúng trong top 5 chỉ ảnh), pTop5 (mã bộ P có mã đúng
+ * trong 5 hạng ảnh đầu) }]. Thứ tự: R6 + R7 → realTop5 lớn → pTop5 lớn → Apache-2.0 → ONNX nhỏ → "cat" → thứ tự model.
  * Trả { name | null, ranked: [variant|pre], dropped: [{ name, why }] }.
  */
 export function pickModel(vs) {
@@ -421,31 +446,40 @@ export function pickModel(vs) {
   const ok = [];
   for (const v of vs || []) {
     const name = `${v.variant}|${v.pre}`;
+    if (!Number.isInteger(v.realTop5) || !Number.isInteger(v.pTop5)) throw new Error(`lens: ${name} thiếu realTop5 / pTop5`);
     const why = [];
     if (!(Number.isFinite(v.p95) && v.p95 <= R6_P95_MS)) why.push(`R6 p95 ${v.p95}`);
     if (!(Number.isFinite(v.r7Bytes) && v.r7Bytes <= R7_MAX_BYTES)) why.push(`R7 ${v.r7Bytes}`);
     if (why.length) dropped.push({ name, why: why.join(", ") }); else ok.push({ ...v, name });
   }
   const apache = (l) => (/apache-2\.0/i.test(String(l ?? "")) ? 0 : 1);
-  ok.sort((a, b) => b.abTop5 - a.abTop5 || b.realTop5 - a.realTop5 || apache(a.license) - apache(b.license)
+  ok.sort((a, b) => b.realTop5 - a.realTop5 || b.pTop5 - a.pTop5 || apache(a.license) - apache(b.license)
     || a.onnxBytes - b.onnxBytes || PRE_ORDER.indexOf(a.pre) - PRE_ORDER.indexOf(b.pre) || MODEL_VARIANTS.indexOf(a.variant) - MODEL_VARIANTS.indexOf(b.variant));
   return { name: ok[0]?.name ?? null, ranked: ok.map((x) => x.name), dropped };
 }
 
 /**
- * Cổng dừng sớm. ab = [{ code, measurable, pos (hạng ảnh của mã đúng hoặc null) }] (mã A / B, mỗi mã 1 lần);
+ * Cổng dừng sớm (LỆCH LUẬT 1 (ii)). p = [{ id, code, pos (hạng ảnh của mã đúng hoặc null) }] (bộ P, mỗi mã 1 lần);
  * wrong = [{ img, inIndex, pos }] (7 ảnh đang sai); none3 = [{ img, top1 }]; good = [{ img, top1 }].
+ * G3: |P| ≥ G3_P_MIN → tỉ lệ trúng top 5 ≥ 50 % (true / false); |P| < G3_P_MIN → G3_SMALL ("không đủ mẫu", không chặn).
+ * pass = (G3 true hoặc G3_SMALL) VÀ (G1 HOẶC G2).
  */
-export function earlyGate({ ab, wrong, none3, good }) {
-  const meas = (ab || []).filter((x) => x.measurable);
-  const hit = meas.filter((x) => x.pos != null && x.pos <= 5).length;
-  const rate = meas.length ? hit / meas.length : 0;
-  const G3 = meas.length > 0 && rate >= G3_MIN_RATE;
+export function earlyGate({ p, wrong, none3, good }) {
+  const P = p || [];
+  const ids = new Set(P.map((x) => x.code));
+  if (ids.size !== P.length) throw new Error("lens: bộ P có mã trùng (mỗi mã đếm 1 lần)");
+  const hit = P.filter((x) => Number.isInteger(x.pos) && x.pos >= 1 && x.pos <= 5).length;
+  const rate = P.length ? hit / P.length : null;
+  const G3 = P.length >= G3_P_MIN ? rate >= G3_MIN_RATE : G3_SMALL;
   const inIdx = (wrong || []).filter((x) => x.inIndex);
   const g1n = inIdx.filter((x) => x.pos != null && x.pos <= 5).length;
   const G1 = g1n >= G1_MIN;
   const { G2, g2n, minGood, g2Why } = gateG2(good, none3);
-  return { G1, G2, G3, pass: G3 && (G1 || G2), detail: { abMeasurable: meas.length, abHit5: hit, rate, wrongInIndex: inIdx.length, g1n, minGood, g2n, g2Why } };
+  const g3Ok = G3 === true || G3 === G3_SMALL;
+  return {
+    G1, G2, G3, pass: g3Ok && (G1 || G2),
+    detail: { pN: P.length, pHit5: hit, rate, g3Note: G3 === G3_SMALL ? `|P| = ${P.length} < ${G3_P_MIN}: G3 không đủ mẫu, không chặn (cổng = G1 HOẶC G2)` : null, wrongInIndex: inIdx.length, g1n, minGood, g2n, g2Why },
+  };
 }
 
 /** Số ảnh thư mục 3 ("không có dữ liệu") của bộ ảnh thật. */

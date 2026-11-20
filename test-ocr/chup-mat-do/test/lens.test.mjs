@@ -15,7 +15,7 @@ import {
   rrfFuse, serverTier, imageRank, lensOf, isUnsureU, appTier, cellOf, judgeR, targetsM, achieves, pickMethod, pickModel,
   earlyGate, gateG2, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
   guardWant, checkIndexGuard, RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES,
-  HASH_OK_MIN, S_GRID,
+  HASH_OK_MIN, S_GRID, OLD_RULE_SHA, OLD_RULE_SHA256, G3_P_MIN, G3_SMALL,
 } from "../lens-do.mjs";
 import { execSync } from "node:child_process";
 
@@ -58,10 +58,27 @@ function blockAt(sha) {
 }
 
 test("khối luật hiện tại trùng từng byte commit luật RULE_SHA (git show)", (t) => {
+  if (RULE_SHA === null) { t.skip("RULE_SHA chưa đặt (chính commit LỆCH LUẬT 1; đặt ở commit sau)"); return; }
   const old = blockAt(RULE_SHA);
   // gợi ý 2 của code-reviewer vòng 1: không âm thầm bỏ qua; thiếu git / commit thì skip CÓ lý do (hiện trong kết quả test)
   if (old === null) { t.skip(`không chạy được git show ${RULE_SHA} (không có git hoặc thiếu commit)`); return; }
   assert.equal(old, ruleBlockOf(SRC), `khối luật khác commit ${RULE_SHA}`);
+});
+
+test("LỆCH LUẬT 1: khối GỐC ở 81d04e5 vẫn đúng sha256 cũ; khối mới khác khối gốc và ghi rõ lý do + sha khối cũ", (t) => {
+  assert.equal(OLD_RULE_SHA, "81d04e5");
+  assert.equal(OLD_RULE_SHA256, "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a");
+  const now = ruleBlockOf(SRC);
+  assert.notEqual(RULE_SHA256, OLD_RULE_SHA256);
+  for (const s of ["LỆCH LUẬT 1", "BỘ P", "loo.json", "|P| < 10", "không đủ", "KHÔNG chặn", "nửa CHỈNH", "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a", "81d04e5"]) {
+    assert.ok(now.includes(s), `khối mới thiếu ${s}`);
+  }
+  const old = blockAt(OLD_RULE_SHA);
+  if (old === null) { t.skip(`không chạy được git show ${OLD_RULE_SHA} (không có git hoặc thiếu commit)`); return; }
+  assert.equal(sha256Of(old), OLD_RULE_SHA256, "khối gốc ở 81d04e5 không đổi");
+  assert.notEqual(old, now);
+  // phần giữ nguyên: R1 cho cả 60 ảnh, lưới 9.512, G1, G2 (so từng dòng)
+  for (const line of old.split("\n").filter((l) => /R1 60 ảnh|9\.512 cách|G1 trong 7 ảnh|G2 ≥ 2 \/ 6 ảnh/.test(l))) assert.ok(now.includes(line), `dòng gốc bị đổi: ${line}`);
 });
 
 test("khối luật đủ nội dung bắt buộc (P1e) và không chứa mã nhãn / tên file ảnh thật", () => {
@@ -263,11 +280,11 @@ test("cổng G2 (NÊN SỬA 4): mọi top1 phải là số hữu hạn; null / N
   assert.match(gateG2(good.slice(1), none3).g2Why, /cần 8 ảnh đang đúng/);
   assert.match(gateG2(good, none3.slice(1)).g2Why, /cần 6 ảnh thư mục 3/);
   const wrong = [{ img: 2, inIndex: true, pos: 1 }, { img: 4, inIndex: true, pos: 2 }];
-  const g = earlyGate({ ab: Array.from({ length: 10 }, (_, i) => ({ code: String(i), measurable: true, pos: 1 })), wrong: [], none3: nullNone, good });
+  const g = earlyGate({ p: Array.from({ length: 10 }, (_, i) => ({ id: `p-${i}`, code: String(i), pos: 1 })), wrong: [], none3: nullNone, good });
   assert.equal(g.G2, false);
   assert.equal(g.pass, false, "G1 0 + G2 false → không qua");
   assert.match(g.detail.g2Why, /#19/);
-  assert.equal(earlyGate({ ab: Array.from({ length: 10 }, (_, i) => ({ code: String(i), measurable: true, pos: 1 })), wrong, none3: nullNone, good }).pass, true, "G1 đủ vẫn qua");
+  assert.equal(earlyGate({ p: Array.from({ length: 10 }, (_, i) => ({ id: `p-${i}`, code: String(i), pos: 1 })), wrong, none3: nullNone, good }).pass, true, "G1 đủ vẫn qua");
 });
 
 test("lưới: tên cách mang chỉ số phân vị, 2 phân vị cùng giá trị không trùng tên (gợi ý 10)", () => {
@@ -328,34 +345,48 @@ test("kết quả đo ghi sha256 của lens-do.mjs, lens-chay.mjs, lens-vec.py (
   assert.equal(codeSha256s("D:\\khong-co-thu-muc-nay")["lens-do.mjs"], null);
 });
 
-test("chọn model: R6 / R7 lọc, rồi A/B top 5, ảnh thật top 5, Apache-2.0, nhẹ hơn, 'cat' trước", () => {
-  const v = (variant, pre, o) => ({ variant, pre, license: "MIT", onnxBytes: 100, p95: 500, r7Bytes: 20e6, abTop5: 10, realTop5: 3, ...o });
-  assert.equal(pickModel([v("clip-fp32", "cat"), v("dinov2-small", "cat", { abTop5: 11 })]).name, "dinov2-small|cat");
-  assert.equal(pickModel([v("clip-fp32", "cat", { realTop5: 4 }), v("dinov2-small", "cat")]).name, "clip-fp32|cat");
+test("chọn model (LỆCH LUẬT 1 (iii)): R6 / R7 lọc, rồi ảnh thật nửa chỉnh top 5, rồi bộ P top 5, Apache-2.0, nhẹ hơn, 'cat' trước", () => {
+  const v = (variant, pre, o) => ({ variant, pre, license: "MIT", onnxBytes: 100, p95: 500, r7Bytes: 20e6, realTop5: 3, pTop5: 10, ...o });
+  assert.equal(pickModel([v("clip-fp32", "cat"), v("dinov2-small", "cat", { realTop5: 4 })]).name, "dinov2-small|cat", "ảnh thật trước");
+  assert.equal(pickModel([v("clip-fp32", "cat", { pTop5: 11 }), v("dinov2-small", "cat")]).name, "clip-fp32|cat", "hòa ảnh thật → bộ P");
+  // ảnh thật xếp TRƯỚC bộ P: bộ P hơn nhiều vẫn thua 1 ảnh thật (mẫu sai = thứ tự cũ / đảo sẽ chọn clip)
+  assert.equal(pickModel([v("clip-fp32", "cat", { pTop5: 20, realTop5: 2 }), v("dinov2-small", "cat", { pTop5: 1, realTop5: 3 })]).name, "dinov2-small|cat");
   assert.equal(pickModel([v("clip-fp32", "cat"), v("siglip", "cat", { license: "Apache-2.0" })]).name, "siglip|cat");
   assert.equal(pickModel([v("clip-fp32", "cat", { onnxBytes: 300 }), v("clip-int8", "cat", { onnxBytes: 90 })]).name, "clip-int8|cat");
   assert.equal(pickModel([v("clip-fp32", "vien"), v("clip-fp32", "cat")]).name, "clip-fp32|cat");
-  const d = pickModel([v("clip-fp32", "cat", { p95: 1501, abTop5: 99 }), v("siglip", "cat", { r7Bytes: 30e6, abTop5: 99 }), v("dinov2-small", "vien")]);
+  const d = pickModel([v("clip-fp32", "cat", { p95: 1501, realTop5: 99 }), v("siglip", "cat", { r7Bytes: 30e6, realTop5: 99 }), v("dinov2-small", "vien")]);
   assert.equal(d.name, "dinov2-small|vien");
   assert.equal(d.dropped.length, 2);
+  assert.throws(() => pickModel([v("clip-fp32", "cat", { pTop5: undefined })]), /thiếu realTop5 \/ pTop5/, "thiếu số → không lặng lẽ xếp");
   assert.equal(indexBytesInt8(44092, 512), 44092 * 514 + 44092 * 14);
   assert.ok(indexBytesInt8(44092, 512) <= R7_MAX_BYTES);
   assert.ok(indexBytesInt8(44092, 768) > R7_MAX_BYTES, "768 chiều int8 ở mức (b) trượt R7");
 });
 
-test("cổng dừng sớm: G3 và (G1 hoặc G2)", () => {
-  const ab = (hit, meas = 20) => Array.from({ length: meas }, (_, i) => ({ code: String(i), measurable: true, pos: i < hit ? 3 : null }));
+test("cổng dừng sớm (LỆCH LUẬT 1 (ii)): G3 trên bộ P; |P| < 10 → 'không đủ mẫu', không chặn; cổng = G3 và (G1 hoặc G2)", () => {
+  const P = (hit, n = 20) => Array.from({ length: n }, (_, i) => ({ id: `p-${i}`, code: String(i), pos: i < hit ? 3 : null }));
   const good = GOOD_IMGS.map((img, i) => ({ img, top1: 0.8 + i * 0.01 }));
   const wrong = [{ img: 2, inIndex: true, pos: 2 }, { img: 4, inIndex: true, pos: 5 }, { img: 5, inIndex: false, pos: null }];
-  assert.equal(earlyGate({ ab: ab(10), wrong, none3: [], good }).pass, true, "G3 50 % + G1 2");
-  assert.equal(earlyGate({ ab: ab(9), wrong, none3: [], good }).pass, false, "G3 45 %");
+  assert.equal(G3_P_MIN, 10);
+  assert.equal(earlyGate({ p: P(10), wrong, none3: [], good }).pass, true, "G3 50 % + G1 2");
+  assert.equal(earlyGate({ p: P(9), wrong, none3: [], good }).pass, false, "G3 45 %");
+  assert.equal(earlyGate({ p: P(9), wrong, none3: [], good }).G3, false);
+  assert.equal(earlyGate({ p: P(5, 10), wrong, none3: [], good }).G3, true, "|P| = 10, 50 %");
+  const small = earlyGate({ p: P(0, 9), wrong, none3: [], good });
+  assert.equal(small.G3, G3_SMALL, "|P| = 9 → không đủ mẫu");
+  assert.equal(small.pass, true, "không đủ mẫu thì không chặn: G1 đủ → qua");
+  assert.match(small.detail.g3Note, /\|P\| = 9 < 10/);
+  assert.equal(earlyGate({ p: [], wrong, none3: [], good }).G3, G3_SMALL);
   const w1 = [{ img: 2, inIndex: true, pos: 6 }, { img: 4, inIndex: true, pos: 5 }];
-  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: [], good }).pass, false, "G1 chỉ 1, G2 0");
+  assert.equal(earlyGate({ p: P(0, 9), wrong: w1, none3: [], good }).pass, false, "không đủ mẫu + G1 1 + G2 0 → không qua");
+  assert.equal(earlyGate({ p: P(10), wrong: w1, none3: [], good }).pass, false, "G1 chỉ 1, G2 0");
   const six = [{ img: 17, top1: 0.7 }, { img: 18, top1: 0.79 }, { img: 19, top1: 0.8 }, { img: 20, top1: 0.9 }, { img: 21, top1: 0.85 }, { img: 22, top1: 0.81 }];
-  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: six, good }).pass, true, "G2: 2 / 6 ảnh dưới min 0,8");
-  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: six.slice(0, 3), good }).pass, false, "G2 đòi đủ 6 ảnh thư mục 3");
-  const notMeas = [...ab(10), ...Array.from({ length: 5 }, () => ({ measurable: false, pos: null }))];
-  assert.equal(earlyGate({ ab: notMeas, wrong, none3: [], good }).detail.abMeasurable, 20, "mã bị loại không vào mẫu số");
+  assert.equal(earlyGate({ p: P(10), wrong: w1, none3: six, good }).pass, true, "G2: 2 / 6 ảnh dưới min 0,8");
+  assert.equal(earlyGate({ p: P(10), wrong: w1, none3: six.slice(0, 3), good }).pass, false, "G2 đòi đủ 6 ảnh thư mục 3");
+  assert.throws(() => earlyGate({ p: [...P(10), { id: "p-x", code: "0", pos: 1 }], wrong, none3: [], good }), /mã trùng/, "mỗi mã đếm 1 lần");
+  // mẫu sai (G3 cũ: |P| nhỏ vẫn chặn khi tỉ lệ < 50 %) → cổng đóng; hàm thật mở vì không đủ mẫu
+  assert.equal(earlyGate({ p: P(0, 9), wrong, none3: [], good }).pass, true);
+  assert.equal(P(0, 9).filter((x) => x.pos != null).length / 9 >= 0.5, false);
 });
 
 test("đọc .npy float32", () => {

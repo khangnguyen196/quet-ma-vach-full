@@ -274,8 +274,6 @@ export async function runMain(argv, selfUrl) {
   };
   out.antiCheatSha256 = want.antiCheatSha256;
   out.boPSha256 = want.boPSha256;
-  const excluded = new Set(ac.excluded || []);
-  const abCodes = [...new Set(live.filter((c) => c.set === "A" || c.set === "B").map((c) => c.code))];
   const realLab = real.filter((c) => c.code);
   const variantDirs = (level) => {
     const out2 = [];
@@ -286,6 +284,14 @@ export async function runMain(argv, selfUrl) {
     return out2;
   };
   const imgTop5 = (sims, code, qid) => { const r = sims.rowOf(qid); return r ? rankIn(r.ranked, code, 5) : null; };
+  // bộ P (LỆCH LUẬT 1): mỗi mã 1 lần; truy vấn P PHẢI có hàng sim (thiếu → dừng, không đếm thành "trượt")
+  const bop = JSON.parse(bopText);
+  const pOf = (sims) => {
+    const miss = bop.items.filter((x) => !sims.rowOf(x.qid)).map((x) => x.qid);
+    if (miss.length) { console.error(`Thiếu hàng sim cho truy vấn bộ P: ${miss.join(" ")}`); process.exit(3); }
+    return bop.items.map((x) => ({ id: x.qid, code: x.code, pos: imgTop5(sims, x.code, x.qid) }));
+  };
+  out.pN = bop.items.length;
 
   if (mode === "chon-model") {
     const nB = planList(readCatalog(LEVEL_FILES.b)).items.length;
@@ -293,16 +299,18 @@ export async function runMain(argv, selfUrl) {
     for (const vd of variantDirs("a")) {
       const sims = loadChecked(vd.dir);
       const inIdx = new Set(sims.codes);
-      const abMeas = abCodes.filter((code) => !excluded.has(code) && inIdx.has(code));
-      const abTop5 = abMeas.filter((code) => imgTop5(sims, code, `ab-${code}`) != null).length;
-      const realCh = realLab.filter((c) => c.group === "chinh");
+      // (2) ảnh thật nửa CHỈNH có nhãn mã (thư mục 1 + 2), mã có trong chỉ mục (a)
+      const realCh = realLab.filter((c) => c.group === "chinh" && (c.folder === FOLDERS[0] || c.folder === FOLDERS[1]) && inIdx.has(c.code));
       const realTop5 = realCh.filter((c) => imgTop5(sims, c.code, c.qid) != null).length;
+      // (3) bộ P top 5
+      const P = pOf(sims);
+      const pTop5 = P.filter((x) => x.pos != null).length;
       const m = sims.meta;
-      vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: m.timing?.p95, ramMiB: m.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), abTop5, abMeas: abMeas.length, realTop5, realCh: realCh.length });
+      vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: m.timing?.p95, ramMiB: m.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), realTop5, realCh: realCh.length, realImgs: realCh.map((c) => c.img), pTop5, pN: P.length });
     }
     const pick = pickModel(vs);
     Object.assign(out, { variants: vs, pick, nB });
-    for (const x of vs) console.log(`${(x.variant + "|" + x.pre).padEnd(20)} A/B top5 ${x.abTop5}/${x.abMeas} ảnh thật chỉnh top5 ${x.realTop5}/${x.realCh} p95 ${x.p95} ms R7 ${x.r7Bytes} B (${x.license})`);
+    for (const x of vs) console.log(`${(x.variant + "|" + x.pre).padEnd(20)} ảnh thật chỉnh top5 ${x.realTop5}/${x.realCh} bộ P top5 ${x.pTop5}/${x.pN} p95 ${x.p95} ms R7 ${x.r7Bytes} B (${x.license})`);
     console.log(`== Chọn biến thể: ${pick.name ?? "KHÔNG CÓ (mọi biến thể trượt R6 / R7)"}; loại ${JSON.stringify(pick.dropped)}`);
   }
 
@@ -312,13 +320,16 @@ export async function runMain(argv, selfUrl) {
     const [vname, pre] = cm.pick.name.split("|");
     const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, "a"));
     const inIdx = new Set(sims.codes);
-    const ab = abCodes.map((code) => ({ code, measurable: !excluded.has(code) && inIdx.has(code), pos: imgTop5(sims, code, `ab-${code}`) }));
+    const P = pOf(sims);
     const byImg = new Map(real.map((c) => [c.img, c]));
     const wrong = WRONG_IMGS.map((n) => { const c = byImg.get(n); return { img: n, inIndex: inIdx.has(c.code), pos: imgTop5(sims, c.code, c.qid) }; });
     const lensTop1 = (c) => sims.rowOf(c.qid)?.lens?.top1 ?? null;
-    const g = earlyGate({ ab, wrong, none3: none3.map((c) => ({ img: c.img, top1: lensTop1(c) })), good: GOOD_IMGS.map((n) => ({ img: n, top1: lensTop1(byImg.get(n)) })) });
-    Object.assign(out, { variant: cm.pick.name, gate: g, wrong, ab: ab.map((x) => ({ measurable: x.measurable, pos: x.pos })) });
-    console.log(`Cổng dừng sớm (${cm.pick.name}, mức a): G3 ${g.G3} (${g.detail.abHit5}/${g.detail.abMeasurable} = ${(g.detail.rate * 100).toFixed(1)} %), G1 ${g.G1} (${g.detail.g1n}/${g.detail.wrongInIndex} ảnh sai có mã trong chỉ mục), G2 ${g.G2} (${g.detail.g2n}/6 dưới ${g.detail.minGood}) → ${g.pass ? "ĐI TIẾP (b)" : "DỪNG, không tải (b)"}`);
+    const none3In = none3.map((c) => ({ img: c.img, top1: lensTop1(c) }));
+    const goodIn = GOOD_IMGS.map((n) => ({ img: n, top1: lensTop1(byImg.get(n)) }));
+    const g = earlyGate({ p: P, wrong, none3: none3In, good: goodIn });
+    Object.assign(out, { variant: cm.pick.name, gate: g, wrong, none3: none3In, good: goodIn, p: P.map((x) => ({ id: x.id, pos: x.pos })) });
+    const g3s = g.G3 === true || g.G3 === false ? `${g.G3} (${g.detail.pHit5}/${g.detail.pN} = ${(g.detail.rate * 100).toFixed(1)} %)` : `KHÔNG ĐỦ MẪU (|P| = ${g.detail.pN}, không chặn)`;
+    console.log(`Cổng dừng sớm (${cm.pick.name}, mức a): G3 ${g3s}, G1 ${g.G1} (${g.detail.g1n}/${g.detail.wrongInIndex} ảnh sai có mã trong chỉ mục), G2 ${g.G2} (${g.detail.g2n}/6 dưới ${g.detail.minGood}${g.detail.g2Why ? `; ${g.detail.g2Why}` : ""}) → ${g.pass ? "ĐI TIẾP (b)" : "DỪNG, không tải (b)"}`);
   }
 
   if (mode === "do") {
