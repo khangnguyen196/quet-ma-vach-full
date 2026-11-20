@@ -315,6 +315,8 @@ export async function runMain(argv, selfUrl) {
       }
     }
     const chuOf = (c, S, cond, m) => (m.length ? scoreTable(ctx, c.found, serverJoin(c.off[cond], S))(m[0].code).matched : 0);
+    // nhớ m + số từ khớp mục 1 theo (S, A, ca, ô, có lens): U chỉ đổi cờ "không chắc", không đổi m
+    const memo = new Map();
     const evalCells = (g, { noLens = false } = {}) => {
       const res = new Map();
       for (const c of live) {
@@ -322,8 +324,13 @@ export async function runMain(argv, selfUrl) {
         const sn = sNew.get(`${keyOf(c)}|${noLens ? "S0" : g.s}`);
         const r = {};
         for (const cond of CONDS) {
-          const m = row ? appTier(ctx, c, sn.S, cond, g.a, { lens: row.lens, simOf: row.simOf, base0: sn.m0[cond] }) : appTier(ctx, c, sn.S, cond, g.a, { lens: null, simOf: null, base0: sn.m0[cond] });
-          const unsure = row ? isUnsureU(g.u, row.lens, chuOf(c, sn.S, cond, m)) : false;
+          const mk = `${noLens ? "S0" : g.s}|${g.a.id}|${keyOf(c)}|${cond}|${row ? 1 : 0}`;
+          if (!memo.has(mk)) {
+            const mm = appTier(ctx, c, sn.S, cond, g.a, row ? { lens: row.lens, simOf: row.simOf, base0: sn.m0[cond] } : { lens: null, simOf: null, base0: sn.m0[cond] });
+            memo.set(mk, { m: mm, chu: row ? chuOf(c, sn.S, cond, mm) : 0 });
+          }
+          const { m, chu } = memo.get(mk);
+          const unsure = row ? isUnsureU(g.u, row.lens, chu) : false;
           r[cond] = { m: codesOf(m), cell: cellOf(m, c.code, unsure) };
         }
         res.set(keyOf(c), r);
