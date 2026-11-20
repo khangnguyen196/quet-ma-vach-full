@@ -129,6 +129,18 @@ test("fallbackRefOf: cách ghép → cách (b)/(c) đúng tham số (không nh�
   assert.throws(() => fallbackRefOf({ a: A_VARIANTS["a-url"], c: { beta: 7 } }, grid), /có 0 cách/);
 });
 
+test("fallbackRefOf grid giả: 2 cách không có (a) cùng tham số (b) → lỗi 'có 2 cách'; 0 cách khớp → lỗi 'có 0 cách'", () => {
+  const m = { a: A_VARIANTS["a-c70"], b: { sel: "h", k: 1 } };
+  // (i) hai cách (b) riêng trùng hệt tham số: không được chọn bừa một cách
+  const two = { "b-x": { b: { sel: "h", k: 1 } }, "b-y": { b: { sel: "h", k: 1 } }, "c-z": { c: { beta: 1 } } };
+  assert.throws(() => fallbackRefOf(m, two), /có 2 cách/);
+  // (ii) không cách nào khớp tham số (k khác, hoặc chỉ có cách mang (a))
+  const zero = { "b-x": { b: { sel: "h", k: 2 } }, "a-b-x": { a: A_VARIANTS["a-c70"], b: { sel: "h", k: 1 } } };
+  assert.throws(() => fallbackRefOf(m, zero), /có 0 cách/);
+  // đối chứng: đúng một cách khớp → trả tên đó
+  assert.equal(fallbackRefOf(m, { "b-x": { b: { sel: "h", k: 1 } }, "b-y": { b: { sel: "h", k: 2 } } }), "b-x");
+});
+
 test("C4 mới (thử đỏ / xanh): ca quay về so S với cách (b)/(c) riêng (cách ghép) hoặc nền (cách chỉ (a))", () => {
   const grid = methodGrid();
   const base = { x: { S: ["1", "2"], fellBack: false }, y: { S: ["3"], fellBack: false } };
@@ -280,11 +292,21 @@ test("không có mã nhãn / tên ảnh thật trong khung đo và file test", (
   }
   // tài liệu (PLAN.md, test-ocr/README.md, CLAUDE.md): không dạng tên ảnh điện thoại
   for (const f of DOC_FILES) assert.doesNotMatch(fs.readFileSync(f, "utf8"), /\d{13}_\d{10,}_g\d{10,}/, f.pathname);
+  // vòng 4: tên ảnh cũng có dạng KHÔNG có "_g" (13 số _ ≥ 10 số _ ≥ 10 số) → mẫu thứ hai, quét cả khung đo, test, tài liệu.
+  // Tên mẫu dựng lúc chạy (không viết thẳng trong file, để file này không tự khớp).
+  const NAME_RE = /\d{13}_\d{10,}_g?\d{10,}/;
+  const fake = (g) => `${"1".repeat(13)}_${"2".repeat(19)}_${g}${"3".repeat(19)}_x.jpg`;
+  assert.match(fake("g"), NAME_RE);
+  assert.match(fake(""), NAME_RE);
+  assert.doesNotMatch(fake(""), /\d{13}_\d{10,}_g\d{10,}/); // mẫu cũ bỏ sót dạng này
+  for (const f of [SRC_FILE, SELF_FILE, ...DOC_FILES]) assert.doesNotMatch(fs.readFileSync(f, "utf8"), NAME_RE, f.pathname);
   // có nhãn thật trên máy (ngoài git) thì kiểm thêm: không mã / tên file nào xuất hiện. Ở tài liệu, mã công khai đã có
   // trong repo từ trước (bộ A / B: ALL_CODES, cũng ở truth.csv) được phép.
   const nhanFile = "D:\\tmp\\may-chu-loc\\nhan.json";
   if (fs.existsSync(nhanFile)) {
     const nhan = JSON.parse(fs.readFileSync(nhanFile, "utf8"));
+    // mẫu NAME_RE phủ đúng mọi tên ảnh thật (có và không có "_g")
+    for (const x of nhan.items) assert.match(String(x.file), NAME_RE, "tên ảnh thật không khớp mẫu NAME_RE");
     const docAllowed = new Set([...allowed, ...ALL_CODES]);
     for (const [files, ok] of [[[SRC_FILE, SELF_FILE], allowed], [DOC_FILES, docAllowed]]) for (const f of files) {
       const text = fs.readFileSync(f, "utf8");

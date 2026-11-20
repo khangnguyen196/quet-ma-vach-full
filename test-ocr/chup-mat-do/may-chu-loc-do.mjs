@@ -325,7 +325,8 @@ export function pickMethod(list, base, order = METHOD_ORDER) {
  * không đoán theo tên); không có / nhiều hơn một → ném lỗi.
  */
 export function fallbackRefOf(m, grid = methodGrid()) {
-  if (!m?.a || (!m.b && !m.c)) return null;  const same = (x, y) => JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
+  if (!m?.a || (!m.b && !m.c)) return null;
+  const same = (x, y) => JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
   const hit = Object.entries(grid).filter(([, g]) => !g.a && same(g.b, m.b) && same(g.c, m.c)).map(([n]) => n);
   if (hit.length !== 1) throw new Error(`C4: cách (b)/(c) tương ứng của ${JSON.stringify(m)} có ${hit.length} cách`);
   return hit[0];
