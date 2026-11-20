@@ -7,7 +7,7 @@ import {
   imageUrl, fileNameOf, planList, existingOf, isRetryable, backoffMs, createBreaker, createGap, estimateRemaining, budgetOk,
   fetchOne, USER_AGENT, BUDGET_BYTES, DEFAULT_AVG_BYTES, MAX_CONN, GAP_MS, BREAKER_LIMIT, productUrl, candidatesFrom, imgidFromUrl, APP_NAME,
   makeGetProduct, antiCheatVerdict, summarizeAntiCheat, needsImage, onDriveD, catalogImgidOf, decidePIndex, buildVecInput, IMGID_KEY_RE,
-  imgidFilePlan,
+  imgidFilePlan, catalogImgMap,
 } from "../lens-tai.mjs";
 import { chooseSubstitute } from "../lens-do.mjs";
 
@@ -272,6 +272,24 @@ test("đầu vào lens-vec (LỆCH LUẬT 2): mã bị loại VÀO chỉ mục v
   assert.equal(IMGID_KEY_RE.exec("imgid:4")[1], "4");
   assert.throws(() => buildVecInput({ level: "a", rows, fileOf: () => "x", ac, bop: { items: [{ ...bop.items[0], code: "1111111111111", index: { key: "front_xx.1", imgid: "1" } }] }, queries: [] }), /mâu thuẫn/);
   assert.throws(() => buildVecInput({ rows, fileOf, ac, bop, queries: [] }), /mức lạ/, "phải nói rõ mức");
+});
+
+test("khóa ảnh danh mục của lens-chay giữ dòng ĐẦU khi trùng mã, như buildVecInput (gợi ý 3, lần 2)", async () => {
+  // mã trùng 2 dòng khác img: dòng đầu front_vi.3, dòng sau front_vi.9
+  const rows = [
+    { code: "1111111111111", img: "front_vi.3" }, { code: "bad", img: "front_vi.1" }, { code: "2222222222222", img: "front_en.2" },
+    { code: "1111111111111", img: "front_vi.9" },
+  ];
+  const m = catalogImgMap(rows);
+  assert.deepEqual([...m], [["1111111111111", "front_vi.3"], ["2222222222222", "front_en.2"]]);
+  // cùng khóa với buildVecInput (mã bị loại dùng khóa danh mục dòng đầu)
+  const v = buildVecInput({ level: "a", rows, fileOf: (c, k) => `D:\\${c}_${k}.jpg`, ac: { items: [], excluded: ["1111111111111"] }, bop: null, queries: [] });
+  assert.equal(v.indexKey["1111111111111"], m.get("1111111111111"));
+  // mẫu sai (code cũ của lens-chay): new Map(rows.map(...)) giữ dòng CUỐI
+  assert.equal(new Map(rows.map((r) => [r.code, r.img])).get("1111111111111"), "front_vi.9");
+  const src = (await import("node:fs")).readFileSync(new URL("../lens-chay.mjs", import.meta.url), "utf8");
+  assert.match(src, /catImg\.set\(level, catalogImgMap\(readCatalog\(LEVEL_FILES\[level\]\)\)\)/);
+  assert.doesNotMatch(src, /new Map\(readCatalog\(/);
 });
 
 test("bộ P tải ảnh theo imgid CHỈ ghi vào D:\\tmp\\lens (gợi ý 4); đọc lại ảnh có sẵn ở thư mục đợt cũ", async () => {

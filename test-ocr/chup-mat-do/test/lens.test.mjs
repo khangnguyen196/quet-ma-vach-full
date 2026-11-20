@@ -157,17 +157,31 @@ const L2_ADDED = lines(String.raw`//     min của 2 mã băm) > 24 bit. Không 
 `);
 
 /**
- * So chặt: mọi dòng trong removed có trong oldB, mọi dòng trong added có trong newB; bỏ chúng đi thì phần còn lại trùng
- * từng byte (cùng thứ tự). Trả mảng lỗi (rỗng = đạt).
+ * So chặt (gợi ý 1 của code-reviewer trước đo lần 2): các dòng được phép (removed trong oldB, added trong newB) phải
+ * xuất hiện ĐÚNG số lần như trong danh sách và ĐÚNG thứ tự danh sách (khớp lần lượt từ trên xuống); bỏ đúng các lần xuất
+ * hiện đó đi thì phần còn lại trùng từng byte (cùng thứ tự). Dời dòng được phép sai thứ tự hoặc chép thêm một bản → lỗi.
+ * Trả mảng lỗi (rỗng = đạt).
  */
 function strictBlockDiff(oldB, newB, removed, added) {
   const errs = [];
-  const O = oldB.split("\n");
-  const N = newB.split("\n");
-  for (const l of removed) if (!O.includes(l)) errs.push(`dòng bỏ không có trong khối cũ: ${l}`);
-  for (const l of added) if (!N.includes(l)) errs.push(`dòng thêm không có trong khối mới: ${l}`);
-  const restO = O.filter((l) => !removed.includes(l)).join("\n");
-  const restN = N.filter((l) => !added.includes(l)).join("\n");
+  const take = (lines, allowed, what, where) => {
+    const used = new Set();
+    let from = 0;
+    for (const l of allowed) {
+      const i = lines.indexOf(l, from);
+      if (i < 0) { errs.push(`${what} không có (hoặc sai thứ tự) trong ${where}: ${l}`); continue; }
+      used.add(i);
+      from = i + 1;
+    }
+    for (const l of new Set(allowed)) {
+      const want = allowed.filter((x) => x === l).length;
+      const got = lines.filter((x) => x === l).length;
+      if (got !== want) errs.push(`${what} xuất hiện ${got} lần trong ${where} (phải ${want}): ${l}`);
+    }
+    return lines.filter((_, i) => !used.has(i)).join("\n");
+  };
+  const restO = take(oldB.split("\n"), removed, "dòng bỏ", "khối cũ");
+  const restN = take(newB.split("\n"), added, "dòng thêm", "khối mới");
   if (restO !== restN) errs.push("phần còn lại khác từng byte");
   return errs;
 }
@@ -195,6 +209,19 @@ test("LỆCH LUẬT 2: khối 4424292 đúng sha256 cũ; so chặt 4424292 → k
   assert.deepEqual(strictBlockDiff(prev, swapped, L2_REMOVED, L2_ADDED), ["phần còn lại khác từng byte"]);
   // đổi 1 ký tự ở dòng được phép đổi cũng bị bắt (dòng đó không còn khớp danh sách tường minh)
   assert.ok(strictBlockDiff(prev, now.replace("bị ẨN trên hàng", "bị ẨN trên hang"), L2_REMOVED, L2_ADDED).length > 0);
+  // gợi ý 1 (lần 2): chép thêm một bản của dòng được phép → đỏ (code cũ bỏ mọi bản trùng nên lọt)
+  const ia = N.indexOf(L2_ADDED[5]);
+  assert.ok(ia > 0);
+  const dup = [...N.slice(0, ia + 1), N[ia], ...N.slice(ia + 1)].join("\n");
+  assert.ok(strictBlockDiff(prev, dup, L2_REMOVED, L2_ADDED).some((e) => /xuất hiện 2 lần/.test(e)), "chép thêm dòng được phép");
+  // dời dòng được phép sang chỗ khác (lên đầu khối, sai thứ tự danh sách) → đỏ
+  const moved = [N[ia], ...N.slice(0, ia), ...N.slice(ia + 1)].join("\n");
+  assert.ok(strictBlockDiff(prev, moved, L2_REMOVED, L2_ADDED).some((e) => /sai thứ tự/.test(e)), "dời dòng được phép");
+  // dời dòng được phép cũ trong khối cũ cũng bị bắt
+  const O2 = prev.split("\n");
+  const ir = O2.indexOf(L2_REMOVED[1]);
+  const movedOld = [O2[ir], ...O2.slice(0, ir), ...O2.slice(ir + 1)].join("\n");
+  assert.ok(strictBlockDiff(movedOld, now, L2_REMOVED, L2_ADDED).some((e) => /sai thứ tự/.test(e)), "dời dòng bỏ trong khối cũ");
   // khối mới ghi lý do + sha khối trước
   for (const s of ["LỆCH LUẬT 2", "ảnh thật #1", "ab-<mã>", "1.600 px", "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a", "4424292"]) assert.ok(now.includes(s), `khối mới thiếu ${s}`);
 });
@@ -547,8 +574,22 @@ test("6 biến thể cố định (NÊN SỬA 4): thiếu 1 → mã 3; SigLIP v�
 
 test("R6 từ file đo 1.600 px (NÊN SỬA 5): đúng loại file, thiếu số biến thể → ném (người gọi thoát mã 3)", () => {
   const t = (p95) => ({ median: p95 - 50, p95, max: p95 + 20, n: 20 });
-  const gio = { longEdge: 1600, jpegQuality: 0.9, threads: 1, models: { "clip-fp32": { ramAddAfter20MiB: 120, peakWsMiB: 900, time: { cat: t(700), vien: t(710) } } } };
-  assert.deepEqual(r6From(gio, "clip-fp32", "vien"), { p95: 710, median: 660, max: 730, n: 20, ramAddMiB: 120, peakMiB: 900 });
+  const SHA = "a".repeat(64);
+  const gio = {
+    longEdge: 1600, jpegQuality: 0.9, threads: 1, at: "2026-11-21T01:00:00+0700", vecPySha256: "b".repeat(64), gitHead: "c".repeat(40), nSearch: 42208,
+    models: { "clip-fp32": { sha256: SHA, onnxSha256: SHA, ramAddAfter20MiB: 120, peakWsMiB: 900, time: { cat: t(700), vien: t(710) } } },
+  };
+  assert.deepEqual(r6From(gio, "clip-fp32", "vien"), { p95: 710, median: 660, max: 730, n: 20, ramAddMiB: 120, peakMiB: 900, at: gio.at, vecPySha256: gio.vecPySha256, gitHead: gio.gitHead, nSearch: 42208, onnxSha256: SHA });
+  assert.equal(r6From(gio, "clip-fp32", "cat", SHA).p95, 700, "sha ONNX trùng meta bộ sim");
+  // NÊN SỬA 1 (lần 2): thiếu chứng cứ / ma trận nhỏ / sha ONNX lệch → ném
+  assert.throws(() => r6From({ ...gio, at: undefined }, "clip-fp32", "cat"), /thiếu chứng cứ/);
+  assert.throws(() => r6From({ ...gio, vecPySha256: undefined }, "clip-fp32", "cat"), /thiếu chứng cứ/);
+  assert.throws(() => r6From({ ...gio, nSearch: 42207 }, "clip-fp32", "cat"), /42207 hàng < 42208/);
+  assert.throws(() => r6From({ ...gio, nSearch: undefined }, "clip-fp32", "cat"), /ma trận tìm/);
+  const m0 = gio.models["clip-fp32"];
+  assert.throws(() => r6From({ ...gio, models: { "clip-fp32": { ...m0, onnxSha256: undefined } } }, "clip-fp32", "cat"), /sha256 ONNX đã đo/);
+  assert.throws(() => r6From({ ...gio, models: { "clip-fp32": { ...m0, onnxSha256: "d".repeat(64) } } }, "clip-fp32", "cat"), /khác bản ghim/);
+  assert.throws(() => r6From(gio, "clip-fp32", "cat", "e".repeat(64)), /khác meta bộ sim/);
   assert.throws(() => r6From(gio, "clip-int8", "cat"), /thiếu số R6 1.600 px của clip-int8\|cat/);
   assert.throws(() => r6From(null, "clip-fp32", "cat"), /không phải số đo 1600 px/);
   // mẫu sai: file giờ 400 px của vòng 1 (không có longEdge) → không dùng được
@@ -572,6 +613,17 @@ test("trước mọi phán (NÊN SỬA 3): thiếu 1 hàng / ô A / B thiếu le
   assert.equal(rowCheck(rowOf, { qids: [], abQids: [...ab60.slice(1), "ab-2"] }).exitCode, 3, "ô A / B không có lens");
   // mẫu sai (code cũ: .filter(Boolean)) lặng lẽ ra 59 ô
   assert.equal([...ab60.slice(1), "ab-2"].map((q) => rowOf(q)?.lens).filter(Boolean).length, 59);
+  // gợi ý 4 (lần 2): lens có top1 / margin không hữu hạn → mã 3 (ô A / B và truy vấn khác)
+  rows.set("ab-3", { lens: { top1: NaN, margin: 0.1 } });
+  const nanAb = rowCheck(rowOf, { qids: [], abQids: [...ab60.slice(1), "ab-3"] });
+  assert.deepEqual([nanAb.exitCode, nanAb.errs], [3, ["lens.top1 / margin không hữu hạn: ab-3"]]);
+  rows.set("that-2", { lens: { top1: 0.4, margin: null } });
+  const nanQ = rowCheck(rowOf, { qids: ["that-2"] });
+  assert.deepEqual([nanQ.exitCode, nanQ.errs], [3, ["lens.top1 / margin không hữu hạn: that-2"]]);
+  rows.set("that-3", { lens: { top1: 0.4 } });
+  assert.equal(rowCheck(rowOf, { qids: ["that-3"] }).exitCode, 3, "thiếu margin");
+  rows.set("that-4", { lens: null });
+  assert.equal(rowCheck(rowOf, { qids: ["that-4"] }).exitCode, 0, "hàng < 2 mục (lens null) ngoài A / B vẫn được");
 });
 
 test("kết quả đo ghi sha256 của lens-do.mjs, lens-chay.mjs, lens-vec.py (gợi ý 1)", async () => {

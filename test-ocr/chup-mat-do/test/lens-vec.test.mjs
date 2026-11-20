@@ -59,6 +59,41 @@ test("lens-vec.py save_vec_outputs: meta.json chỉ khi kiểm luồng đạt, g
   assert.ok(!crash.files.includes("sims.npy"), "sims.npy dở không được đổi tên thành file thật");
 });
 
+test("lens-vec.py gio1600 (NÊN SỬA 1 + gợi ý 2, lần 2): tiến trình con BLAS 1 luồng; ghi at / sha lens-vec.py / git HEAD / sha ONNX đã đo", (t) => {
+  const g = SRC.slice(SRC.indexOf("def cmd_gio1600("), SRC.indexOf("def main("));
+  assert.match(g, /subprocess\.run\(cmd, env=child_env\(\)\)/, "tiến trình con nhận env 1 luồng");
+  for (const k of ['merged["at"]', 'merged["vecPySha256"] = file_sha256(', 'merged["gitHead"], merged["gitDirty"] = git_state(', '"onnxSha256": onnx_sha', 'out["childEnv"]']) assert.ok(g.includes(k), `thiếu ${k}`);
+  // sha ONNX tính TRƯỚC khi nạp phiên, lệch bản ghim → dừng
+  assert.ok(g.indexOf("onnx_sha = file_sha256(onnx_path)") < g.indexOf("sess = session("));
+  assert.match(g, /if onnx_sha != MODELS\[name\]\["sha256"\]:\n\s+sys\.exit/);
+  if (!fs.existsSync(PY)) { t.skip(`không có Python của venv đợt lens (${PY})`); return; }
+  const py = String.raw`
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("lens_vec", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+e = m.child_env()
+print(json.dumps({"env": {k: e.get(k) for k in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")}, "path": "PATH" in e or "Path" in e,
+                  "git": m.git_state(os.path.dirname(sys.argv[1])), "nogit": m.git_state("D:\\")}))
+`;
+  const r = JSON.parse(execFileSync(PY, ["-I", "-c", py, VEC], { encoding: "utf8" }).trim().split("\n").pop());
+  assert.deepEqual(r.env, { OPENBLAS_NUM_THREADS: "1", OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1" });
+  assert.equal(r.path, true, "giữ biến môi trường khác");
+  assert.match(r.git[0] ?? "", /^[0-9a-f]{40}$/);
+  assert.equal(typeof r.git[1], "boolean");
+  assert.deepEqual(r.nogit, [null, null], "không có git → null");
+});
+
+test("lens-chay ghi gio1600Sha256 vào MỌI file kết quả (đặt trong out trước mọi nhánh ghi)", () => {
+  const src = fs.readFileSync(path.join(path.dirname(VEC), "lens-chay.mjs"), "utf8");
+  const iOut = src.indexOf("const out = {");
+  assert.ok(iOut > 0);
+  assert.match(src.slice(iOut, src.indexOf("\n", iOut)), /gio1600Sha256: gio1600Text === null \? null : sha256OfText\(gio1600Text\)/);
+  // out tạo TRƯỚC mọi writeFileSync (loi.json, nen, chon-model, cong, do)
+  const firstWrite = src.indexOf("fs.writeFileSync(");
+  assert.ok(iOut < firstWrite);
+  assert.equal((src.match(/r6From\(gio1600, variant, pre, onnxSha256\)/g) || []).length, 1, "r6From nhận sha ONNX meta");
+});
+
 test("lens-vec.py (gợi ý 2): chữ ký chạy nối có số luồng; file phần ghi tạm rồi đổi tên; hideByRow vào meta; không còn đọc file giờ 400 px", () => {
   assert.match(SRC, /sig = \{[^}]*"threads": a\.threads\}/s);
   assert.match(SRC, /atomic_npy\(pf, X\)/);

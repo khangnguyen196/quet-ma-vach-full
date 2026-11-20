@@ -561,6 +561,25 @@ def real_photos(root):
     return sorted(out)
 
 
+BLAS_ENV = {"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+
+
+def child_env():
+    """Moi truong cho tien trinh con gio1600 (goi y 2 cua code-reviewer truoc do lan 2): numpy / BLAS 1 luong (phep tim
+    mat @ v khong dung nhieu loi), con lai giu nguyen."""
+    return {**os.environ, **BLAS_ENV}
+
+
+def git_state(cwd):
+    """(HEAD, dirty) cua repo chua file nay; khong co git -> (None, None)."""
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+        st = subprocess.run(["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True, check=True).stdout
+        return head, st.strip() != ""
+    except Exception:
+        return None, None
+
+
 def cmd_gio1600(a):
     """R6 o anh truy van 1.600 px (LECH LUAT 2 (ii)): 20 anh that (chi de do gio; KHONG ghi vector / ten file anh ra dia),
     moi anh thu canh dai 1.600 px + JPEG chat luong 90 trong bo nho (khong tinh gio, nhu dien thoai lam); do 1 luong:
@@ -569,11 +588,12 @@ def cmd_gio1600(a):
     if not a.chi:
         merged = None
         base, ext = os.path.splitext(a.out)
+        started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         for name in R6_MODELS:
             part = f"{base}-{name}{ext}"
             cmd = [sys.executable, "-I", os.path.abspath(__file__), "gio1600", "--chi", name, "--model-dir", a.model_dir,
                    "--anh-that", a.anh_that, "--out", part, "--nb", str(a.nb)]
-            r = subprocess.run(cmd)
+            r = subprocess.run(cmd, env=child_env())
             if r.returncode != 0:
                 sys.exit(r.returncode)
             with open(part, encoding="utf-8") as f:
@@ -581,6 +601,12 @@ def cmd_gio1600(a):
             if merged is None:
                 merged = {**j, "models": {}, "perProcess": True}
             merged["models"].update(j["models"])
+        # NEN SUA 1 cua code-reviewer truoc do lan 2: chung cu gio / ban code / commit / file ONNX
+        merged["startedAt"] = started
+        merged["at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        merged["vecPySha256"] = file_sha256(os.path.abspath(__file__))
+        merged["gitHead"], merged["gitDirty"] = git_state(os.path.dirname(os.path.abspath(__file__)))
+        merged["blasThreadsEnv"] = BLAS_ENV
         merged["r6P95MaxMs"] = 1500
         merged["r6Fail"] = [f"{n}|{m}" for n, x in merged["models"].items() for m, t in x["time"].items() if not t["p95"] <= 1500]
         atomic_json(a.out, merged, indent=1)
@@ -602,6 +628,11 @@ def cmd_gio1600(a):
                    "argpartition 50); RAM = working set Windows (MiB) tru ma tran tim; anh that chi de do gio, khong ghi "
                    "vector / ten file",
            "models": {}}
+    out["childEnv"] = {k: os.environ.get(k) for k in BLAS_ENV}
+    onnx_path = os.path.join(a.model_dir, MODELS[name]["dir"], MODELS[name]["onnx"])
+    onnx_sha = file_sha256(onnx_path)  # NEN SUA 1: sha256 file ONNX that su da do (phai trung ban ghim)
+    if onnx_sha != MODELS[name]["sha256"]:
+        sys.exit(f"sha256 file ONNX khac ban ghim: {onnx_path}")
     cfg = load_cfg(a.model_dir, name)
     ws0, _ = working_set_mib()
     t0 = time.perf_counter()
@@ -628,6 +659,7 @@ def cmd_gio1600(a):
     ws2, peak = working_set_mib()
     size = os.path.getsize(os.path.join(a.model_dir, MODELS[name]["dir"], MODELS[name]["onnx"]))
     out["models"][name] = {**{k: MODELS[name][k] for k in ("repo", "revision", "sha256", "license", "onnx")}, "onnxBytes": size,
+                           "onnxSha256": onnx_sha, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                            "dims": d, "loadS": load_s, "wsBeforeMiB": ws0, "ramAddLoadMiB": (ws1 - ws0) if ws0 else None,
                            "ramAddAfter20MiB": (ws2 - ws0 - mat.nbytes / 1048576) if ws0 else None,
                            "peakWsMiB": peak, "searchMatMiB": mat.nbytes / 1048576, "time": times}

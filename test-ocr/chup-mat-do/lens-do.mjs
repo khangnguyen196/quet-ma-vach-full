@@ -757,18 +757,27 @@ export const R6_JPEG_QUALITY = 0.9;
 
 /**
  * Số R6 của một biến thể từ file đo 1.600 px (gio-1600.json của lens-vec.py gio1600; NÊN SỬA 5): kiểm file đúng loại
- * (cạnh dài 1.600, JPEG 0,9, 1 luồng, ≥ 20 ảnh) và có số hữu hạn; thiếu / sai → ném lỗi (người gọi thoát mã 3). Trả
- * { p95, median, max, n, ramAddMiB, peakMiB }.
+ * (cạnh dài 1.600, JPEG 0,9, 1 luồng, ≥ 20 ảnh) và có số hữu hạn; thiếu / sai → ném lỗi (người gọi thoát mã 3).
+ * NÊN SỬA 1 của code-reviewer trước đo lần 2: file phải có chứng cứ (at, vecPySha256), ma trận tìm ≥ R6_N_SEARCH hàng
+ * (cỡ mức (b)), sha256 file ONNX thật sự đã đo (models[variant].onnxSha256) trùng bản ghim trong file và trùng
+ * onnxSha256 truyền vào (sha256 trong meta.json của bộ sim; bỏ trống = không so). Trả { p95, median, max, n, ramAddMiB,
+ * peakMiB, at, vecPySha256, gitHead, nSearch, onnxSha256 }.
  */
-export function r6From(gio, variant, pre) {
+export function r6From(gio, variant, pre, onnxSha256 = null) {
   const g = gio || {};
   if (g.longEdge !== R6_LONG_EDGE || g.jpegQuality !== R6_JPEG_QUALITY || g.threads !== 1) throw new Error(`lens: file giờ không phải số đo ${R6_LONG_EDGE} px JPEG ${R6_JPEG_QUALITY} 1 luồng`);
+  if (typeof g.at !== "string" || !g.at || !/^[0-9a-f]{64}$/.test(g.vecPySha256 ?? "")) throw new Error("lens: file giờ thiếu chứng cứ (at / vecPySha256): đo lại bằng lens-vec.py gio1600");
+  if (!(Number.isInteger(g.nSearch) && g.nSearch >= R6_N_SEARCH)) throw new Error(`lens: file giờ đo trên ma trận tìm ${g.nSearch} hàng < ${R6_N_SEARCH} (mức (b))`);
   const m = g.models?.[variant];
   const t = m?.time?.[pre];
   if (!t || !Number.isFinite(t.p95) || !Number.isFinite(t.median) || !Number.isFinite(t.max) || !(t.n >= TIME_N)) throw new Error(`lens: thiếu số R6 1.600 px của ${variant}|${pre}`);
   if (!Number.isFinite(m.ramAddAfter20MiB)) throw new Error(`lens: thiếu RAM thêm (1.600 px) của ${variant}`);
-  return { p95: t.p95, median: t.median, max: t.max, n: t.n, ramAddMiB: m.ramAddAfter20MiB, peakMiB: m.peakWsMiB ?? null };
+  if (!/^[0-9a-f]{64}$/.test(m.onnxSha256 ?? "") || m.onnxSha256 !== m.sha256) throw new Error(`lens: sha256 ONNX đã đo của ${variant} (${m.onnxSha256}) khác bản ghim ${m.sha256}`);
+  if (onnxSha256 != null && m.onnxSha256 !== onnxSha256) throw new Error(`lens: sha256 ONNX đo giờ của ${variant} (${m.onnxSha256}) khác meta bộ sim ${onnxSha256}`);
+  return { p95: t.p95, median: t.median, max: t.max, n: t.n, ramAddMiB: m.ramAddAfter20MiB, peakMiB: m.peakWsMiB ?? null, at: g.at, vecPySha256: g.vecPySha256, gitHead: g.gitHead ?? null, nSearch: g.nSearch, onnxSha256: m.onnxSha256 };
 }
+/** Số hàng tối thiểu của ma trận tìm khi đo R6 (số sản phẩm có ảnh ở mức (b), planList của lens-tai.mjs). */
+export const R6_N_SEARCH = 42208;
 
 /**
  * Trước mọi phán (NÊN SỬA 3): mọi qid của ca có ảnh (A / B, ảnh thật, buldak, ruaypuan) và của bộ P phải có hàng sim;
@@ -780,12 +789,17 @@ export function rowCheck(rowOf, { qids = [], abQids = null, abN = 60 } = {}) {
   const miss = [...new Set(qids)].filter((q) => !rowOf(q));
   if (miss.length) errs.push(`thiếu hàng sim cho truy vấn: ${miss.join(" ")}`);
   let tops = null;
+  // gợi ý 4 của code-reviewer trước đo lần 2: lens có thì top1 / margin phải là số hữu hạn (NaN / null → mã 3)
+  const finiteLens = (l) => Number.isFinite(l?.top1) && Number.isFinite(l?.margin);
+  const badLens = [...new Set(qids)].filter((q) => { const l = rowOf(q)?.lens; return l != null && !finiteLens(l); });
   if (abQids) {
     tops = abQids.map((q) => rowOf(q)?.lens ?? null);
     if (abQids.length !== abN) errs.push(`ô A / B có ${abQids.length} (phải ${abN})`);
     const noLens = abQids.filter((q, i) => !tops[i]);
     if (noLens.length) errs.push(`ô A / B không có lens: ${[...new Set(noLens)].join(" ")}`);
+    for (const [i, q] of abQids.entries()) if (tops[i] && !finiteLens(tops[i]) && !badLens.includes(q)) badLens.push(q);
   }
+  if (badLens.length) errs.push(`lens.top1 / margin không hữu hạn: ${badLens.join(" ")}`);
   return { exitCode: errs.length ? 3 : 0, errs, tops };
 }
 

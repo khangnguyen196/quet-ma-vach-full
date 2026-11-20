@@ -24,7 +24,7 @@ export function codeSha256s(dir = path.dirname(fileURLToPath(import.meta.url))) 
 import { ruleBlockOf, keyOf, rankIn, sha256Of as sha256OfText } from "./g2-di-qua-do.mjs";
 import { splitHalves } from "./may-chu-loc-do.mjs";
 import { mergeLocal, scoreTable, BASE_PARAMS } from "./khau-gop-do.mjs";
-import { planList, readCatalog, LEVEL_FILES } from "./lens-tai.mjs";
+import { planList, readCatalog, catalogImgMap, LEVEL_FILES } from "./lens-tai.mjs";
 import { serverJoin } from "../../src/front-server.js";
 
 /** RAM máy chủ hiện có (H2 đợt kho-lon vòng 3, Windows, mức (c), MiB) — nền cho ước R6 RAM. */
@@ -227,7 +227,10 @@ export async function runMain(argv, selfUrl) {
   console.log(`Kiểm chéo mergeLocal(BASE) = serverMerge src: ${k0.ok ? "ĐẠT" : "LỆCH"} ${k0.same}/${k0.cells} ${k0.diff.slice(0, 5).join(", ")}`);
   console.log(`Kiểm chéo nền = khau-gop nen.json từng ô: ${kc.ok ? "ĐẠT" : "LỆCH"} MÁY ${kc.may}/${kc.cells}, LÙI ${kc.lui}/${kc.cells}, thiếu ${kc.missing} (khau-gop allOk ${kc.kgAllOk}, mode ${kc.kgMode}) ${kc.diff.slice(0, 8).join(", ")}`);
   console.log(`Bảng nền: ${JSON.stringify(tab)}; ảnh thật đúng vị trí 1 ${JSON.stringify(good)}; đang sai ${JSON.stringify(wrongNow)}; thư mục 3 tự mở ${none3.filter((c) => CONDS.every((cond) => posOf(c, cond).auto)).length}/6 → ${kt.ok ? "ĐẠT" : "LỆCH " + kt.diff.join("; ")}`);
-  const out = { at: new Date().toISOString(), startedAt, mode, sha, dirty, ruleSha: RULE_SHA, ruleSha256: RULE_SHA256, codeSha256: codeSha256s(), checks: ck, allOk, split, baseTable: tab, good, wrong: wrongNow, cacheOnly: true, azureCalls: 0 };
+  // NÊN SỬA 1 của code-reviewer trước đo lần 2: sha256 file giờ 1.600 px ghi vào MỌI file kết quả (kể cả .loi.json, nen)
+  const gio1600File = arg("--gio-1600", path.join(lensDir, "gio-1600.json"));
+  const gio1600Text = fs.existsSync(gio1600File) ? fs.readFileSync(gio1600File, "utf8") : null;
+  const out = { at: new Date().toISOString(), startedAt, mode, sha, dirty, ruleSha: RULE_SHA, ruleSha256: RULE_SHA256, codeSha256: codeSha256s(), gio1600File, gio1600Sha256: gio1600Text === null ? null : sha256OfText(gio1600Text), checks: ck, allOk, split, baseTable: tab, good, wrong: wrongNow, cacheOnly: true, azureCalls: 0 };
   if (!allOk) {
     const bad = path.join(outDir, `${mode}.loi.json`);
     fs.writeFileSync(bad, JSON.stringify(out, null, 1), "utf8");
@@ -269,7 +272,7 @@ export async function runMain(argv, selfUrl) {
   const catImg = new Map();
   /** Điều chỉ mục phải thỏa ở một mức (LỆCH LUẬT 2: ẩn theo hàng, override bộ P chỉ mức a; khóa danh mục của mã bị loại). */
   const wantOf = (level) => {
-    if (!catImg.has(level)) catImg.set(level, new Map(readCatalog(LEVEL_FILES[level]).map((r) => [r.code, r.img])));
+    if (!catImg.has(level)) catImg.set(level, catalogImgMap(readCatalog(LEVEL_FILES[level])));
     return guardWant(acText, bopText, { level, catalogImg: catImg.get(level) });
   };
   /** Đọc bộ sim + kiểm chỉ mục đã áp chống ăn gian + bộ sim hợp lệ (đạt kiểm luồng, đủ truy vấn / ảnh, đúng thư mục). */
@@ -296,12 +299,11 @@ export async function runMain(argv, selfUrl) {
   const pOf = (sims) => bop.items.map((x) => ({ id: x.qid, code: x.code, pos: imgTop5(sims, x.code, x.qid) }));
   out.pN = bop.items.length;
   /** R6 1.600 px (LỆCH LUẬT 2 (ii), NÊN SỬA 5): file đo P4; thiếu file / số → dừng mã 3. */
-  const gio1600File = arg("--gio-1600", path.join(lensDir, "gio-1600.json"));
-  const gio1600 = fs.existsSync(gio1600File) ? JSON.parse(fs.readFileSync(gio1600File, "utf8")) : null;
-  const r6Of = (variant, pre) => {
-    try { return r6From(gio1600, variant, pre); } catch (e) { return stop(`THIẾU SỐ R6 1.600 px (${gio1600File})`, [String(e.message)]); }
+  const gio1600 = gio1600Text === null ? null : JSON.parse(gio1600Text);
+  /** onnxSha256 = sha256 ONNX trong meta.json của bộ sim đang dùng (phải trùng sha ONNX đã đo giờ). */
+  const r6Of = (variant, pre, onnxSha256) => {
+    try { return r6From(gio1600, variant, pre, onnxSha256); } catch (e) { return stop(`THIẾU SỐ R6 1.600 px (${gio1600File})`, [String(e.message)]); }
   };
-  out.gio1600File = gio1600File;
 
   if (mode === "chon-model") {
     const nB = planList(readCatalog(LEVEL_FILES.b)).items.length;
@@ -319,7 +321,7 @@ export async function runMain(argv, selfUrl) {
       const P = pOf(sims);
       const pTop5 = P.filter((x) => x.pos != null).length;
       const m = sims.meta;
-      const r6 = r6Of(vd.variant, vd.pre);
+      const r6 = r6Of(vd.variant, vd.pre, m.sha256);
       vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: r6.p95, r6, ramMiB: r6.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), realTop5, realCh: realCh.length, realImgs: realCh.map((c) => c.img), pTop5, pN: P.length });
     }
     const pick0 = pickModel(vs);
@@ -414,7 +416,7 @@ export async function runMain(argv, selfUrl) {
       const res = evalCells({ s, a: { id: "A0" }, u: { id: "U0" } });
       r5yBy.set(s, verdictOf(res, { r5x: true, r5y: { pass: true }, r6: { p95: 0, ramMiB: 0 }, r7: { bytes: 0 } }));
     }
-    const r6s = r6Of(vname, pre); // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px
+    const r6s = r6Of(vname, pre, meta.sha256); // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px
     const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + (meta.indexBytes ?? Infinity) / 1048576 };
     const r7 = { bytes: meta.indexBytes };
     const methods = [];

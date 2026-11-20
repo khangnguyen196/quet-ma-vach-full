@@ -340,6 +340,20 @@ export function decidePIndex({ queryImgid, catalogKey, catalogImgid, catalogDist
  * (mọi mã A / B, bộ P ở mức a) ghi imgid ảnh chỉ mục khi biết (meta.indexImgid). Trả { index: [{ code, key, file }],
  * indexKey, indexImgid, override, hideByRow, missing: [{ code, key }], queries }.
  */
+/**
+ * Khóa ảnh danh mục theo mã, CÙNG LUẬT với buildVecInput (gợi ý 3 của code-reviewer trước đo lần 2): bỏ dòng mã sai dạng,
+ * mã trùng thì giữ dòng ĐẦU (new Map(rows.map(...)) sẽ giữ dòng cuối). Trả Map mã → img (có thể không hợp lệ; người dùng
+ * tự kiểm dạng khóa).
+ */
+export function catalogImgMap(rows) {
+  const m = new Map();
+  for (const r of rows || []) {
+    if (!r || typeof r.code !== "string" || !CODE_RE.test(r.code) || m.has(r.code)) continue;
+    m.set(r.code, r.img);
+  }
+  return m;
+}
+
 export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
   if (level !== "a" && level !== "b") throw new Error(`buildVecInput: mức lạ ${level}`);
   const P = level === "a" ? bop?.items || [] : [];
