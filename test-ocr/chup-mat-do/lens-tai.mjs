@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 export const USER_AGENT = "QuetMaVachLens/0.1 (student project, image similarity test; contact via project repository)";
@@ -214,12 +215,179 @@ export function imgidFromUrl(url) {
   return m ? m[1] : null;
 }
 
+/** Đường dẫn chỉ ở ổ D (gợi ý 4 của code-reviewer vòng 1: mọi chế độ ghi đĩa đều kiểm). */
+export function onDriveD(...dirs) {
+  return dirs.every((d) => /^[dD]:/.test(path.resolve(String(d))));
+}
+
+/**
+ * Hàm đọc OFF API sản phẩm (NÊN SỬA 3 của code-reviewer vòng 1): kiểm cầu dao TRƯỚC mỗi lượt gọi, ghi breaker.record(status)
+ * cho MỌI lượt kể cả thành công (cầu dao đếm đúng "liên tiếp"); thử lại có lùi khi 429 / 5xx / lỗi mạng; trần maxCalls lượt
+ * mạng mỗi lần chạy. cache = { get(code) → json | null, set(code, json) } (lượt từ cache không tính, không chạm cầu dao).
+ * Trả { kind: "ok", json } | { kind: "khong-co", status: 404 } | { kind: "loi", status } | { kind: "cau-dao" } | { kind: "tran" }.
+ */
+export function makeGetProduct({ fetchImpl, gap, breaker, sleep, cache, stats, maxCalls, userAgent = USER_AGENT }) {
+  return async (code) => {
+    const hit = cache.get(code);
+    if (hit) { stats.apiCached++; return { kind: "ok", json: hit }; }
+    let status = null;
+    for (let attempt = 0; attempt <= RETRIES; attempt++) {
+      if (breaker.open) return { kind: "cau-dao" };
+      if (stats.apiCalls >= maxCalls) return { kind: "tran" };
+      if (attempt) await sleep(backoffMs(attempt));
+      await gap();
+      if (breaker.open) return { kind: "cau-dao" };
+      stats.apiCalls++;
+      status = 0;
+      let json = null;
+      try {
+        const res = await fetchImpl(productUrl(code), { headers: { "User-Agent": userAgent } });
+        status = res.status;
+        if (res.ok) json = await res.json();
+      } catch { status = 0; json = null; }
+      if (status === 200 && json == null) status = 0; // trả 200 mà không đọc được JSON: coi như lỗi mạng
+      if (breaker.record(status)) return { kind: "cau-dao" };
+      if (json) { cache.set(code, json); return { kind: "ok", json }; }
+      if (status === 404) return { kind: "khong-co", status };
+      if (!isRetryable(status)) return { kind: "loi", status };
+    }
+    return { kind: "loi", status };
+  };
+}
+
+/**
+ * Phán một mã A / B sau khi đã có ứng viên (NÊN SỬA 2 của code-reviewer vòng 1). cands = [{ key, imgid, distance,
+ * fetchFail? ("tai-loi" | "cau-dao") }]; choose = chooseSubstitute của lens-do.mjs. Ứng viên đã xét mà tải ảnh lỗi →
+ * "chua-xong" (KHÔNG phải loại); chỉ khi mọi ứng viên đã xét đủ mà không có ảnh khác hợp lệ mới là "loai".
+ * Trả { status: "dung" | "loai" | "chua-xong", chosen, rejected, reason }.
+ */
+export function antiCheatVerdict(cands, testImgid, choose, { productFound = true } = {}) {
+  const r = choose(cands || [], testImgid);
+  const byKey = new Map((cands || []).map((c) => [c.key, c]));
+  const failed = r.rejected.map((x) => byKey.get(x.key)).filter((c) => c?.fetchFail);
+  if (failed.length) {
+    return { status: "chua-xong", chosen: null, rejected: r.rejected, reason: failed.some((c) => c.fetchFail === "cau-dao") ? "cầu dao mở" : "tải ảnh lỗi" };
+  }
+  if (r.chosen) return { status: "dung", chosen: r.chosen, rejected: r.rejected, reason: null };
+  const reason = (cands || []).length ? [...new Set(r.rejected.map((x) => x.reason))].join("; ") : productFound ? "OFF không có ảnh mặt trước" : "OFF không có sản phẩm";
+  return { status: "loai", chosen: null, rejected: r.rejected, reason };
+}
+
+/** Ứng viên có cần tải ảnh để so mã băm (imgid ảnh đo và ứng viên đều biết, khác nhau). */
+export function needsImage(c, testImgid, known) {
+  return known(testImgid) && known(c.imgid) && String(c.imgid) !== String(testImgid);
+}
+
+/**
+ * Tổng hợp chống ăn gian: items = [{ code, status, reason, chosen (khóa) }], expected = mọi mã A / B. Mã chưa có item =
+ * "chưa xét". complete chỉ khi đủ mã và không mã nào "chua-xong". excluded = CHỈ mã "loai"; override = mã "dung" → khóa.
+ */
+export function summarizeAntiCheat(items, expected) {
+  const by = new Map((items || []).map((x) => [x.code, x]));
+  const incomplete = [];
+  for (const c of expected || []) {
+    const x = by.get(c);
+    if (!x) incomplete.push({ code: c, reason: "chưa xét" });
+    else if (x.status === "chua-xong") incomplete.push({ code: c, reason: x.reason });
+    else if (x.status !== "dung" && x.status !== "loai") incomplete.push({ code: c, reason: `trạng thái lạ ${x.status}` });
+  }
+  const done = (items || []).filter((x) => (expected || []).includes(x.code));
+  return {
+    complete: incomplete.length === 0 && (expected || []).length > 0, incomplete,
+    excluded: done.filter((x) => x.status === "loai").map((x) => x.code),
+    override: Object.fromEntries(done.filter((x) => x.status === "dung").map((x) => [x.code, x.chosen])),
+  };
+}
+
+// ---------------- bộ P (LỆCH LUẬT 1 của lens-do.mjs) ----------------
+/** Khóa override dạng imgid (ảnh chỉ mục lấy theo imgid, không theo khóa front_xx.rev). */
+export const IMGID_KEY_RE = /^imgid:(\d+)$/;
+
+/** imgid của khóa danh mục "front_xx.rev" theo bản ghi xuất OFF (fronts [{ key "front_xx", imgid, rev }]); rev khác / không có → null. */
+export function catalogImgidOf(fronts, catalogKey) {
+  const m = typeof catalogKey === "string" ? /^(front_[a-z]{2,3})\.(\d+)$/.exec(catalogKey) : null;
+  if (!m) return null;
+  const f = (fronts || []).find((x) => x?.key === m[1] && String(x.rev) === m[2]);
+  return f && f.imgid != null && String(f.imgid).trim() !== "" ? String(f.imgid) : null;
+}
+
+/**
+ * Chọn ảnh chỉ mục cho một cặp loo của bộ P (luật LỆCH LUẬT 1 (i)): giữ khóa danh mục nếu imgid KHÁC queryImgid và mã
+ * băm > 24 bit (dist ≥ okMin); không thì ảnh indexImgid (override "imgid:<n>") nếu imgid khác queryImgid và > 24 bit;
+ * không thì bỏ cặp. imgid không rõ = không đạt. Trả { index: { key, imgid, source, distance } | null, reasons: [string] }.
+ */
+export function decidePIndex({ queryImgid, catalogKey, catalogImgid, catalogDist, indexImgid, indexDist }, { okMin, known }) {
+  const reasons = [];
+  if (!known(queryImgid)) return { index: null, reasons: ["không biết imgid ảnh truy vấn"] };
+  const ok = (imgid, dist, what) => {
+    if (!known(imgid)) { reasons.push(`${what}: không biết imgid`); return false; }
+    if (String(imgid) === String(queryImgid)) { reasons.push(`${what}: cùng imgid ảnh truy vấn`); return false; }
+    if (!Number.isFinite(dist)) { reasons.push(`${what}: không có mã băm`); return false; }
+    if (dist < okMin) { reasons.push(`${what}: gần ảnh truy vấn ${dist} bit (≤ ${okMin - 1})`); return false; }
+    return true;
+  };
+  if (catalogKey && ok(catalogImgid, catalogDist, "khóa danh mục")) return { index: { key: catalogKey, imgid: String(catalogImgid), source: "catalog", distance: catalogDist }, reasons };
+  if (!catalogKey) reasons.push("không có khóa danh mục");
+  if (ok(indexImgid, indexDist, "ảnh indexImgid")) return { index: { key: `imgid:${indexImgid}`, imgid: String(indexImgid), source: "override", distance: indexDist }, reasons };
+  return { index: null, reasons };
+}
+
+/**
+ * Danh sách đầu vào cho lens-vec.py (lệnh vec) — ẢNH CHỈ MỤC CHỌN TƯỜNG MINH, không quét thư mục. rows = dòng danh mục
+ * (mức a / b); fileOf(code, key) → đường dẫn ảnh hoặc null; ac / bop = chong-an-gian.json / bo-p.json đã đọc (+ sha256);
+ * queries = [{ qid, file }]. Mã bị loại không vào chỉ mục; mã có override dùng khóa override; mã có ảnh truy vấn (A / B
+ * dùng được, bộ P) ghi imgid ảnh chỉ mục (meta.indexImgid). Trả { index: [{ code, key, file }], indexKey, indexImgid,
+ * missing: [{ code, key }], queries }.
+ */
+export function buildVecInput({ rows, fileOf, ac, bop, queries }) {
+  const excluded = new Set(ac.excluded || []);
+  const override = { ...(ac.override || {}) };
+  const imgidOf = {};
+  for (const x of ac.items || []) if (x.chosen) {
+    const c = (x.candidates || []).find((k) => k.key === x.chosen);
+    imgidOf[x.code] = c?.imgid != null ? String(c.imgid) : null;
+  }
+  for (const p of bop?.items || []) {
+    if (Object.hasOwn(override, p.code) && override[p.code] !== p.index.key) throw new Error(`override mâu thuẫn ${p.code}`);
+    override[p.code] = p.index.key;
+    imgidOf[p.code] = String(p.index.imgid);
+  }
+  const index = [];
+  const indexKey = {};
+  const indexImgid = {};
+  const missing = [];
+  const seen = new Set();
+  for (const r of rows || []) {
+    if (!r || typeof r.code !== "string" || !CODE_RE.test(r.code) || seen.has(r.code)) continue;
+    seen.add(r.code);
+    if (excluded.has(r.code)) continue;
+    const key = override[r.code] ?? (typeof r.img === "string" && IMG_RE.test(r.img) ? r.img : null);
+    if (!key) continue;
+    const file = fileOf(r.code, key);
+    if (!file) { missing.push({ code: r.code, key }); continue; }
+    index.push({ code: r.code, key, file });
+    indexKey[r.code] = key;
+    if (Object.hasOwn(imgidOf, r.code)) indexImgid[r.code] = imgidOf[r.code];
+  }
+  const qs = [...(queries || [])];
+  for (const p of bop?.items || []) if (!qs.some((q) => q.qid === p.qid)) qs.push({ qid: p.qid, file: p.query.file });
+  return { index, indexKey, indexImgid, missing, queries: qs };
+}
+
 // ---------------- chạy ----------------
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const argv = process.argv.slice(2);
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
   if (argv.includes("--chong-an-gian")) {
-    await runAntiCheat(arg);
+    const done = await runAntiCheat(arg);
+    process.exit(done ? 0 : 5);
+  }
+  if (argv.includes("--bo-p")) {
+    const ok = await runBoP(arg);
+    process.exit(ok ? 0 : 5);
+  }
+  if (argv.includes("--vao-vec")) {
+    runVecInput(arg);
     process.exit(0);
   }
   const level = arg("--muc", "a");
@@ -228,7 +396,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   if (!(minutes > 0 && minutes < 8)) { console.error("--phut phải trong (0, 8)"); process.exit(2); }
   const outDir = arg("--out", "D:\\tmp\\lens\\anh");
   const rootDir = arg("--goc", "D:\\tmp\\lens");
-  if (!/^[dD]:/.test(path.resolve(outDir)) || !/^[dD]:/.test(path.resolve(rootDir))) { console.error("Chỉ ghi vào ổ D."); process.exit(2); }
+  if (!onDriveD(outDir, rootDir)) { console.error("Chỉ ghi vào ổ D."); process.exit(2); }
   fs.mkdirSync(outDir, { recursive: true });
   const logFile = path.join(outDir, "tai-log.jsonl");
   const sumFile = path.join(outDir, `tai-tong-${level}.json`);
@@ -304,93 +472,104 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   process.exit(breaker.open ? 5 : 0);
 }
 
+// ---------------- phần chạy chung của chống ăn gian / bộ P ----------------
 /**
- * Chuẩn bị chống ăn gian (cờ --chong-an-gian; KHÔNG tính độ giống ảnh): với mỗi mã A / B (truy vấn "ab-<mã>" của
- * D:\tmp\lens\ca.json): đọc ảnh mặt trước trên OFF API sản phẩm (cache D:\tmp\lens\off-sp, giãn ≥ 1 giây, ≤ 60 lượt),
- * tải ảnh ứng viên (.400, lịch sự như trên), mã băm dHash / pHash vùng giữa (lib.mjs; ảnh xám cạnh dài 256 px bằng sharp
- * có sẵn theo @huggingface/transformers), chọn ảnh thay theo luật (chooseSubstitute của lens-do.mjs). Ảnh thật: so mã
- * băm ảnh chụp với ảnh chỉ mục của mã đúng đã tải (≤ 10 bit → ghi chú). Ra D:\tmp\lens\chong-an-gian.json.
+ * Bộ dụng cụ dùng chung (chỉ ở phần chạy): mã băm dHash / pHash vùng giữa (cropHashSet / compareHashSets của lib.mjs) trên
+ * ảnh xám cạnh dài 256 px, xoay theo EXIF, bằng sharp. LƯU Ý (gợi ý 5 của code-reviewer vòng 1): sharp KHÔNG khai trong
+ * test-ocr/chup-mat-do/package.json; nó có mặt nhờ @huggingface/transformers kéo theo (phụ thuộc gián tiếp). Không thêm vào
+ * package.json (không thêm thư viện); đổi / bỏ transformers thì phần này gãy, cần xem lại.
  */
-async function runAntiCheat(arg) {
-  const lensDir = arg("--goc", "D:\\tmp\\lens");
-  const outDir = arg("--out", "D:\\tmp\\lens\\anh");
-  const photos = arg("--photos", "D:\\quet-ma-vach-full\\test-ocr\\photos");
-  const nhanFile = arg("--nhan", "D:\\tmp\\may-chu-loc\\nhan.json");
-  const spDir = path.join(lensDir, "off-sp");
-  fs.mkdirSync(spDir, { recursive: true });
-  const { cropHashSet, compareHashSets, parseCsv, HASH_DUP } = await import("./lib.mjs");
-  const { chooseSubstitute, OFF_CALLS_MAX, REAL_DUP_MAX, BULDAK_CODE, RUAYPUAN_CODE } = await import("./lens-do.mjs");
+async function hashTools() {
+  const { cropHashSet, compareHashSets } = await import("./lib.mjs");
   const sharp = (await import("sharp")).default;
-  const ca = JSON.parse(fs.readFileSync(path.join(lensDir, "ca.json"), "utf8"));
-  const nguon = parseCsv(fs.readFileSync(path.join(photos, "NGUON.csv"), "utf8"));
-  const catA = new Map(readCatalog(LEVEL_FILES.a).map((r) => [r.code, r]));
-  const catB = new Map(readCatalog(LEVEL_FILES.b).map((r) => [r.code, r]));
   const hashOf = async (file) => {
     const { data, info } = await sharp(file).rotate().resize(256, 256, { fit: "inside" }).greyscale().raw().toBuffer({ resolveWithObject: true });
     const g = new Array(info.width * info.height);
     for (let i = 0; i < g.length; i++) g[i] = data[i * info.channels];
     return cropHashSet(g, info.width, info.height);
   };
+  const distance = async (a, b) => compareHashSets(await hashOf(a), await hashOf(b))?.distance ?? null;
+  return { hashOf, distance, compareHashSets };
+}
+
+/**
+ * Chống ăn gian (cờ --chong-an-gian; KHÔNG tính độ giống ảnh): với mỗi mã A / B (truy vấn "ab-<mã>" của
+ * D:\tmp\lens\ca.json): đọc ảnh mặt trước trên OFF API sản phẩm (cache D:\tmp\lens\off-sp, giãn ≥ 1 giây, ≤ 60 lượt mạng
+ * mỗi lần chạy, cầu dao 5 lần 429 / 5xx liên tiếp, kiểm trước mỗi lượt), tải ảnh ứng viên (.400, lịch sự như trên), mã
+ * băm vùng giữa, chọn ảnh thay theo luật (chooseSubstitute của lens-do.mjs). Lỗi tải / cầu dao / OFF API lỗi → mã "chưa
+ * xong" (complete: false + incomplete), KHÔNG ghi thành LOẠI; chỉ "OFF không có ảnh khác hợp lệ" mới LOẠI. Ảnh thật: so
+ * mã băm ảnh chụp với ảnh chỉ mục của mã đúng đã tải (≤ 10 bit → ghi chú). Ra D:\tmp\lens\chong-an-gian.json. Trả
+ * complete.
+ */
+async function runAntiCheat(arg) {
+  const lensDir = arg("--goc", "D:\\tmp\\lens");
+  const outDir = arg("--out", "D:\\tmp\\lens\\anh");
+  const photos = arg("--photos", "D:\\quet-ma-vach-full\\test-ocr\\photos");
+  const nhanFile = arg("--nhan", "D:\\tmp\\may-chu-loc\\nhan.json");
+  if (!onDriveD(lensDir, outDir)) { console.error("Chỉ ghi vào ổ D."); process.exit(2); }
+  const spDir = path.join(lensDir, "off-sp");
+  fs.mkdirSync(spDir, { recursive: true });
+  fs.mkdirSync(outDir, { recursive: true });
+  const { parseCsv, HASH_DUP } = await import("./lib.mjs");
+  const { chooseSubstitute, knownImgid, OFF_CALLS_MAX, REAL_DUP_MAX, BULDAK_CODE, RUAYPUAN_CODE } = await import("./lens-do.mjs");
+  const { hashOf, compareHashSets } = await hashTools();
+  const ca = JSON.parse(fs.readFileSync(path.join(lensDir, "ca.json"), "utf8"));
+  const nguon = parseCsv(fs.readFileSync(path.join(photos, "NGUON.csv"), "utf8"));
+  const catA = new Map(readCatalog(LEVEL_FILES.a).map((r) => [r.code, r]));
+  const catB = new Map(readCatalog(LEVEL_FILES.b).map((r) => [r.code, r]));
   const gap = createGap(GAP_MS);
   const breaker = createBreaker();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const stats = { apiCalls: 0, apiCached: 0, imgDownloads: 0, imgCached: 0, imgFail: 0 };
-  const getProduct = async (code) => {
-    const f = path.join(spDir, `${code}.json`);
-    if (fs.existsSync(f)) { stats.apiCached++; return JSON.parse(fs.readFileSync(f, "utf8")); }
-    for (let attempt = 0; attempt <= RETRIES; attempt++) {
-      if (stats.apiCalls >= OFF_CALLS_MAX) throw new Error(`chạm trần ${OFF_CALLS_MAX} lượt OFF API`);
-      if (attempt) await sleep(backoffMs(attempt));
-      await gap();
-      stats.apiCalls++;
-      let status = 0;
-      try {
-        const res = await fetch(productUrl(code), { headers: { "User-Agent": USER_AGENT } });
-        status = res.status;
-        if (res.ok) { const j = await res.json(); fs.writeFileSync(f, JSON.stringify(j), "utf8"); return j; }
-      } catch { status = 0; }
-      if (breaker.record(status)) throw new Error("cầu dao mở (OFF API)");
-      if (!isRetryable(status)) return { status };
-    }
-    return { status: "het-thu" };
+  const cache = {
+    get: (code) => { const f = path.join(spDir, `${code}.json`); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; },
+    set: (code, j) => fs.writeFileSync(path.join(spDir, `${code}.json`), JSON.stringify(j), "utf8"),
   };
+  const getProduct = makeGetProduct({ fetchImpl: fetch, gap, breaker, sleep, cache, stats, maxCalls: OFF_CALLS_MAX });
+  /** Ảnh ứng viên: { file } hoặc { fail: "cau-dao" | "tai-loi", status }. */
   const ensureImg = async (code, key) => {
-    for (const s of SIZES) { const f = path.join(outDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) { stats.imgCached++; return f; } }
+    for (const s of SIZES) { const f = path.join(outDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) { stats.imgCached++; return { file: f }; } }
+    if (breaker.open) { stats.imgFail++; return { fail: "cau-dao" }; }
     const r = await fetchOne({ code, img: key }, { fetchImpl: fetch, gap, breaker, sleep });
-    if (!r.ok) { stats.imgFail++; return null; }
+    if (!r.ok) { stats.imgFail++; return { fail: r.breaker ? "cau-dao" : "tai-loi", status: r.status }; }
     stats.imgDownloads++;
     const f = path.join(outDir, fileNameOf(code, key, r.size));
     fs.writeFileSync(f, r.buf);
-    return f;
+    return { file: f };
   };
   const items = [];
-  let stopped = null;
+  const expected = ca.queries.filter((x) => x.qid.startsWith("ab-")).map((x) => x.qid.slice(3));
   for (const q of ca.queries.filter((x) => x.qid.startsWith("ab-"))) {
     const code = q.qid.slice(3);
     const src = nguon.find((r) => r.code === code && r.file === "front.jpg");
     const testImgid = imgidFromUrl(src?.url);
-    const catalogImg = catA.get(code)?.img || "";
+    const catalogImg = (catA.get(code) ?? catB.get(code))?.img || "";
+    const base = { code, testImgid, catalogImg, catalogLevel: catA.has(code) ? "a" : catB.has(code) ? "b" : null };
+    const prod = await getProduct(code);
+    if (prod.kind !== "ok" && prod.kind !== "khong-co") {
+      const reason = prod.kind === "cau-dao" ? "cầu dao mở" : prod.kind === "tran" ? `chạm trần ${OFF_CALLS_MAX} lượt OFF API` : `OFF API lỗi ${prod.status}`;
+      items.push({ ...base, offStatus: prod.kind, candidates: [], chosen: null, rejected: [], status: "chua-xong", reason });
+      console.log(`${code}: CHƯA XONG (${reason})`);
+      continue;
+    }
     const testSet = await hashOf(q.file);
-    let prod;
-    try { prod = await getProduct(code); } catch (e) {
-      // cầu dao / chạm trần: dừng gọi OFF, ghi phần đã xét (incomplete), lần sau chạy lại dùng cache
-      stopped = `${code}: ${e.message}`;
-      console.log(`DỪNG: ${stopped}`);
-      break;
+    const cands = prod.kind === "ok" ? candidatesFrom(prod.json?.product, catalogImg) : [];
+    for (let i = 0; i < cands.length; i++) {
+      const c = cands[i];
+      if (!needsImage(c, testImgid, knownImgid)) continue;
+      const g = await ensureImg(code, c.key);
+      if (g.fail) { c.distance = null; c.fetchFail = g.fail; continue; }
+      c.distance = compareHashSets(await hashOf(g.file), testSet)?.distance ?? null;
+      if (chooseSubstitute(cands.slice(0, i + 1), testImgid).chosen) break; // đã có ảnh thay: không tải thêm
     }
-    const cands = candidatesFrom(prod?.product, catalogImg);
-    for (const c of cands) {
-      const f = await ensureImg(code, c.key);
-      c.distance = f ? compareHashSets(await hashOf(f), testSet)?.distance ?? null : null;
-    }
-    const r = chooseSubstitute(cands, testImgid);
+    const v = antiCheatVerdict(cands, testImgid, chooseSubstitute, { productFound: prod.kind === "ok" });
     items.push({
-      code, testImgid, catalogImg, offStatus: prod?.product ? 200 : prod?.status ?? null,
-      candidates: cands.map(({ key, imgid, fromCatalog, note, distance }) => ({ key, imgid, fromCatalog, note: note ?? null, distance })),
-      chosen: r.chosen ? r.chosen.key : null, rejected: r.rejected,
-      reason: r.chosen ? null : (cands.length ? [...new Set(r.rejected.map((x) => x.reason))].join("; ") : "OFF không có ảnh mặt trước"),
+      ...base, offStatus: prod.kind === "ok" ? 200 : 404,
+      candidates: cands.map(({ key, imgid, fromCatalog, note, distance, fetchFail }) => ({ key, imgid, fromCatalog, note: note ?? null, distance: distance ?? null, fetchFail: fetchFail ?? null })),
+      chosen: v.chosen ? v.chosen.key : null, rejected: v.rejected, status: v.status, reason: v.reason,
     });
-    console.log(`${code}: ảnh đo imgid ${testImgid}, danh mục ${catalogImg || "(không ảnh)"}, ${cands.length} ứng viên → ${r.chosen ? `dùng ${r.chosen.key} (${r.chosen.distance} bit)` : `LOẠI (${items.at(-1).reason})`}`);
+    const dd = v.chosen ? `DÙNG ${v.chosen.key} (imgid ${v.chosen.imgid}, ${v.chosen.distance} bit)` : v.status === "loai" ? `LOẠI (${v.reason})` : `CHƯA XONG (${v.reason})`;
+    console.log(`${code}: ảnh đo imgid ${testImgid}, danh mục ${catalogImg || "(không ảnh)"}, ${cands.length} ứng viên → ${dd}`);
   }
   // ảnh thật (+ buldak, ruaypuan): mã băm ảnh chụp so ảnh chỉ mục của mã đúng (nếu đã tải); chỉ ghi chú, không loại
   const nhan = JSON.parse(fs.readFileSync(nhanFile, "utf8"));
@@ -413,13 +592,158 @@ async function runAntiCheat(arg) {
     const dist = f ? compareHashSets(await hashOf(f), await hashOf(q.file))?.distance ?? null : null;
     real.push({ qid: q.qid, hasLabel: true, level, hasImgKey: !!key, indexImgDownloaded: !!f, distance: dist, note: dist != null && dist <= REAL_DUP_MAX ? "có thể trùng ảnh (≤ 10 bit)" : null });
   }
+  const sum = summarizeAntiCheat(items, expected);
   const out = {
-    at: new Date().toISOString(), rule: `ảnh thay: imgid khác ảnh đo VÀ mã băm vùng giữa > 24 bit (HASH_DUP ${HASH_DUP}; cropHashSet / compareHashSets của lib.mjs, xám bằng sharp, cạnh dài 256 px)`,
-    userAgent: USER_AGENT, appName: APP_NAME, stats, items, complete: stopped === null, stopped,
-    excluded: items.filter((x) => !x.chosen).map((x) => x.code),
-    override: Object.fromEntries(items.filter((x) => x.chosen).map((x) => [x.code, x.chosen])),
-    real,
+    at: new Date().toISOString(), rule: `ảnh thay: imgid ảnh đo và ứng viên đều biết, khác nhau, VÀ mã băm vùng giữa > 24 bit (HASH_DUP ${HASH_DUP}; cropHashSet / compareHashSets của lib.mjs, xám bằng sharp, xoay EXIF, cạnh dài 256 px); lỗi tải / cầu dao / OFF API lỗi = chưa xong, không phải loại`,
+    userAgent: USER_AGENT, appName: APP_NAME, stats, breakerOpen: breaker.open, items, expected: expected.length,
+    complete: sum.complete, incomplete: sum.incomplete, excluded: sum.excluded, override: sum.override, real,
   };
   fs.writeFileSync(path.join(lensDir, "chong-an-gian.json"), JSON.stringify(out, null, 1), "utf8");
-  console.log(`A/B: ${items.length} mã, dùng được ${items.length - out.excluded.length}, loại ${out.excluded.length}. Ảnh thật có nhãn ${real.filter((x) => x.hasLabel).length}, ảnh chỉ mục đã tải ${real.filter((x) => x.indexImgDownloaded).length}, ghi chú trùng ${real.filter((x) => x.note).length}. OFF API ${stats.apiCalls} lượt (cache ${stats.apiCached}), ảnh tải ${stats.imgDownloads} (có sẵn ${stats.imgCached}, lỗi ${stats.imgFail}).`);
+  console.log(`A/B: ${items.length}/${expected.length} mã, dùng được ${Object.keys(sum.override).length}, LOẠI ${sum.excluded.length}, CHƯA XONG ${sum.incomplete.length} → complete ${sum.complete}. Ảnh thật có nhãn ${real.filter((x) => x.hasLabel).length}, ảnh chỉ mục đã tải ${real.filter((x) => x.indexImgDownloaded).length}, ghi chú trùng ${real.filter((x) => x.note).length}. OFF API ${stats.apiCalls} lượt mạng (cache ${stats.apiCached}), ảnh tải ${stats.imgDownloads} (có sẵn ${stats.imgCached}, lỗi ${stats.imgFail})${breaker.open ? "; CẦU DAO MỞ" : ""}.`);
+  return sum.complete;
+}
+
+/**
+ * Bộ P (cờ --bo-p; LỆCH LUẬT 1 của lens-do.mjs; KHÔNG tính độ giống ảnh): mã A / B dùng được có trong danh mục (a) (ảnh
+ * truy vấn = ảnh đo, ảnh chỉ mục = ảnh thay) ∪ cặp VN leave-one-out của D:\tmp\chup-mat-do\chi-muc\loo.json có mã trong
+ * danh mục (a), không trùng mã A / B (ảnh truy vấn = ảnh queryImgid; ảnh chỉ mục theo decidePIndex). imgid của khóa danh
+ * mục lấy từ bản xuất OFF D:\tmp\chup-mat-do\du-lieu\vn-products.json (khóa front_xx.rev cố định một ảnh; rev khác = không
+ * biết imgid). Ảnh dùng lại từ D:\tmp\chup-mat-do\chi-muc\anh và D:\tmp\lens\anh; thiếu thì tải bản .400 theo imgid
+ * (giãn ≥ 1 giây, ≤ 40 ảnh). Ra D:\tmp\lens\bo-p.json. Trả true khi không có cặp nào dở vì tải lỗi.
+ */
+async function runBoP(arg) {
+  const lensDir = arg("--goc", "D:\\tmp\\lens");
+  const anhDir = arg("--out", "D:\\tmp\\lens\\anh");
+  const looFile = arg("--loo", "D:\\tmp\\chup-mat-do\\chi-muc\\loo.json");
+  const looAnh = arg("--loo-anh", "D:\\tmp\\chup-mat-do\\chi-muc\\anh");
+  const vnFile = arg("--vn", "D:\\tmp\\chup-mat-do\\du-lieu\\vn-products.json");
+  const photos = arg("--photos", "D:\\quet-ma-vach-full\\test-ocr\\photos");
+  if (!onDriveD(lensDir, anhDir, looAnh)) { console.error("Chỉ ghi vào ổ D."); process.exit(2); }
+  const { knownImgid, HASH_OK_MIN } = await import("./lens-do.mjs");
+  const { distance } = await hashTools();
+  const ac = JSON.parse(fs.readFileSync(path.join(lensDir, "chong-an-gian.json"), "utf8"));
+  if (ac.complete !== true) { console.error("chong-an-gian.json chưa complete: dựng bộ P sau."); return false; }
+  const catA = new Map(readCatalog(LEVEL_FILES.a).map((r) => [r.code, r]));
+  const loo = JSON.parse(fs.readFileSync(looFile, "utf8"));
+  const vn = new Map(JSON.parse(fs.readFileSync(vnFile, "utf8")).map((r) => [r.code, r]));
+  const MAX_DL = 40;
+  const gap = createGap(GAP_MS);
+  const breaker = createBreaker();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const dl = { downloads: 0, cached: 0, fail: 0 };
+  const byImgid = (code, imgid) => path.join(looAnh, `${code}_${imgid}.400.jpg`);
+  /** Ảnh theo imgid (chi-muc\anh): có sẵn → file; thiếu → tải .400 từ images.openfoodfacts.org (≤ 40 ảnh). */
+  const ensureImgid = async (code, imgid) => {
+    const f = byImgid(code, imgid);
+    if (fs.existsSync(f) && fs.statSync(f).size > 0) { dl.cached++; return f; }
+    if (dl.downloads >= MAX_DL || breaker.open) { dl.fail++; return null; }
+    const p = code.padStart(13, "0");
+    const url = `https://images.openfoodfacts.org/images/products/${p.slice(0, 3)}/${p.slice(3, 6)}/${p.slice(6, 9)}/${p.slice(9)}/${imgid}.400.jpg`;
+    await gap();
+    dl.downloads++;
+    let status = 0;
+    let b = null;
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+      status = res.status;
+      if (res.ok) b = Buffer.from(await res.arrayBuffer());
+    } catch { status = 0; b = null; }
+    breaker.record(status);
+    if (b && b.length) { fs.writeFileSync(f, b); return f; }
+    dl.fail++;
+    return null;
+  };
+  const anhFile = (code, key) => { for (const s of SIZES) { const f = path.join(anhDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) return f; } return null; };
+  const items = [];
+  const dropped = [];
+  let pending = 0;
+  // (1) A / B dùng được, có trong danh mục (a)
+  for (const it of ac.items) {
+    if (it.status !== "dung") continue;
+    if (!catA.has(it.code)) { dropped.push({ code: it.code, kind: "ab", reason: "mã không có trong danh mục (a)" }); continue; }
+    const c = it.candidates.find((x) => x.key === it.chosen);
+    const file = anhFile(it.code, it.chosen);
+    if (!file) { dropped.push({ code: it.code, kind: "ab", reason: "chưa có file ảnh thay" }); pending++; continue; }
+    items.push({
+      qid: `ab-${it.code}`, code: it.code, kind: "ab",
+      query: { file: path.join(photos, it.code, "front.jpg"), imgid: String(it.testImgid) },
+      index: { key: it.chosen, imgid: String(c.imgid), source: "override", distance: c.distance, file },
+    });
+  }
+  // (2) cặp leave-one-out VN
+  const abSet = new Set(ac.items.map((x) => x.code));
+  for (const pr of loo.pairs || []) {
+    const code = String(pr.code);
+    if (abSet.has(code)) { dropped.push({ code, kind: "loo", reason: "trùng mã A / B" }); continue; }
+    const row = catA.get(code);
+    if (!row) { dropped.push({ code, kind: "loo", reason: "mã không có trong danh mục (a)" }); continue; }
+    const qf = await ensureImgid(code, pr.queryImgid);
+    if (!qf) { dropped.push({ code, kind: "loo", reason: "chưa có ảnh truy vấn (tải lỗi)" }); pending++; continue; }
+    const catalogKey = typeof row.img === "string" && IMG_RE.test(row.img) ? row.img : null;
+    const catalogImgid = catalogKey ? catalogImgidOf(vn.get(code)?.fronts, catalogKey) : null;
+    const cf = catalogKey ? anhFile(code, catalogKey) : null;
+    const catalogDist = cf && knownImgid(catalogImgid) && String(catalogImgid) !== String(pr.queryImgid) ? await distance(cf, qf) : null;
+    let indexDist = null;
+    let xf = null;
+    const needOverride = !(catalogKey && knownImgid(catalogImgid) && String(catalogImgid) !== String(pr.queryImgid) && Number.isFinite(catalogDist) && catalogDist >= HASH_OK_MIN);
+    if (needOverride && knownImgid(pr.indexImgid) && String(pr.indexImgid) !== String(pr.queryImgid)) {
+      xf = await ensureImgid(code, pr.indexImgid);
+      indexDist = xf ? await distance(xf, qf) : null;
+    }
+    const d = decidePIndex({ queryImgid: String(pr.queryImgid), catalogKey, catalogImgid, catalogDist, indexImgid: pr.indexImgid, indexDist }, { okMin: HASH_OK_MIN, known: knownImgid });
+    if (catalogKey && !cf) d.reasons.push("khóa danh mục: chưa có file ảnh");
+    if (!d.index) { dropped.push({ code, kind: "loo", reason: d.reasons.join("; ") }); continue; }
+    items.push({
+      qid: `p-${code}`, code, kind: "loo",
+      query: { file: qf, imgid: String(pr.queryImgid) },
+      index: { ...d.index, file: d.index.source === "catalog" ? cf : xf }, notes: d.reasons,
+    });
+  }
+  const out = {
+    at: new Date().toISOString(),
+    rule: "LỆCH LUẬT 1 (i): bộ P = mã A / B đo được (ảnh thay hợp lệ, có trong danh mục (a)) ∪ cặp VN leave-one-out (loo.json) có mã trong danh mục (a), không trùng mã A / B; ảnh chỉ mục: khóa danh mục nếu imgid khác queryImgid và mã băm > 24 bit, không thì ảnh indexImgid (> 24 bit), không thì bỏ cặp",
+    hashMethod: "sharp xám, xoay EXIF, cạnh dài 256 px, cropHashSet / compareHashSets của lib.mjs",
+    imgidSource: "khóa danh mục → imgid theo bản xuất OFF vn-products.json (front_xx.rev)",
+    n: items.length, nAb: items.filter((x) => x.kind === "ab").length, nLoo: items.filter((x) => x.kind === "loo").length,
+    looPairs: (loo.pairs || []).length, items, dropped, download: dl, userAgent: USER_AGENT,
+  };
+  fs.writeFileSync(path.join(lensDir, "bo-p.json"), JSON.stringify(out, null, 1), "utf8");
+  console.log(`Bộ P: |P| = ${out.n} (A/B ${out.nAb}, loo ${out.nLoo}); cặp loo ${out.looPairs}, bỏ ${dropped.length}: ${dropped.map((x) => `${x.code} (${x.kind}: ${x.reason})`).join("; ")}. Ảnh tải ${dl.downloads}, có sẵn ${dl.cached}, lỗi ${dl.fail}.`);
+  return pending === 0;
+}
+
+/**
+ * Đầu vào lens-vec.py (cờ --vao-vec --muc a|b): danh sách ảnh chỉ mục TƯỜNG MINH (buildVecInput) + truy vấn (ca.json +
+ * bộ P) + các trường meta chống ăn gian (sha256 chong-an-gian.json / bo-p.json, excluded, override). Ra
+ * D:\tmp\lens\vec-vao-<mức>.json. Không đọc / tính ảnh.
+ */
+function runVecInput(arg) {
+  const lensDir = arg("--goc", "D:\\tmp\\lens");
+  const anhDir = arg("--out", "D:\\tmp\\lens\\anh");
+  const level = arg("--muc", "a");
+  if (!Object.hasOwn(LEVEL_FILES, level)) { console.error(`--muc phải là a hoặc b (nhận ${level})`); process.exit(2); }
+  if (!onDriveD(lensDir, anhDir)) { console.error("Chỉ ghi vào ổ D."); process.exit(2); }
+  const acText = fs.readFileSync(path.join(lensDir, "chong-an-gian.json"), "utf8");
+  const bopText = fs.readFileSync(path.join(lensDir, "bo-p.json"), "utf8");
+  const ac = JSON.parse(acText);
+  const bop = JSON.parse(bopText);
+  if (ac.complete !== true) { console.error("chong-an-gian.json chưa complete."); process.exit(3); }
+  const ca = JSON.parse(fs.readFileSync(path.join(lensDir, "ca.json"), "utf8"));
+  const pFile = new Map(bop.items.map((p) => [p.code, p.index]));
+  const fileOf = (code, key) => {
+    const m = IMGID_KEY_RE.exec(key);
+    if (m) { const p = pFile.get(code); return p && p.key === key && p.file && fs.existsSync(p.file) ? p.file : null; }
+    for (const s of SIZES) { const f = path.join(anhDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) return f; }
+    return null;
+  };
+  const v = buildVecInput({ rows: readCatalog(LEVEL_FILES[level]), fileOf, ac, bop, queries: ca.queries.map((q) => ({ qid: q.qid, file: q.file })) });
+  const sha = (t) => crypto.createHash("sha256").update(t, "utf8").digest("hex");
+  const out = {
+    at: new Date().toISOString(), level, antiCheatSha256: sha(acText), boPSha256: sha(bopText), excluded: ac.excluded,
+    override: { ...ac.override, ...Object.fromEntries(bop.items.map((p) => [p.code, p.index.key])) },
+    indexKey: v.indexKey, indexImgid: v.indexImgid, missing: v.missing, index: v.index, queries: v.queries,
+  };
+  const f = path.join(lensDir, `vec-vao-${level}.json`);
+  fs.writeFileSync(f, JSON.stringify(out), "utf8");
+  console.log(`Đầu vào lens-vec mức (${level}): ${v.index.length} ảnh chỉ mục (thiếu file ${v.missing.length}), ${v.queries.length} truy vấn, loại ${ac.excluded.length} mã, override ${Object.keys(out.override).length}. Ghi ${f}.`);
 }

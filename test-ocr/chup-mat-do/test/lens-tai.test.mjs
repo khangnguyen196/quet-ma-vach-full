@@ -6,7 +6,9 @@ import { frontImageUrl } from "../../../src/front-search.js";
 import {
   imageUrl, fileNameOf, planList, existingOf, isRetryable, backoffMs, createBreaker, createGap, estimateRemaining, budgetOk,
   fetchOne, USER_AGENT, BUDGET_BYTES, DEFAULT_AVG_BYTES, MAX_CONN, GAP_MS, BREAKER_LIMIT, productUrl, candidatesFrom, imgidFromUrl, APP_NAME,
+  makeGetProduct, antiCheatVerdict, summarizeAntiCheat, needsImage, onDriveD, catalogImgidOf, decidePIndex, buildVecInput, IMGID_KEY_RE,
 } from "../lens-tai.mjs";
+import { chooseSubstitute } from "../lens-do.mjs";
 
 test("imageUrl trùng frontImageUrl của src (400 / 200), sai dạng → rỗng", () => {
   for (const [code, img] of [["8934588752117", "front_vi.12"], ["12345678", "front_en.3"], ["0052603065054", "front_fr.100"]]) {
@@ -130,4 +132,123 @@ test("cổng 5 GB: hiện có + ước còn lại", () => {
   assert.equal(estimateRemaining(10, 4, 400), 1000);
   assert.equal(budgetOk(4 * 1024 ** 3, 1024 ** 3), true);
   assert.equal(budgetOk(4 * 1024 ** 3, 1024 ** 3 + 1), false);
+});
+
+// ---------------- vòng 2: cầu dao OFF API, chống ăn gian "chưa xong" ≠ "loại", bộ P, đầu vào lens-vec ----------------
+const jsonResp = (status) => ({ status, ok: status >= 200 && status < 300, json: async () => ({ code: "x", product: { images: {} } }) });
+function apiDeps(script) {
+  const calls = [];
+  const cacheMap = new Map();
+  const stats = { apiCalls: 0, apiCached: 0 };
+  const breaker = createBreaker();
+  const getProduct = makeGetProduct({
+    fetchImpl: async (url) => { calls.push(url); const s = script.shift(); if (s === undefined) throw new Error("gọi quá kịch bản"); if (s === "throw") throw new Error("net"); return jsonResp(s); },
+    gap: async () => {}, breaker, sleep: async () => {}, cache: { get: (c) => cacheMap.get(c) ?? null, set: (c, j) => cacheMap.set(c, j) }, stats, maxCalls: 60,
+  });
+  return { calls, cacheMap, stats, breaker, getProduct };
+}
+const knownT = (x) => x != null && String(x).trim() !== "";
+
+test("OFF API (NÊN SỬA 3): 429, 200, 429… KHÔNG mở cầu dao; 5 lần 429 liền thì mở và không gọi thêm", async () => {
+  // xen kẽ: mỗi mã 429 rồi 200 (thử lại được) → thành công ghi record(200) nên chuỗi liên tiếp về 0
+  const d = apiDeps([429, 200, 429, 200, 429, 200, 429, 200, 429, 200, 429, 200]);
+  for (const c of ["11111111", "22222222", "33333333", "44444444", "55555555", "66666666"]) assert.equal((await d.getProduct(c)).kind, "ok", c);
+  assert.equal(d.breaker.open, false, "lượt thành công đặt lại chuỗi");
+  assert.equal(d.breaker.run, 0);
+  assert.equal(d.calls.length, 12);
+  assert.match(d.calls[0], /app_name=quet-ma-vach-lens/);
+  // lượt từ cache không gọi mạng, không chạm cầu dao
+  assert.equal((await d.getProduct("11111111")).kind, "ok");
+  assert.equal(d.stats.apiCached, 1);
+  assert.equal(d.calls.length, 12);
+  // 5 lần 429 liền: mã 1 hết 4 lượt (RETRIES 3) → lỗi; mã 2 lượt 1 = lần thứ 5 → mở; mã 3 không gọi
+  const e = apiDeps([429, 429, 429, 429, 429]);
+  assert.deepEqual(await e.getProduct("11111111"), { kind: "loi", status: 429 });
+  assert.deepEqual(await e.getProduct("22222222"), { kind: "cau-dao" });
+  assert.equal(e.breaker.open, true);
+  assert.deepEqual(await e.getProduct("33333333"), { kind: "cau-dao" });
+  assert.equal(e.calls.length, 5, "cầu dao mở thì không gọi thêm lượt nào");
+  // 404 → khong-co; 403 → loi không thử lại; trần lượt
+  assert.deepEqual(await apiDeps([404]).getProduct("12345678"), { kind: "khong-co", status: 404 });
+  const f = apiDeps([403]);
+  assert.deepEqual(await f.getProduct("12345678"), { kind: "loi", status: 403 });
+  assert.equal(f.calls.length, 1);
+  const g = apiDeps([200]);
+  g.stats.apiCalls = 60;
+  assert.deepEqual(await g.getProduct("12345678"), { kind: "tran" });
+  assert.equal(g.calls.length, 0);
+});
+
+test("chống ăn gian (NÊN SỬA 2): tải ảnh lỗi / cầu dao → 'chua-xong' (không LOẠI); complete false + incomplete", () => {
+  const C = (key, imgid, distance, fetchFail) => ({ key, imgid, distance, fetchFail });
+  assert.equal(antiCheatVerdict([C("front_vi.3", "8", 40)], "7", chooseSubstitute).status, "dung");
+  const tl = antiCheatVerdict([C("front_vi.3", "8", null, "tai-loi")], "7", chooseSubstitute);
+  assert.deepEqual([tl.status, tl.reason], ["chua-xong", "tải ảnh lỗi"]);
+  const cd = antiCheatVerdict([C("front_vi.3", "8", null, "cau-dao")], "7", chooseSubstitute);
+  assert.deepEqual([cd.status, cd.reason], ["chua-xong", "cầu dao mở"]);
+  assert.equal(antiCheatVerdict([C("front_vi.3", "8", null, "tai-loi"), C("front_en.4", "9", 40)], "7", chooseSubstitute).status, "chua-xong", "ứng viên đứng trước tải lỗi → chưa biết luật chọn ai");
+  assert.equal(antiCheatVerdict([C("front_en.4", "9", 40), C("front_vi.3", "8", null, "tai-loi")], "7", chooseSubstitute).status, "dung", "ứng viên lỗi đứng sau ảnh đã chọn → không ảnh hưởng");
+  const lo = antiCheatVerdict([C("front_vi.3", "7", null), C("front_en.4", "9", 3)], "7", chooseSubstitute);
+  assert.deepEqual([lo.status, lo.reason], ["loai", "cùng imgid; gần ảnh đo 3 bit (≤ 24)"]);
+  assert.deepEqual(antiCheatVerdict([], "7", chooseSubstitute).reason, "OFF không có ảnh mặt trước");
+  assert.deepEqual(antiCheatVerdict([], "7", chooseSubstitute, { productFound: false }).reason, "OFF không có sản phẩm");
+  // mẫu sai (bản vòng 1): ảnh lỗi → distance null → chooseSubstitute thật trả "không có mã băm" (sẽ bị ghi LOẠI)
+  assert.equal(chooseSubstitute([C("front_vi.3", "8", null)], "7").rejected[0].reason, "không có mã băm");
+  const s = summarizeAntiCheat([
+    { code: "1", status: "dung", chosen: "front_vi.3" }, { code: "2", status: "loai" }, { code: "3", status: "chua-xong", reason: "tải ảnh lỗi" },
+  ], ["1", "2", "3", "4"]);
+  assert.equal(s.complete, false);
+  assert.deepEqual(s.incomplete, [{ code: "3", reason: "tải ảnh lỗi" }, { code: "4", reason: "chưa xét" }]);
+  assert.deepEqual(s.excluded, ["2"], "chỉ LOẠI thật mới vào excluded");
+  assert.deepEqual(s.override, { 1: "front_vi.3" });
+  assert.equal(summarizeAntiCheat([{ code: "1", status: "dung", chosen: "k" }, { code: "2", status: "loai" }], ["1", "2"]).complete, true);
+  assert.equal(summarizeAntiCheat([], []).complete, false);
+  assert.equal(needsImage({ imgid: "8" }, "7", knownT), true);
+  assert.equal(needsImage({ imgid: "7" }, "7", knownT), false);
+  assert.equal(needsImage({ imgid: null }, "7", knownT), false);
+  assert.equal(needsImage({ imgid: "8" }, null, knownT), false);
+});
+
+test("chỉ ghi ổ D (gợi ý 4)", () => {
+  assert.equal(onDriveD("D:\\tmp\\lens", "d:/tmp/lens/anh"), true);
+  assert.equal(onDriveD("D:\\tmp\\lens", "C:\\Users\\x"), false);
+});
+
+test("bộ P: imgid khóa danh mục theo bản xuất; giữ khóa danh mục / dùng indexImgid / bỏ cặp (LỆCH LUẬT 1 (i))", () => {
+  const fronts = [{ key: "front_en", imgid: "35", rev: "177" }, { key: "front_fr", imgid: "24", rev: "115" }];
+  assert.equal(catalogImgidOf(fronts, "front_en.177"), "35");
+  assert.equal(catalogImgidOf(fronts, "front_en.178"), null, "rev khác → không biết imgid");
+  assert.equal(catalogImgidOf(fronts, "front_vi.1"), null);
+  assert.equal(catalogImgidOf(undefined, "front_en.177"), null);
+  const opt = { okMin: 25, known: knownT };
+  const base = { queryImgid: "24", catalogKey: "front_en.177", catalogImgid: "35", catalogDist: 28, indexImgid: "35", indexDist: 28 };
+  assert.deepEqual(decidePIndex(base, opt).index, { key: "front_en.177", imgid: "35", source: "catalog", distance: 28 });
+  const ov = decidePIndex({ ...base, catalogImgid: "24" }, opt);
+  assert.deepEqual(ov.index, { key: "imgid:35", imgid: "35", source: "override", distance: 28 }, "khóa danh mục cùng imgid ảnh truy vấn → indexImgid");
+  assert.match(ov.reasons[0], /cùng imgid ảnh truy vấn/);
+  assert.equal(decidePIndex({ ...base, catalogImgid: null }, opt).index.source, "override", "không biết imgid khóa danh mục");
+  assert.equal(decidePIndex({ ...base, catalogDist: 24 }, opt).index.source, "override", "khóa danh mục gần (≤ 24 bit)");
+  assert.equal(decidePIndex({ ...base, catalogDist: 24, indexDist: 24 }, opt).index, null, "cả hai gần → bỏ cặp");
+  assert.equal(decidePIndex({ ...base, catalogDist: null, indexDist: null }, opt).index, null);
+  assert.equal(decidePIndex({ ...base, catalogKey: null, catalogImgid: null }, opt).index.source, "override");
+  assert.equal(decidePIndex({ ...base, queryImgid: null }, opt).index, null);
+  assert.equal(decidePIndex({ ...base, catalogImgid: "24", indexImgid: "24" }, opt).index, null, "indexImgid cùng ảnh truy vấn → bỏ");
+});
+
+test("đầu vào lens-vec: danh sách tường minh, bỏ mã bị loại, dùng override, ghi imgid ảnh chỉ mục + truy vấn bộ P", () => {
+  const rows = [
+    { code: "1111111111111", img: "front_vi.3" }, { code: "2222222222222", img: "front_vi.4" }, { code: "3333333333333", img: "front_en.5" },
+    { code: "4444444444444", img: "front_th.6" }, { code: "5555555555555", img: "" }, { code: "1111111111111", img: "front_vi.9" },
+  ];
+  const ac = { items: [{ code: "1111111111111", chosen: "front_fr.7", candidates: [{ key: "front_fr.7", imgid: "12" }] }], excluded: ["2222222222222"], override: { "1111111111111": "front_fr.7" } };
+  const bop = { items: [{ qid: "p-3333333333333", code: "3333333333333", query: { file: "D:\\q3.jpg", imgid: "1" }, index: { key: "imgid:4", imgid: "4", file: "D:\\i3.jpg" } }] };
+  const files = { "1111111111111|front_fr.7": "D:\\a1.jpg", "3333333333333|imgid:4": "D:\\i3.jpg", "2222222222222|front_vi.4": "D:\\a2.jpg" };
+  const v = buildVecInput({ rows, fileOf: (c, k) => files[`${c}|${k}`] ?? null, ac, bop, queries: [{ qid: "ab-1111111111111", file: "D:\\f1.jpg" }] });
+  assert.deepEqual(v.index, [{ code: "1111111111111", key: "front_fr.7", file: "D:\\a1.jpg" }, { code: "3333333333333", key: "imgid:4", file: "D:\\i3.jpg" }]);
+  assert.deepEqual(v.indexImgid, { "1111111111111": "12", "3333333333333": "4" });
+  assert.deepEqual(v.missing, [{ code: "4444444444444", key: "front_th.6" }]);
+  assert.deepEqual(v.queries.map((q) => q.qid), ["ab-1111111111111", "p-3333333333333"]);
+  assert.ok(!v.index.some((x) => x.code === "2222222222222"), "mã bị loại không vào chỉ mục dù có file");
+  assert.equal(IMGID_KEY_RE.exec("imgid:4")[1], "4");
+  assert.throws(() => buildVecInput({ rows, fileOf: () => "x", ac, bop: { items: [{ ...bop.items[0], code: "1111111111111", index: { key: "front_xx.1", imgid: "1" } }] }, queries: [] }), /mâu thuẫn/);
 });
