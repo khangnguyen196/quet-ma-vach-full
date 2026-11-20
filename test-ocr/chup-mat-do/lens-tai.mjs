@@ -374,8 +374,12 @@ export function queryTruth(ca, bop, level) {
  * trên hàng ab-<mã> (hideByRow); override A / B mọi mức, override + truy vấn bộ P CHỈ ở mức (a). Mã có ảnh truy vấn
  * (mọi mã A / B, bộ P ở mức a) ghi imgid ảnh chỉ mục khi biết (meta.indexImgid). Trả { index: [{ code, key, file }],
  * indexKey, indexImgid, override, hideByRow, missing: [{ code, key }], queries }.
+ * Vòng 3 A' (NÊN SỬA 2 review mốc 4): missing404 = Set mã có ảnh danh mục 404 cả hai cỡ (tai-tong-b.json; null = như cũ).
+ * Mã KHÔNG có override, thiếu file VÀ nằm trong missing404 = "không có ảnh" (như mã không có khóa ảnh): không vào chỉ mục,
+ * không tính vào missing, ghi vào unavailable404. Mã được bảo vệ (bị loại, A / B, bộ P) mà rơi vào unavailable404 → ghi
+ * vào unavailable404Blocked (người gọi thoát mã 3; checkIndexGuard cũng chặn). Trả thêm { unavailable404, unavailable404Blocked }.
  */
-export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
+export function buildVecInput({ level, rows, fileOf, ac, bop, queries, missing404 = null }) {
   if (level !== "a" && level !== "b") throw new Error(`buildVecInput: mức lạ ${level}`);
   const P = level === "a" ? bop?.items || [] : [];
   const override = { ...(ac.override || {}) };
@@ -395,6 +399,7 @@ export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
   const indexKey = {};
   const indexImgid = {};
   const missing = [];
+  const unavailable404 = [];
   const seen = new Set();
   for (const r of rows || []) {
     if (!r || typeof r.code !== "string" || !CODE_RE.test(r.code) || seen.has(r.code)) continue;
@@ -402,7 +407,11 @@ export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
     const key = override[r.code] ?? (typeof r.img === "string" && IMG_RE.test(r.img) ? r.img : null);
     if (!key) continue;
     const file = fileOf(r.code, key);
-    if (!file) { missing.push({ code: r.code, key }); continue; }
+    if (!file) {
+      if (missing404 && !Object.hasOwn(override, r.code) && missing404.has(r.code)) unavailable404.push(r.code);
+      else missing.push({ code: r.code, key });
+      continue;
+    }
     index.push({ code: r.code, key, file });
     indexKey[r.code] = key;
     // imgid chỉ ghi khi đúng là imgid của khóa đang dùng (khóa khác → không biết)
@@ -410,7 +419,22 @@ export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
   }
   const qs = [...(queries || [])];
   for (const p of P) if (!qs.some((q) => q.qid === p.qid)) qs.push({ qid: p.qid, file: p.query.file });
-  return { index, indexKey, indexImgid, override, hideByRow, missing, queries: qs };
+  const guarded = new Set([...(ac.excluded || []), ...(ac.items || []).map((x) => x.code), ...P.map((p) => p.code)]);
+  const unavailable404Blocked = unavailable404.filter((c) => guarded.has(c));
+  return { index, indexKey, indexImgid, override, hideByRow, missing, queries: qs, unavailable404, unavailable404Blocked };
+}
+
+/**
+ * Vòng 3 A' (NÊN SỬA 2 review mốc 4): --vao-vec b chỉ khi tải mức (b) đã xong: tai-tong-b.json đúng cỡ (withImg = số sp có
+ * khóa ảnh của mức b) VÀ downloaded + số mã 404 (không trùng) = withImg (tạo đầu vào giữa chừng sẽ ra missing > 0). Trả null
+ * khi đạt, không thì câu lỗi.
+ */
+export function vecInputReady(sum, withImg) {
+  if (!sum || typeof sum !== "object" || !Number.isInteger(sum.downloaded) || !Array.isArray(sum.missing404)) return "tai-tong-b.json thiếu / sai dạng (downloaded, missing404)";
+  if (sum.withImg !== withImg) return `tai-tong-b.json withImg ${sum.withImg} ≠ số sp có khóa ảnh mức (b) ${withImg}`;
+  const n404 = new Set(sum.missing404).size;
+  if (sum.downloaded + n404 !== withImg) return `chưa tải xong mức (b): ${sum.downloaded} ảnh + ${n404} mã 404 ≠ ${withImg}`;
+  return null;
 }
 
 /** Đường dẫn ảnh theo imgid của bộ P (gợi ý 4): ĐỌC ở readDirs theo thứ tự (ảnh có sẵn), GHI (tải mới) CHỈ vào writeDir. */
@@ -785,10 +809,28 @@ function runVecInput(arg) {
     for (const s of SIZES) { const f = path.join(anhDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) return f; }
     return null;
   };
-  const v = buildVecInput({ level, rows: readCatalog(LEVEL_FILES[level]), fileOf, ac, bop, queries: ca.queries.map((q) => ({ qid: q.qid, file: q.file })) });
+  const rows = readCatalog(LEVEL_FILES[level]);
+  // vòng 3 A' (NÊN SỬA 2 review mốc 4): mức (b) chỉ khi tải xong; mã ảnh danh mục 404 = "không có ảnh" (unavailable404)
+  let taiText = null;
+  let missing404 = null;
+  if (level === "b") {
+    const sf = path.join(anhDir, "tai-tong-b.json");
+    if (!fs.existsSync(sf)) { console.error(`Chưa có ${sf}: tải mức (b) trước (lens-tai.mjs --muc b).`); process.exit(3); }
+    taiText = fs.readFileSync(sf, "utf8");
+    const sum = JSON.parse(taiText);
+    const why = vecInputReady(sum, planList(rows).items.length);
+    if (why) { console.error(`--vao-vec b: ${why}. Chờ vòng lặp tải ghi "dừng: XONG".`); process.exit(3); }
+    missing404 = new Set(sum.missing404);
+  }
+  const v = buildVecInput({ level, rows, fileOf, ac, bop, queries: ca.queries.map((q) => ({ qid: q.qid, file: q.file })), missing404 });
+  if (v.unavailable404Blocked.length) {
+    console.error(`--vao-vec ${level}: mã bị loại / A / B / bộ P có ảnh danh mục 404, không được bỏ khỏi chỉ mục: ${v.unavailable404Blocked.join(" ")}. Dừng báo.`);
+    process.exit(3);
+  }
   const sha = (t) => crypto.createHash("sha256").update(t, "utf8").digest("hex");
   const out = {
     at: new Date().toISOString(), level, antiCheatSha256: sha(acText), boPSha256: sha(bopText), excluded: ac.excluded,
+    unavailable404: v.unavailable404, tai404Sha256: taiText === null ? null : sha(taiText),
     override: v.override, hideByRow: v.hideByRow,
     indexKey: v.indexKey, indexImgid: v.indexImgid, missing: v.missing, index: v.index, queries: v.queries,
     truth: queryTruth(ca, bop, level), // mã đúng từng truy vấn, cho int8Loss (vòng 3); file ngoài git
@@ -796,5 +838,5 @@ function runVecInput(arg) {
   const f = path.join(lensDir, `vec-vao-${level}.json`);
   fs.writeFileSync(f, JSON.stringify(out), "utf8");
   const hiddenIn = Object.values(v.hideByRow).flat().filter((c) => Object.hasOwn(v.indexKey, c)).length;
-  console.log(`Đầu vào lens-vec mức (${level}): ${v.index.length} ảnh chỉ mục (thiếu file ${v.missing.length}), ${v.queries.length} truy vấn, loại ${ac.excluded.length} mã (ẩn theo hàng: ${Object.keys(v.hideByRow).length} hàng, ${hiddenIn} mã có trong chỉ mục), override ${Object.keys(out.override).length}. Ghi ${f}.`);
+  console.log(`Đầu vào lens-vec mức (${level}): ${v.index.length} ảnh chỉ mục (thiếu file ${v.missing.length}, ảnh 404 bỏ ${v.unavailable404.length}), ${v.queries.length} truy vấn, loại ${ac.excluded.length} mã (ẩn theo hàng: ${Object.keys(v.hideByRow).length} hàng, ${hiddenIn} mã có trong chỉ mục), override ${Object.keys(out.override).length}. Ghi ${f}.`);
 }

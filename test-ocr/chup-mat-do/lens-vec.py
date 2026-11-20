@@ -19,7 +19,8 @@
 #   python -I lens-vec.py int8 --model clip-fp32 --pre cat [--muc b] [--vec D:\tmp\lens\vec]
 #       (vong 3) Tu bo fp32 <vec>/<model>-<pre>/<muc> tao <muc>-int8 (luong tu int8 doi xung theo tung vector, thang
 #       float16; cach cai o muc "chi muc int8" cuoi file), meta co quant / fp32Sha256 / indexBytes / int8Loss.
-# vec va int8 ghi vao meta: vecPySha256 (sha256 file nay), gitHead, gitDirty (lens-chay --do kiem).
+# vec va int8 ghi vao meta: vecPySha256 (sha256 file nay), gitHead, gitDirty, vecPyPath (lens-chay --do kiem); ca hai
+# dung ngay (ma 3) khi worktree ban DAU luot va doi provenance cuoi luot trung luc dau (vong 3 A').
 # EXIF: moi lenh xoay theo EXIF (ImageOps.exif_transpose) cho ca anh chi muc lan anh truy van.
 #
 # Tien xu ly (giong ImageProcessor cua transformers.js tren Node, dung sharp):
@@ -432,12 +433,16 @@ def cmd_vec(a):
     <vec>/<model>-<pre>/<muc>/: index.npy (vector chi muc fp32), sims.npy [truy van x san pham] (hang DAY DU, an theo hang
     do lens-do.mjs simsFrom ap), codes.json, queries.json, meta.json (gom cac truong chong an gian de lens-chay.mjs kiem).
     Chay noi: vector chi muc luu theo phan (phan/idx-<k>.npy, ghi tam roi doi ten); het --phut thi thoat ma 10. Phan cu
-    khac dau vao / model / so luong -> dung, thoat ma 3. Truot kiem nhieu luong -> khong ghi bo sim, thoat ma 3."""
-    with open(a.vao, encoding="utf-8") as f:
-        vin = json.load(f)
+    khac dau vao / model / so luong -> dung, thoat ma 3. Truot kiem nhieu luong -> khong ghi bo sim, thoat ma 3.
+    Vong 3 A' (NGHIEM TRONG 1 review moc 4): provenance goi DAU luot (ban -> ma 3, truoc khi ghi chu ky / nhung anh); chu
+    ky chay noi co vecPySha256 + gitHead (lens-vec.py / HEAD doi giua hai luot -> ma 3, phan cu khong dung lai); cuoi luot
+    provenance phai trung luc dau; meta mang provenance luc dau."""
     name, mode = a.model, a.pre
     if name not in MODELS or mode not in ("cat", "vien"):
         sys.exit(f"model / tien xu ly la: {name} {mode}")
+    p0 = start_provenance("vec")
+    with open(a.vao, encoding="utf-8") as f:
+        vin = json.load(f)
     level = vin["level"]
     out_dir = os.path.join(a.vec, f"{name}-{mode}", level)
     if not os.path.abspath(out_dir).upper().startswith("D:"):
@@ -445,7 +450,7 @@ def cmd_vec(a):
     part_dir = os.path.join(out_dir, "phan")
     os.makedirs(part_dir, exist_ok=True)
     sig = {"vaoSha256": file_sha256(a.vao), "model": name, "pre": mode, "onnxSha256": MODELS[name]["sha256"], "chunk": CHUNK,
-           "threads": a.threads}
+           "threads": a.threads, "vecPySha256": p0["vecPySha256"], "gitHead": p0["gitHead"]}
     sig_file = os.path.join(part_dir, "dau.json")
     if os.path.exists(sig_file):
         with open(sig_file, encoding="utf-8") as f:
@@ -506,8 +511,11 @@ def cmd_vec(a):
         "vaoFile": os.path.abspath(a.vao), "vaoSha256": sig["vaoSha256"], "missingIndexFiles": len(vin.get("missing", [])),
         "simsNote": "hang DAY DU; an theo hang (hideByRow) ap o lens-do.mjs simsFrom",
         **{k: vin[k] for k in GUARD_KEYS},
-        **provenance(),  # vong 3 (NEN SUA 3 sau cong): sha256 lens-vec.py dang chay + git HEAD + ban / sach
+        # vong 3 A' (NEN SUA 2 review moc 4): ma anh danh muc 404 o muc (b) = khong co anh, khong vao chi muc
+        "unavailable404": vin.get("unavailable404", []), "tai404Sha256": vin.get("tai404Sha256"),
+        **p0,  # vong 3: sha256 lens-vec.py + git HEAD + sach + duong dan, LUC DAU luot (cuoi luot da so trung)
     }
+    require_same_provenance(p0, "vec")
     if not save_vec_outputs(out_dir, X, sims, [x["code"] for x in index], [q["qid"] for q in qs], meta, qvec=Q):
         sys.exit(3)
     print(f"{name}-{mode} muc {level}: {X.shape[0]} anh chi muc, {len(qs)} truy van (thieu {len(q_missing)}), "
@@ -590,10 +598,33 @@ def git_state(cwd):
 
 def provenance():
     """Chung cu ban code cho meta bo vector (vong 3, NEN SUA 3 sau cong): sha256 lens-vec.py DANG CHAY + git HEAD + ban /
-    sach cua repo chua file nay. lens-chay --do doi vecPySha256 = sha lens-vec.py hien tai va gitDirty False."""
+    sach cua repo chua file nay. lens-chay --do doi vecPySha256 = sha lens-vec.py hien tai va gitDirty False.
+    Vong 3 A' (goi y 5 review moc 4): ghi them duong dan file chay (vecPyPath): gitHead / gitDirty la cua checkout chua
+    file do (worktree hay repo chinh)."""
     here = os.path.abspath(__file__)
     head, dirty = git_state(os.path.dirname(here))
-    return {"vecPySha256": file_sha256(here), "gitHead": head, "gitDirty": dirty}
+    return {"vecPySha256": file_sha256(here), "gitHead": head, "gitDirty": dirty, "vecPyPath": here}
+
+
+def start_provenance(what):
+    """Vong 3 A' (NGHIEM TRONG 1 review moc 4): goi DAU moi luot vec / int8, TRUOC khi doc / nhung anh. gitDirty khong
+    phai False (ban hoac khong ro) -> dung ngay, thoat ma 3 (bo vector dung tren worktree ban se bi --do tu choi)."""
+    p = provenance()
+    if p["gitDirty"] is not False:
+        print(f"{what}: worktree chua sach (gitDirty {p['gitDirty']}, file chay {p['vecPyPath']}): commit roi chay lai.",
+              file=sys.stderr)
+        sys.exit(3)
+    return p
+
+
+def require_same_provenance(p0, what):
+    """Cuoi luot (truoc khi ghi meta): provenance phai TRUNG luc dau (sha lens-vec.py, HEAD, sach, duong dan); khac ->
+    thoat ma 3, khong ghi meta."""
+    p1 = provenance()
+    if p1 != p0:
+        print(f"{what}: ban code doi giua luot (dau {p0}, cuoi {p1}): khong ghi meta, chay lai.", file=sys.stderr)
+        sys.exit(3)
+    return p1
 
 
 def cmd_gio1600(a):
@@ -720,16 +751,25 @@ def int8_loss(S32, S8, codes, qids, truth, hide_by_row):
     """Mat mat top-k cua int8 so fp32 (chi bao). Chi tinh truy van co ma dung thay duoc tren hang SAU KHI AN (ma co trong
     chi muc va khong bi an tren hang do). Tra n, so truy van hang 1 / trong 5 / trong 10 o fp32 va int8, so truy van doi
     trang thai o tung muc, trung binh phan chung top 10 (|top10 fp32 giao top10 int8| / 10), |sim int8 - sim fp32| lon
-    nhat tren moi o cua ma tran (hang day du)."""
+    nhat tren moi o cua ma tran (hang day du). Vong 3 A' (NEN SUA 3 review moc 4): them nTruth (so truy van co ma dung)
+    va skipped {noTruth, notInIndex, hidden} (so truy van bi bo theo ly do); n + notInIndex + hidden = nTruth."""
     pos = {c: j for j, c in enumerate(codes)}
     ks = (1, 5, 10)
     cnt = {"fp32": {f"top{k}": 0 for k in ks}, "int8": {f"top{k}": 0 for k in ks}}
     changed = {f"top{k}": 0 for k in ks}
     overlaps = []
+    skipped = {"noTruth": 0, "notInIndex": 0, "hidden": 0}
     for i, qid in enumerate(qids):
         hid = set((hide_by_row or {}).get(qid) or [])
         code = (truth or {}).get(qid)
-        if code is None or code not in pos or code in hid:
+        if code is None:
+            skipped["noTruth"] += 1
+            continue
+        if code not in pos:
+            skipped["notInIndex"] += 1
+            continue
+        if code in hid:
+            skipped["hidden"] += 1
             continue
         keep = np.array([c not in hid for c in codes]) if hid else None
         ranks, tops = {}, {}
@@ -746,7 +786,7 @@ def int8_loss(S32, S8, codes, qids, truth, hide_by_row):
             cnt["int8"][f"top{k}"] += int(b)
             changed[f"top{k}"] += int(a != b)
         overlaps.append(len(tops["fp32"] & tops["int8"]) / 10)
-    return {"n": len(overlaps), **cnt, "changed": changed,
+    return {"n": len(overlaps), "nTruth": len(qids) - skipped["noTruth"], "skipped": skipped, **cnt, "changed": changed,
             "top10OverlapMean": float(np.mean(overlaps)) if overlaps else 0.0,
             "maxAbsSimDiff": float(np.abs(np.asarray(S8, np.float64) - np.asarray(S32, np.float64)).max()) if np.size(S32) else 0.0,
             "note": "chi tinh truy van co ma dung thay duoc tren hang sau khi an; maxAbsSimDiff tren moi o (hang day du)"}
@@ -755,11 +795,14 @@ def int8_loss(S32, S8, codes, qids, truth, hide_by_row):
 def cmd_int8(a):
     """Tu bo fp32 <vec>/<model>-<pre>/<muc> (index.npy chuan L2 + qvec.npy + sims.npy + meta.json) tao
     <vec>/<model>-<pre>/<muc>-int8: index-int8.npy, scale-f16.npy, sims.npy (hang DAY DU, an theo hang do lens-chay ap),
-    codes.json, queries.json, meta.json (ghi CUOI). Thieu file / qvec khong khop sims / thieu truth -> thoat ma 3."""
+    codes.json, queries.json, meta.json (ghi CUOI). Thieu file / qvec khong khop sims / thieu truth -> thoat ma 3.
+    Vong 3 A' (review moc 4): provenance DAU luot (ban -> ma 3), cuoi luot phai trung; int8Loss n = 0 -> ma 3 (khong ghi
+    gi); meta ghi them sha256 index-int8.npy / scale-f16.npy (index8Sha256 / scaleSha256)."""
     src = os.path.join(a.vec, f"{a.model}-{a.pre}", a.muc)
     dst = src + "-int8"
     if not os.path.abspath(dst).upper().startswith("D:"):
         sys.exit("Chi ghi vao o D.")
+    p0 = start_provenance("int8")
 
     def fail(msg):
         print(f"int8: {msg}", file=sys.stderr)
@@ -797,6 +840,8 @@ def cmd_int8(a):
     q, c = quantize_int8(X)
     S8 = int8_sims(Q, q, c)
     loss = int8_loss(S32, S8, codes, qids, truth, meta.get("hideByRow"))
+    if loss["n"] == 0:
+        fail(f"int8Loss n = 0 (nTruth {loss['nTruth']}, bo {loss['skipped']}): khong co truy van nao do duoc mat mat top-k")
     os.makedirs(dst, exist_ok=True)
     mp = os.path.join(dst, "meta.json")
     if os.path.exists(mp):
@@ -813,9 +858,12 @@ def cmd_int8(a):
         "fp32Dir": os.path.abspath(src), "fp32Sha256": fp32_sha,
         "fp32Meta": {k: meta.get(k) for k in ("at", "vecPySha256", "gitHead", "gitDirty")},
         "indexBytes": n * (d + 2) + n * 14, "int8Loss": loss,
+        "index8Sha256": file_sha256(os.path.join(dst, "index-int8.npy")),
+        "scaleSha256": file_sha256(os.path.join(dst, "scale-f16.npy")),
         "simsNote": "hang DAY DU (int8); an theo hang (hideByRow) ap o lens-do.mjs simsFrom",
-        **provenance(),
+        **p0,
     }
+    require_same_provenance(p0, "int8")
     atomic_json(mp, meta8, indent=1)
     print(f"int8 {a.model}-{a.pre} muc {a.muc}: {n} x {d}, indexBytes {meta8['indexBytes']}, int8Loss n {loss['n']} "
           f"fp32 {loss['fp32']} int8 {loss['int8']} doi {loss['changed']} chung top10 {loss['top10OverlapMean']:.4f} "

@@ -630,8 +630,10 @@ export function hideByRowOf(excluded) {
  * antiCheatSha256, boPSha256, excluded, hideByRow, excludedKey: { mã bị loại: khóa danh mục | null } (khi có
  * catalogImg), override: { mã: khóa ảnh chỉ mục bắt buộc } (ảnh thay A / B mọi mức + ảnh chỉ mục bộ P CHỈ ở mức a),
  * guard: [{ code, queryImgid, qid }] (ảnh truy vấn có imgid OFF: mọi mã A / B + bộ P ở mức a), mustHave: [mã bộ P ở mức a] }.
+ * Vòng 3 A' (NÊN SỬA 2 review mốc 4): tai404Text = nội dung tai-tong-b.json (chỉ mức b; null = chưa đọc) → thêm
+ * tai404Sha256 + missing404 (mã ảnh danh mục 404) để checkIndexGuard kiểm unavailable404; mức a: cả hai null.
  */
-export function guardWant(acText, bopText, { level = "a", catalogImg = null } = {}) {
+export function guardWant(acText, bopText, { level = "a", catalogImg = null, tai404Text = null } = {}) {
   if (!LEVELS.includes(level)) throw new Error(`lens: mức lạ ${level}`);
   const ac = JSON.parse(acText);
   const bop = bopText == null ? null : JSON.parse(bopText);
@@ -649,9 +651,11 @@ export function guardWant(acText, bopText, { level = "a", catalogImg = null } = 
   const excluded = [...(ac.excluded || [])];
   const keyOf = catalogImg == null ? null : typeof catalogImg === "function" ? catalogImg : catalogImg instanceof Map ? (c) => catalogImg.get(c) : (c) => catalogImg[c];
   const excludedKey = keyOf ? Object.fromEntries(excluded.map((c) => { const k = keyOf(c); return [c, typeof k === "string" && IMG_KEY_RE.test(k) ? k : null]; })) : null;
+  const tai = level === "b" && tai404Text != null ? JSON.parse(tai404Text) : null;
   return {
     level, antiCheatSha256: sha256Of(acText), boPSha256: bopText == null ? null : sha256Of(bopText), excluded,
     hideByRow: hideByRowOf(excluded), excludedKey, override, guard, mustHave: P.map((p) => p.code),
+    tai404Sha256: tai ? sha256Of(tai404Text) : null, missing404: tai ? [...new Set(Array.isArray(tai.missing404) ? tai.missing404 : [])].sort() : null,
   };
 }
 
@@ -715,6 +719,30 @@ export function checkIndexGuard(meta, codes, want, expect = null) {
   }
   const miss = (w.mustHave || []).filter((c) => !inIdx.has(c));
   if (miss.length) errs.push(`mã bộ P không có trong chỉ mục: ${miss.join(" ")}`);
+  // (iv) vòng 3 A' (NÊN SỬA 2 review mốc 4): ảnh danh mục 404 ở mức (b) = "không có ảnh" (meta.unavailable404), KHÔNG vào
+  // chỉ mục; mã bị loại / A / B / bộ P KHÔNG được nằm trong đó; mỗi mã 404 của tai-tong-b.json phải ở chỉ mục (override)
+  // hoặc unavailable404; meta.tai404Sha256 = sha256 tai-tong-b.json đang có.
+  const un = m.unavailable404 ?? [];
+  if (!Array.isArray(un)) errs.push("(iv) meta.unavailable404 sai dạng (phải là mảng mã)");
+  else {
+    const unSet = new Set(un);
+    for (const c of un) if (inIdx.has(c)) errs.push(`(iv) 404: mã ${c} nằm trong unavailable404 mà vẫn có trong chỉ mục`);
+    const protectedWhy = new Map();
+    for (const c of w.excluded || []) protectedWhy.set(c, "bị loại");
+    for (const g of w.guard || []) if (!protectedWhy.has(g.code)) protectedWhy.set(g.code, `có truy vấn ảnh ${g.qid}`);
+    for (const c of w.mustHave || []) if (!protectedWhy.has(c)) protectedWhy.set(c, "bộ P");
+    for (const [c, why] of protectedWhy) if (unSet.has(c)) errs.push(`(iv) 404: mã ${c} (${why}) nằm trong unavailable404: không được bỏ khỏi chỉ mục`);
+    if (w.missing404) {
+      const m404 = new Set(w.missing404);
+      for (const c of un) if (!m404.has(c)) errs.push(`(iv) 404: mã ${c} trong unavailable404 nhưng không có trong missing404 của tai-tong-b.json`);
+      for (const c of m404) if (!unSet.has(c) && !inIdx.has(c)) errs.push(`(iv) 404: mã ${c} của tai-tong-b.json vắng cả chỉ mục lẫn unavailable404`);
+    }
+  }
+  if (w.level === "b" && expect) {
+    if (!Array.isArray(m.unavailable404)) errs.push("(iv) mức (b): meta.unavailable404 thiếu (dựng lại đầu vào bằng lens-tai.mjs --vao-vec --muc b)");
+    if (!w.tai404Sha256) errs.push("(iv) mức (b): chưa đọc tai-tong-b.json (không kiểm được ảnh 404)");
+    else if (m.tai404Sha256 !== w.tai404Sha256) errs.push(`(iv) meta.tai404Sha256 ${m.tai404Sha256} ≠ tai-tong-b.json ${w.tai404Sha256}`);
+  }
   // NÊN SỬA 2: bộ sim phải là bản đạt kiểm luồng, đủ truy vấn, đủ ảnh chỉ mục, đúng thư mục
   if (expect) {
     if (m.threadCheck?.pass !== true) errs.push("meta.threadCheck.pass không phải true (bộ sim trượt kiểm nhiều luồng)");
@@ -804,7 +832,7 @@ export function vecMetaErrors(meta, { vecPySha256, what }) {
 /** Cách lượng tử của chỉ mục sẽ đóng gói (khối luật: "vector int8 đối xứng theo từng vector, thang float16"; cài ở vòng 3). */
 export const INT8_QUANT = "int8-sym-perVector-scaleF16-invNorm";
 /** Khóa bắt buộc của meta.int8Loss (lens-vec.py int8). */
-export const INT8_LOSS_KEYS = Object.freeze(["n", "fp32", "int8", "changed", "top10OverlapMean", "maxAbsSimDiff"]);
+export const INT8_LOSS_KEYS = Object.freeze(["n", "nTruth", "skipped", "fp32", "int8", "changed", "top10OverlapMean", "maxAbsSimDiff"]);
 
 /**
  * Kiểm meta bộ int8 (A4): quant đúng chuỗi, indexBytes === indexBytesInt8(nIndex, dims), int8Loss đủ khóa và số hữu hạn,
@@ -825,7 +853,17 @@ export function int8MetaErrors(meta, { fp32Sha256 }) {
     const miss = INT8_LOSS_KEYS.filter((k) => !Object.hasOwn(L, k) || L[k] == null);
     if (miss.length) errs.push(`int8: meta.int8Loss thiếu ${miss.join(" ")}`);
     else if (!Number.isInteger(L.n) || !tri(L.fp32) || !tri(L.int8) || !tri(L.changed) || !fin(L.top10OverlapMean) || !fin(L.maxAbsSimDiff)) errs.push("int8: meta.int8Loss có số sai dạng / không hữu hạn");
+    else {
+      // vòng 3 A' (NÊN SỬA 3 review mốc 4): n ≥ 1; nTruth + số bỏ theo lý do phải cộng khớp
+      const S = L.skipped;
+      const skOk = S && typeof S === "object" && ["noTruth", "notInIndex", "hidden"].every((k) => Number.isInteger(S[k]) && S[k] >= 0);
+      if (L.n < 1) errs.push(`int8: meta.int8Loss n = ${L.n} (phải ≥ 1: không có truy vấn nào đo được mất mát top-k)`);
+      if (!Number.isInteger(L.nTruth)) errs.push(`int8: meta.int8Loss nTruth sai dạng (${L.nTruth})`);
+      if (!skOk) errs.push("int8: meta.int8Loss.skipped phải có noTruth / notInIndex / hidden là số nguyên ≥ 0");
+      if (skOk && Number.isInteger(L.nTruth) && L.n + S.notInIndex + S.hidden !== L.nTruth) errs.push(`int8: meta.int8Loss n ${L.n} + notInIndex ${S.notInIndex} + hidden ${S.hidden} không khớp nTruth ${L.nTruth}`);
+    }
   }
+  if (!HEX64.test(m.index8Sha256 ?? "") || !HEX64.test(m.scaleSha256 ?? "")) errs.push(`int8: meta.index8Sha256 / scaleSha256 thiếu / sai dạng (${m.index8Sha256} / ${m.scaleSha256})`);
   if (!HEX64.test(fp32Sha256 ?? "")) errs.push(`int8: không có sha256 index.npy của bộ fp32 (${fp32Sha256})`);
   else if (m.fp32Sha256 !== fp32Sha256) errs.push(`int8: meta.fp32Sha256 ${m.fp32Sha256} ≠ sha256 index.npy của bộ fp32 ${fp32Sha256}`);
   return errs;
@@ -835,10 +873,24 @@ export function int8MetaErrors(meta, { fp32Sha256 }) {
  * Kiểm đầu vào của --do (A1 + A4, chạy TRƯỚC τ / μ và mọi phán): bộ (b) fp32 và bộ int8 cùng đúng bản lens-vec.py hiện
  * tại + worktree sạch (vecMetaErrors), bộ int8 đủ khóa (int8MetaErrors), int8 dựng từ đúng bộ (b) (model / pre / level /
  * sha256 ONNX / vaoSha256 / nIndex / dims trùng). Trả { exitCode (0 | 3), errs }.
+ * Vòng 3 A' (gợi ý 1 review mốc 4): bListSha256 / int8ListSha256 = { codes, queries } (sha256 codes.json / queries.json
+ * thật của (b) và b-int8) phải đủ và trùng nhau; int8FileSha256 = { index, scale } (sha256 index-int8.npy / scale-f16.npy
+ * thật) phải trùng meta.index8Sha256 / scaleSha256. Thiếu → lỗi.
  */
-export function doInputCheck({ bMeta, int8Meta, fp32Sha256, vecPySha256 }) {
+export function doInputCheck({ bMeta, int8Meta, fp32Sha256, vecPySha256, bListSha256 = null, int8ListSha256 = null, int8FileSha256 = null }) {
   const errs = [...vecMetaErrors(bMeta, { vecPySha256, what: "(b) fp32" }), ...vecMetaErrors(int8Meta, { vecPySha256, what: "int8" }), ...int8MetaErrors(int8Meta, { fp32Sha256 })];
   for (const k of ["model", "pre", "level", "sha256", "vaoSha256", "nIndex", "dims"]) if ((int8Meta || {})[k] !== (bMeta || {})[k]) errs.push(`int8: meta.${k} ${(int8Meta || {})[k]} ≠ bộ fp32 ${(bMeta || {})[k]}`);
+  for (const f of ["codes", "queries"]) {
+    const b = bListSha256?.[f];
+    const i = int8ListSha256?.[f];
+    if (!HEX64.test(b ?? "") || !HEX64.test(i ?? "")) errs.push(`int8: thiếu sha256 ${f}.json thật của (b) / int8 (${b} / ${i})`);
+    else if (b !== i) errs.push(`int8: ${f}.json của int8 (${i}) khác bộ (b) (${b})`);
+  }
+  for (const [f, k] of [["index", "index8Sha256"], ["scale", "scaleSha256"]]) {
+    const x = int8FileSha256?.[f];
+    if (!HEX64.test(x ?? "")) errs.push(`int8: thiếu sha256 file ${f} thật của bộ int8 (${x})`);
+    else if ((int8Meta || {})[k] !== x) errs.push(`int8: meta.${k} ${(int8Meta || {})[k]} ≠ file thật ${x}`);
+  }
   if ((bMeta || {}).level !== "b") errs.push(`bộ fp32: meta.level ${(bMeta || {}).level} ≠ b`);
   return { exitCode: errs.length ? 3 : 0, errs };
 }

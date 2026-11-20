@@ -13,8 +13,10 @@ const CUR = H("a");
 
 /** meta bộ (b) fp32 hợp lệ (như lens-vec.py vec ghi từ vòng 3). */
 const bMeta = () => ({ model: "clip-fp32", pre: "cat", level: "b", sha256: H("e"), vaoSha256: H("f"), nIndex: 3, dims: 4, vecPySha256: CUR, gitHead: "c".repeat(40), gitDirty: false });
-const loss = () => ({ n: 2, fp32: { top1: 1, top5: 2, top10: 2 }, int8: { top1: 1, top5: 2, top10: 2 }, changed: { top1: 0, top5: 0, top10: 0 }, top10OverlapMean: 1, maxAbsSimDiff: 0.0004 });
-const i8Meta = () => ({ ...bMeta(), quant: INT8_QUANT, fp32Sha256: H("d"), indexBytes: indexBytesInt8(3, 4), int8Loss: loss() });
+// vòng 3 A': int8Loss thêm nTruth + skipped; meta int8 thêm sha file int8; doInputCheck nhận sha danh sách / file thật
+const loss = () => ({ n: 2, nTruth: 2, skipped: { noTruth: 0, notInIndex: 0, hidden: 0 }, fp32: { top1: 1, top5: 2, top10: 2 }, int8: { top1: 1, top5: 2, top10: 2 }, changed: { top1: 0, top5: 0, top10: 0 }, top10OverlapMean: 1, maxAbsSimDiff: 0.0004 });
+const i8Meta = () => ({ ...bMeta(), quant: INT8_QUANT, fp32Sha256: H("d"), indexBytes: indexBytesInt8(3, 4), int8Loss: loss(), index8Sha256: H("6"), scaleSha256: H("7") });
+const LISTS = { bListSha256: { codes: H("3"), queries: H("4") }, int8ListSha256: { codes: H("3"), queries: H("4") }, int8FileSha256: { index: H("6"), scale: H("7") } };
 
 test("A1 vecMetaErrors: thiếu vecPySha256 / sha lệch lens-vec.py hiện tại / gitDirty true hoặc thiếu → lỗi (lens-chay thoát mã 3)", () => {
   assert.deepEqual(vecMetaErrors(bMeta(), { vecPySha256: CUR, what: "b" }), []);
@@ -29,9 +31,9 @@ test("A1 vecMetaErrors: thiếu vecPySha256 / sha lệch lens-vec.py hiện tạ
 });
 
 test("A1 + A4 doInputCheck: bộ (b) và bộ int8 đúng bản code, int8 đủ khóa → 0; mỗi mẫu sai → mã 3", () => {
-  const ok = doInputCheck({ bMeta: bMeta(), int8Meta: i8Meta(), fp32Sha256: H("d"), vecPySha256: CUR });
+  const ok = doInputCheck({ bMeta: bMeta(), int8Meta: i8Meta(), fp32Sha256: H("d"), vecPySha256: CUR, ...LISTS });
   assert.deepEqual([ok.exitCode, ok.errs], [0, []]);
-  const bad = (o) => doInputCheck({ bMeta: bMeta(), int8Meta: i8Meta(), fp32Sha256: H("d"), vecPySha256: CUR, ...o });
+  const bad = (o) => doInputCheck({ bMeta: bMeta(), int8Meta: i8Meta(), fp32Sha256: H("d"), vecPySha256: CUR, ...LISTS, ...o });
   const del = (k) => { const m = i8Meta(); delete m[k]; return m; };
   const cases = {
     "bộ (b) gitDirty true": { bMeta: { ...bMeta(), gitDirty: true } },
@@ -58,7 +60,7 @@ test("A1 + A4 doInputCheck: bộ (b) và bộ int8 đúng bản code, int8 đủ
     assert.equal(r.exitCode, 3, why);
     assert.ok(r.errs.length >= 1, why);
   }
-  assert.deepEqual([...INT8_LOSS_KEYS], ["n", "fp32", "int8", "changed", "top10OverlapMean", "maxAbsSimDiff"]);
+  assert.deepEqual([...INT8_LOSS_KEYS], ["n", "nTruth", "skipped", "fp32", "int8", "changed", "top10OverlapMean", "maxAbsSimDiff"]);
   assert.equal(INT8_QUANT, "int8-sym-perVector-scaleF16-invNorm");
   assert.equal(indexBytesInt8(42208, 512), 42208 * 528, "R7 = nIndex × 528 byte");
 });
@@ -68,7 +70,7 @@ test("A4 lens-chay --do: không còn '?? Infinity' / 'int8Loss ?? null'; kiểm 
   const d = src.slice(src.indexOf('if (mode === "do")'), src.indexOf("out.offStats"));
   assert.doesNotMatch(d, /\?\? Infinity/);
   assert.doesNotMatch(d, /int8Loss \?\? null/);
-  assert.match(d, /doInputCheck\(\{ bMeta, int8Meta: sims\.meta, fp32Sha256, vecPySha256: vecPySha \}\)/);
+  assert.match(d, /doInputCheck\(\{ bMeta, int8Meta: sims\.meta, fp32Sha256, vecPySha256: vecPySha, bListSha256, int8ListSha256, int8FileSha256: /);
   assert.ok(d.indexOf("doInputCheck(") < d.indexOf("percentiles("), "kiểm trước τ / μ");
   assert.match(d, /if \(dc\.exitCode\) stop\(/);
   assert.match(d, /r6Of\(vname, pre, meta\.sha256, \{ requireOnnx: true, vecPySha256: vecPySha, requireClean: true \}\)/);

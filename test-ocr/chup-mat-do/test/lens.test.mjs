@@ -500,11 +500,12 @@ test("chỉ mục đã áp chống ăn gian (NÊN SỬA 5 + LỆCH LUẬT 2): m�
   one(bad({ pre: "vien" }), /meta.pre vien ≠ thư mục cat/);
   one(bad({ level: "b" }), /meta.level b/);
   // NÊN SỬA 6: ở mức (b) override của bộ P KHÔNG áp (mã đó dùng khóa danh mục); A / B override vẫn áp
-  const wantB = guardWant(acText, bopText, { level: "b", catalogImg: cat });
+  // vòng 3 A': mức (b) kiểm thêm ảnh 404 (tai-tong-b.json + meta.unavailable404); ở đây không có mã 404
+  const wantB = guardWant(acText, bopText, { level: "b", catalogImg: cat, tai404Text: JSON.stringify({ missing404: [] }) });
   assert.deepEqual(wantB.override, { "1111111111111": "front_en.9" });
   assert.deepEqual(wantB.mustHave, []);
   assert.ok(!wantB.guard.some((g) => g.qid.startsWith("p-")), "mức (b) không có truy vấn bộ P");
-  const metaB = { ...metaOk, level: "b", override: { ...wantB.override }, indexKey: { ...metaOk.indexKey, "3333333333333": "front_en.2" }, indexImgid: { "1111111111111": "5", "2222222222222": "1" } };
+  const metaB = { ...metaOk, level: "b", override: { ...wantB.override }, indexKey: { ...metaOk.indexKey, "3333333333333": "front_en.2" }, indexImgid: { "1111111111111": "5", "2222222222222": "1" }, unavailable404: [], tai404Sha256: wantB.tai404Sha256 };
   const expB = { ...expect, level: "b" };
   assert.deepEqual(checkIndexGuard(metaB, codesOk, wantB, expB), []);
   const pAtB = checkIndexGuard({ ...metaB, override: { ...want.override } }, codesOk, wantB, expB);

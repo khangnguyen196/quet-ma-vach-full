@@ -30,6 +30,7 @@ import { serverJoin } from "../../src/front-server.js";
 /** RAM máy chủ hiện có (H2 đợt kho-lon vòng 3, Windows, mức (c), MiB) — nền cho ước R6 RAM. */
 export const SERVER_RAM_BASE_MIB = 835.3;
 export const MAIN_ROOT_PHOTOS = "D:\\quet-ma-vach-full\\test-ocr\\photos";
+const HEX64_RE = /^[0-9a-f]{64}$/;
 
 export async function runMain(argv, selfUrl) {
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -271,9 +272,16 @@ export async function runMain(argv, selfUrl) {
   };
   const catImg = new Map();
   /** Điều chỉ mục phải thỏa ở một mức (LỆCH LUẬT 2: ẩn theo hàng, override bộ P chỉ mức a; khóa danh mục của mã bị loại). */
+  // vòng 3 A' (NÊN SỬA 2 review mốc 4): mức (b) kiểm ảnh 404 theo tai-tong-b.json (thiếu file → stop)
+  const taiFile = path.join(arg("--anh", path.join(lensDir, "anh")), "tai-tong-b.json");
   const wantOf = (level) => {
     if (!catImg.has(level)) catImg.set(level, catalogImgMap(readCatalog(LEVEL_FILES[level])));
-    return guardWant(acText, bopText, { level, catalogImg: catImg.get(level) });
+    let tai404Text = null;
+    if (level === "b") {
+      if (!fs.existsSync(taiFile)) stop(`THIẾU ${taiFile} (không kiểm được ảnh 404 mức b)`, [taiFile]);
+      tai404Text = fs.readFileSync(taiFile, "utf8");
+    }
+    return guardWant(acText, bopText, { level, catalogImg: catImg.get(level), tai404Text });
   };
   /** Đọc bộ sim + kiểm chỉ mục đã áp chống ăn gian + bộ sim hợp lệ (đạt kiểm luồng, đủ truy vấn / ảnh, đúng thư mục). */
   const loadChecked = (dir, expect) => {
@@ -381,19 +389,33 @@ export async function runMain(argv, selfUrl) {
     const [vname, pre] = cm.pick.name.split("|");
     // A1 + A4 (vòng 3): bộ (b) fp32 và bộ int8 phải dựng bằng đúng lens-vec.py hiện tại trên worktree sạch; bộ int8 đủ khóa
     const vecPySha = codeSha256s()["lens-vec.py"];
+    // vòng 3 A' (gợi ý 2 review mốc 4): không đọc được lens-vec.py → dừng có .loi.json (không thoát mã 1 trần)
+    if (!HEX64_RE.test(vecPySha ?? "")) stop("KHÔNG ĐỌC ĐƯỢC lens-vec.py (sha256 null)", [`codeSha256s()["lens-vec.py"] = ${vecPySha}`]);
+    const fileSha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
     const bDir = path.join(vecDir, `${vname}-${pre}`, level);
+    const i8Dir = path.join(vecDir, `${vname}-${pre}`, `${level}-int8`);
     let bMeta = null;
     let fp32Sha256 = null;
     try {
       bMeta = JSON.parse(fs.readFileSync(path.join(bDir, "meta.json"), "utf8"));
-      fp32Sha256 = crypto.createHash("sha256").update(fs.readFileSync(path.join(bDir, "index.npy"))).digest("hex");
+      fp32Sha256 = fileSha(path.join(bDir, "index.npy"));
       const bErrs = checkIndexGuard(bMeta, JSON.parse(fs.readFileSync(path.join(bDir, "codes.json"), "utf8")), wantOf(level), { model: vname, pre, level });
       if (bErrs.length) stop(`BỘ (b) fp32 CHƯA ÁP ĐÚNG CHỐNG ĂN GIAN (${bDir})`, bErrs, { indexDir: bDir });
     } catch (e) { stop(`KHÔNG ĐỌC ĐƯỢC BỘ (b) fp32 (${bDir})`, [String(e.message)]); }
-    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`), { model: vname, pre, level });
+    const sims = loadChecked(i8Dir, { model: vname, pre, level });
     const meta = sims.meta;
-    const dc = doInputCheck({ bMeta, int8Meta: sims.meta, fp32Sha256, vecPySha256: vecPySha });
+    let dc = null;
+    try {
+      const bListSha256 = { codes: fileSha(path.join(bDir, "codes.json")), queries: fileSha(path.join(bDir, "queries.json")) };
+      const int8ListSha256 = { codes: fileSha(path.join(i8Dir, "codes.json")), queries: fileSha(path.join(i8Dir, "queries.json")) };
+      dc = doInputCheck({ bMeta, int8Meta: sims.meta, fp32Sha256, vecPySha256: vecPySha, bListSha256, int8ListSha256, int8FileSha256: { index: fileSha(path.join(i8Dir, "index-int8.npy")), scale: fileSha(path.join(i8Dir, "scale-f16.npy")) } });
+    } catch (e) { stop("KHÔNG KIỂM ĐƯỢC ĐẦU VÀO --do", [String(e.message)]); }
     if (dc.exitCode) stop("BỘ VECTOR (b) / int8 KHÔNG ĐÚNG BẢN CODE HOẶC THIẾU KHÓA", dc.errs);
+    // gợi ý 3 review mốc 4: kiểm R6 (file giờ đúng bản lens-vec.py, sạch) NGAY sau doInputCheck, trước mọi tính nặng.
+    // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px; vòng 3: file giờ phải đo bằng lens-vec.py hiện tại, worktree sạch
+    const r6s = r6Of(vname, pre, meta.sha256, { requireOnnx: true, vecPySha256: vecPySha, requireClean: true });
+    const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + meta.indexBytes / 1048576 };
+    const r7 = { bytes: meta.indexBytes };
     // NÊN SỬA 3: mọi ca có ảnh có hàng, đủ 60 ô A / B có lens (sau khi ẩn); không .filter(Boolean) làm mất ô lặng lẽ
     const { tops } = needRows(sims, { withP: false, withAb: true });
     const taus = percentiles(tops.map((l) => l.top1));
@@ -452,10 +474,6 @@ export async function runMain(argv, selfUrl) {
       const res = evalCells({ s, a: { id: "A0" }, u: { id: "U0" } });
       r5yBy.set(s, verdictOf(res, { r5x: true, r5y: { pass: true }, r6: { p95: 0, ramMiB: 0 }, r7: { bytes: 0 } }));
     }
-    // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px; vòng 3: file giờ phải đo bằng lens-vec.py hiện tại, worktree sạch
-    const r6s = r6Of(vname, pre, meta.sha256, { requireOnnx: true, vecPySha256: vecPySha, requireClean: true });
-    const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + meta.indexBytes / 1048576 };
-    const r7 = { bytes: meta.indexBytes };
     const methods = [];
     for (const g of grid) {
       const res = evalCells(g);

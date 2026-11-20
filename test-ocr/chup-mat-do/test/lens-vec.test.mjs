@@ -95,7 +95,7 @@ test("lens-chay ghi gio1600Sha256 vào MỌI file kết quả (đặt trong out 
 });
 
 test("lens-vec.py (gợi ý 2): chữ ký chạy nối có số luồng; file phần ghi tạm rồi đổi tên; hideByRow vào meta; không còn đọc file giờ 400 px", () => {
-  assert.match(SRC, /sig = \{[^}]*"threads": a\.threads\}/s);
+  assert.match(SRC, /sig = \{[^}]*"threads": a\.threads,/s); // vòng 3 A': sau threads còn vecPySha256 + gitHead
   assert.match(SRC, /atomic_npy\(pf, X\)/);
   assert.doesNotMatch(SRC, /np\.save\(pf/);
   // mọi .npy ghi qua atomic_npy (np.save chỉ có MỘT chỗ: vào file tạm, rồi os.replace)
@@ -123,11 +123,11 @@ function runPy(body, ...args) {
 
 test("A1 lens-vec.py: provenance() = sha256 lens-vec.py đang chạy + git HEAD + bẩn / sạch; vec ghi 3 khóa vào meta.json", (t) => {
   const v = SRC.slice(SRC.indexOf("def cmd_vec("), SRC.indexOf("# ---------------- R6"));
-  assert.match(v, /\*\*provenance\(\),/, "meta của vec mang provenance()");
+  assert.match(v, /\*\*p0,/, "meta của vec mang provenance() lúc đầu lượt (vòng 3 A')");
   assert.match(v, /save_vec_outputs\(out_dir, X, sims, \[x\["code"\] for x in index\], \[q\["qid"\] for q in qs\], meta, qvec=Q\)/, "vec lưu vector truy vấn (qvec.npy) cho lệnh int8");
   if (!fs.existsSync(PY)) { t.skip(`không có Python của venv đợt lens (${PY})`); return; }
   const r = runPy(`p = m.provenance()\nprint(json.dumps({"p": p, "sha": m.file_sha256(sys.argv[1])}))`);
-  assert.deepEqual(Object.keys(r.p).sort(), ["gitDirty", "gitHead", "vecPySha256"]);
+  assert.deepEqual(Object.keys(r.p).sort(), ["gitDirty", "gitHead", "vecPyPath", "vecPySha256"], "vòng 3 A': thêm đường dẫn file chạy");
   assert.equal(r.p.vecPySha256, r.sha);
   assert.match(r.p.gitHead, /^[0-9a-f]{40}$/);
   assert.equal(typeof r.p.gitDirty, "boolean");
@@ -176,7 +176,15 @@ meta = {"model": "clip-fp32", "pre": "cat", "level": "b", "sha256": "e" * 64, "d
 assert m.save_vec_outputs(b, X, (Q @ X.T).astype(np.float32), codes, qids, meta, qvec=Q)
 print(json.dumps({"b": b, "files": sorted(os.listdir(b))}))`, root);
     assert.deepEqual(mk.files, ["codes.json", "index.npy", "meta.json", "queries.json", "qvec.npy", "sims.npy"]);
-    const run = (...extra) => { try { execFileSync(PY, ["-I", VEC, "int8", "--model", "clip-fp32", "--pre", "cat", "--muc", "b", "--vec", root, ...extra], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); return 0; } catch (e) { return e.status; } };
+    // vòng 3 A': lệnh int8 dừng mã 3 khi checkout chứa file chạy bẩn → chạy BẢN SAO lens-vec.py trong repo git tạm sạch
+    const repo = path.join(root, "repo");
+    fs.mkdirSync(repo, { recursive: true });
+    const vecCopy = path.join(repo, "lens-vec.py");
+    fs.copyFileSync(VEC, vecCopy);
+    fs.writeFileSync(path.join(repo, ".gitignore"), "__pycache__/\n", "utf8");
+    const git = (...a) => execFileSync("git", ["-c", "user.name=lens-test", "-c", "user.email=lens-test@example.invalid", ...a], { cwd: repo, stdio: "ignore" });
+    git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "ban sao");
+    const run = (...extra) => { try { execFileSync(PY, ["-I", vecCopy, "int8", "--model", "clip-fp32", "--pre", "cat", "--muc", "b", "--vec", root, ...extra], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); return 0; } catch (e) { return e.status; } };
     assert.equal(run(), 0);
     const d8 = path.join(root, "clip-fp32-cat", "b-int8");
     assert.deepEqual(fs.readdirSync(d8).sort(), ["codes.json", "index-int8.npy", "meta.json", "queries.json", "scale-f16.npy", "sims.npy"], "không còn file .tam");
@@ -186,7 +194,8 @@ print(json.dumps({"b": b, "files": sorted(os.listdir(b))}))`, root);
     assert.equal(m8.indexBytes, indexBytesInt8(40, 8));
     assert.equal(m8.level, "b");
     for (const k of ["model", "pre", "sha256", "vaoSha256", "hideByRow", "excluded", "override", "threadCheck", "antiCheatSha256", "indexKey", "indexImgid"]) assert.deepEqual(m8[k], bm[k], k);
-    const fpSha = (await import("node:crypto")).createHash("sha256").update(fs.readFileSync(path.join(mk.b, "index.npy"))).digest("hex");
+    const crypto = await import("node:crypto");
+    const fpSha = crypto.createHash("sha256").update(fs.readFileSync(path.join(mk.b, "index.npy"))).digest("hex");
     assert.equal(m8.fp32Sha256, fpSha);
     // int8Loss: ab-<mã 1> bị ẩn trên hàng → không tính; buldak mã không có trong chỉ mục → không tính; còn that-1
     assert.equal(m8.int8Loss.n, 1);
@@ -195,7 +204,9 @@ print(json.dumps({"b": b, "files": sorted(os.listdir(b))}))`, root);
     // sims.npy int8 đọc được bằng parseNpy (float32) và đúng cỡ
     const s = parseNpy(fs.readFileSync(path.join(d8, "sims.npy")));
     assert.deepEqual(s.shape, [3, 40]);
-    const dc = doInputCheck({ bMeta: bm, int8Meta: m8, fp32Sha256: fpSha, vecPySha256: m8.vecPySha256 });
+    const fsha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex");
+    const lst = (d) => ({ codes: fsha(path.join(d, "codes.json")), queries: fsha(path.join(d, "queries.json")) });
+    const dc = doInputCheck({ bMeta: bm, int8Meta: m8, fp32Sha256: fpSha, vecPySha256: m8.vecPySha256, bListSha256: lst(mk.b), int8ListSha256: lst(d8), int8FileSha256: { index: fsha(path.join(d8, "index-int8.npy")), scale: fsha(path.join(d8, "scale-f16.npy")) } });
     assert.equal(dc.errs.filter((e) => !/gitDirty/.test(e)).length, 0, dc.errs.join("; "));
     assert.ok(Array.isArray(checkIndexGuard(m8, JSON.parse(fs.readFileSync(path.join(d8, "codes.json"), "utf8")), { level: "b", excluded: [], hideByRow: {}, override: {} }, { model: "clip-fp32", pre: "cat", level: "b" })));
     // thiếu qvec.npy → mã 3, không ghi meta mới
