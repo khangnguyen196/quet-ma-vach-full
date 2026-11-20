@@ -1296,3 +1296,19 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
       | DINOv2-small · cat | 308,7 | 322,6 | 328,0 | 109,6 | 345,4 |
       | DINOv2-small · vien | 338,4 | 351,8 | 354,6 | 109,6 | 345,4 |
 
+    - Vector chỉ mục (a) (`lens-vec.py vec`, 6 biến thể, 4 luồng onnxruntime, chạy nối mỗi lần ≤ 7,5 phút; đầu vào `D:\tmp\lens\vec-vao-a.json` của 2b-1 không đổi, sha256 3307156a…627d, checkIndexGuard 0 lỗi trước khi chạy): file đầu tiên trong `D:\tmp\lens\vec` (dau.json) 2026-11-21 00:30:42, sims.npy đầu tiên 00:40:50, cuối 01:29:52 — đều SAU mốc 3 (61b981e 00:29:20). Mỗi biến thể 5.122 ảnh chỉ mục, 65 truy vấn (thiếu 0), kiểm cos(1 luồng, 4 luồng) trên 10 ảnh ≥ 0,9999998 (threadCheck.pass true cả 6). `D:\tmp\lens\vec` 120 MB, tổng `D:\tmp\lens` 1,3 GB.
+    - Chọn model (`lens-do.mjs --chon-model`, worktree sạch a0861d4, RULE_SHA256 10ec7168…b11a, gio1600Sha256 e7098fb2…3269, 0 lượt OFF thật, 0 Azure; kiểm chéo nền 186 / 186 ĐẠT). "Ảnh thật chỉnh" = ảnh thật nửa chỉnh có nhãn mã ở thư mục 1 + 2 và mã có trong chỉ mục (a) (6 ảnh: #2 #4 #6 #10 #12 #15), top 5 CHỈ ẢNH; bộ P top 5 chỉ ảnh (|P| = 12):
+
+      | Biến thể | Ảnh thật chỉnh top 5 | Bộ P top 5 | R6 p95 1.600 px (ms) | R7 ước (b) int8 (byte) | Giấy phép |
+      |---|---|---|---|---|---|
+      | CLIP fp32 · cat | 4 / 6 | 6 / 12 | 297,8 | 22.285.824 | MIT |
+      | CLIP fp32 · vien | 4 / 6 | 4 / 12 | 315,8 | 22.285.824 | MIT |
+      | CLIP int8 · cat | 2 / 6 | 7 / 12 | 270,6 | 22.285.824 | MIT |
+      | CLIP int8 · vien | 3 / 6 | 6 / 12 | 298,3 | 22.285.824 | MIT |
+      | DINOv2-small · cat | 3 / 6 | 4 / 12 | 322,6 | 16.883.200 | Apache-2.0 |
+      | DINOv2-small · vien | 1 / 6 | 7 / 12 | 351,8 | 16.883.200 | Apache-2.0 |
+      | SigLIP · cat / vien | không tính (dropped: R7 ước 33,1 MB > 25 MB) | | | | |
+
+      Chọn CLIP fp32 · cat (hòa ảnh thật 4 / 6 với fp32 · vien, hơn ở bộ P 6 / 12 so 4 / 12). n nhỏ (6 ảnh thật chỉnh, bộ P 12), chỉ để tham khảo.
+    - Cổng dừng sớm (`lens-do.mjs --cong`, CLIP fp32 · cat, mức (a), cùng điều kiện như trên): G3 ĐẠT (bộ P top 5 = 6 / 12 = 50,0 %); G1 ĐẠT (3 / 5 ảnh đang sai có mã trong chỉ mục vào top 5 chỉ ảnh: #4 hạng 3, #5 hạng 1, #10 hạng 2; #2 và #15 ngoài top 5; #11 và #16 không có mã trong chỉ mục (a)); G2 ĐẠT (2 / 6 ảnh thư mục 3 có top1 thấp hơn top1 nhỏ nhất của 8 ảnh đang đúng = 0,7050 (#13): #18 0,6505, #19 0,6670; còn lại #17 0,7335, #20 0,7435, #21 0,7595, #22 0,7137; top1 của 8 ảnh đúng: #1 0,7310, #3 0,7097, #6 0,8163, #7 0,8271, #8 0,8175, #9 0,7184, #12 0,7682, #13 0,7050). Ngưỡng (khối luật): G3 ≥ 50 % (đạt ĐÚNG ngưỡng, thiếu 1 mã là trượt), G1 ≥ 2, G2 ≥ 2, qua = G3 VÀ (G1 HOẶC G2). Kết luận: QUA CỔNG → được tải mức (b) (vòng 3, chờ người điều khiển giao). Chưa chạy `--do`. n nhỏ (22 ảnh thật, bộ P 12, bộ A / B 60 ô trong đó 29 ô ẩn mã), chỉ để tham khảo.
+
