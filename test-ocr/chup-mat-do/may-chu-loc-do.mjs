@@ -34,7 +34,8 @@
 //       a-tong-c80 (tiêu chí như dong-noi-bat). Lọc làm câu tìm rỗng → dùng mọi hàng (giống nền từng ca).
 //   (b) dòng nổi bật: b-h1..3, b-hoa1..3; RRF hằng số 60 với danh sách tìm cả câu (sâu 10), như dong-noi-bat.
 //   (c) từ ở chữ to nặng điểm hơn: c-0.5, c-1, c-2 (trọng số 1 + β × max(0, cao / m − 1), m = trung vị dưới).
-//   (a)+(b), (a)+(c): mọi biến thể (a) × mọi ô (b) / (c) (lọc hàng trước, rồi (b) / (c) trên khung của hàng còn lại).
+//   (a)+(b), (a)+(c): mọi biến thể (a) × mọi ô (b) / (c) (lọc hàng trước, rồi (b) / (c) trên khung của hàng còn lại;
+//     lọc rỗng → mọi hàng).
 //   Không thêm cách sau khi thấy số.
 // "CHIỀU CAO" ở (b) và (c) = CHIỀU CAO KHUNG CHỮ (item box), KHÔNG phải h của hàng rowLineInfo (h hàng = khung cao
 //   nhất của hàng; chẩn đoán thấy nhiều khung chữ dọc / chữ to làm cả ảnh thành 1 hàng cao 660–697 px):
@@ -66,7 +67,9 @@
 //   C3 7Up Diet 8934588752117 vị trí 1 ở 4 ô (chữ máy / câu gõ × (i)(ii)); buldak 8801073250574 vị trí 1 ở (i)(ii);
 //      muối Co.op photoOutcome kind "open" ở MÁY (i)(ii) và LÙI (i)(ii); 6 ca ngoại: tổng số ô vị trí 1 và tổng số ô
 //      trong 5 (trên 12 ô) không giảm so với nền.
-//   C4 S ≤ 10 mục ở mọi ca; (a) lọc hết dòng → quay về mọi dòng: S và found trùng nền từng ca đó.
+//   C4 S ≤ 10 mục ở mọi ca; (a) lọc hết dòng → quay về mọi dòng. Ở ca quay về: cách chỉ có (a) → S trùng nền; cách
+//      (a)+(b) / (a)+(c) → S trùng S của cách (b) / (c) cùng tham số không có (a) (cùng ca, cùng lần chạy). found luôn
+//      trùng nền.
 //   C5 Không đổi src/, server/, public/, package.json, package-lock.json so với da1ca3b (git diff --quiet); lúc chạy:
 //      CONFIDENCE_RULE { feature: null, threshold: null }, STRANGE_MODE null, SERVER_MERGE_OPTS / DEFAULT_GUARD như nền
 //      (G2 / c-idf, danh mục, kho phụ, dependency không đổi); câu OFF (cleanQuery) từng ca trùng nền; danh sách 5 mã LÙI
@@ -85,6 +88,8 @@
 //       0,05) ⇒ số ảnh ≈ ⌈5 / p⌉, p = tỷ lệ ảnh loại 2 mà cách tốt nhất sửa được (ước từ nhóm chỉnh + chẩn đoán); không
 //       ước được → bảng p = 0,2 / 0,3 / 0,5 → 25 / 17 / 10 ảnh;
 //   (2) ước tỷ lệ ±15 điểm % ở độ tin 95%: n ≈ ⌈1,96² · p(1 − p) / 0,15²⌉ (p = 0,5 → 43). Ghi cả hai.
+// Vòng 3 (2026-11-20): sửa C4 trước khi chạy --do-cach, LỆCH LUẬT so với 2206809, chưa có số cách nào; lý do: cách
+//   ghép trượt C4 vì cấu trúc.
 // Tự kiểm: khối luật kiểm bằng sha256 (RULE_SHA256, đặt ngoài khối sau commit luật) và so từng byte với commit luật
 //   (git show); đo chỉ chạy khi worktree sạch và khối luật trùng; lệch → thoát mã 3.
 // ===================================================================================================================
@@ -123,7 +128,7 @@ import { keyOf, rankIn, ruleBlockOf, sha256Of } from "./g2-di-qua-do.mjs";
 export const RULE_SHA = "2206809";
 export const RULE_FILE = "test-ocr/chup-mat-do/may-chu-loc-do.mjs";
 /** sha256 (hex) của khối luật ở commit RULE_SHA. */
-export const RULE_SHA256 = "fbd1b40a80d4168a9d01798f568dcf549066a93161b33cbebabad8bcc2d88153";
+export const RULE_SHA256 = "a4df1c16536a175ccef3083c5c52160b8981a9d45c05dfce25275c83bbb7aee5";
 
 /**
  * Phán tự kiểm (thuần): khối luật hiện tại (now) và ở commit luật (old), worktree dirty.
