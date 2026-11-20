@@ -512,6 +512,6 @@ export function qidOf(c) {
 
 // ---------------- chạy ----------------
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  const { runMain } = await import("./lens-chay.mjs");
-  await runMain(process.argv.slice(2), import.meta.url);
+  // KHÔNG await ở cấp module: lens-chay.mjs import lại file này (vòng import), await ở đây sẽ treo.
+  import("./lens-chay.mjs").then(({ runMain }) => runMain(process.argv.slice(2), import.meta.url)).catch((e) => { console.error(e); process.exit(1); });
 }
