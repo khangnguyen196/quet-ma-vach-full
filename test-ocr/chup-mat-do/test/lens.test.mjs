@@ -14,8 +14,9 @@ import { mergeLocal, BASE_PARAMS } from "../khau-gop-do.mjs";
 import {
   rrfFuse, serverTier, imageRank, lensOf, isUnsureU, appTier, cellOf, judgeR, targetsM, achieves, pickMethod, pickModel,
   earlyGate, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
-  RULE_SHA256, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES, HASH_OK_MIN, S_GRID,
+  RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES, HASH_OK_MIN, S_GRID,
 } from "../lens-do.mjs";
+import { execSync } from "node:child_process";
 
 const SRC = fs.readFileSync(new URL("../lens-do.mjs", import.meta.url), "utf8");
 const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), "utf8"));
@@ -44,6 +45,10 @@ test("khối luật: sha256 trùng RULE_SHA256; đổi 1 ký tự → tự kiể
   assert.equal(selfCheck({ now: block, old: null, dirty: true }, { ruleSha: null }).exitCode, 3, "worktree bẩn → không đo");
   assert.equal(selfCheck({ now: block, old: bad, dirty: false }, { ruleSha: "abc1234" }).exitCode, 3, "khác từng byte commit luật");
   assert.equal(selfCheck({ now: block, old: block, dirty: false }, { ruleSha: "abc1234" }).exitCode, 0);
+  // khối luật hiện tại trùng từng byte commit luật (git show; không có git thì bỏ qua phần này)
+  let old = null;
+  try { old = ruleBlockOf(execSync(`git show ${RULE_SHA}:${RULE_FILE}`, { cwd: new URL("../../..", import.meta.url), stdio: ["ignore", "pipe", "ignore"] }).toString("utf8")); } catch { old = null; }
+  if (old !== null) assert.equal(old, block, `khối luật khác commit ${RULE_SHA}`);
   assert.equal(modeOf(["--do"]), "do");
   assert.equal(modeOf(["--do", "--cong"]), null);
 });

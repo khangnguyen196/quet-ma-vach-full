@@ -177,8 +177,8 @@ import { ruleBlockOf, sha256Of, keyOf, rankIn } from "./g2-di-qua-do.mjs";
 import { splitHalves, lossRows } from "./may-chu-loc-do.mjs";
 import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.mjs";
 
-/** Commit luật (đặt ở commit sau commit luật; null = chưa có, tự kiểm chỉ dùng sha256). */
-export const RULE_SHA = null;
+/** Commit luật "test(lens): luật chốt trước" (2026-11-20 22:44:37 +0700); tự kiểm so từng byte khối luật bằng git show. */
+export const RULE_SHA = "81d04e5";
 export const RULE_FILE = "test-ocr/chup-mat-do/lens-do.mjs";
 /** sha256 (hex) của khối luật (ruleBlockOf). */
 export const RULE_SHA256 = "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a";
