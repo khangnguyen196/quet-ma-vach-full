@@ -12,7 +12,7 @@ const H = (ch) => ch.repeat(64);
 const CUR = H("a");
 
 /** meta bộ (b) fp32 hợp lệ (như lens-vec.py vec ghi từ vòng 3). */
-const bMeta = () => ({ model: "clip-fp32", pre: "cat", level: "b", sha256: H("e"), vaoSha256: H("f"), nIndex: 3, dims: 4, vecPySha256: CUR, gitHead: "c".repeat(40), gitDirty: false });
+const bMeta = () => ({ model: "clip-fp32", pre: "cat", level: "b", sha256: H("e"), vaoSha256: H("f"), nIndex: 3, dims: 4, nQueries: 2, vecPySha256: CUR, gitHead: "c".repeat(40), gitDirty: false });
 // vòng 3 A': int8Loss thêm nTruth + skipped; meta int8 thêm sha file int8; doInputCheck nhận sha danh sách / file thật
 const loss = () => ({ n: 2, nTruth: 2, skipped: { noTruth: 0, notInIndex: 0, hidden: 0 }, fp32: { top1: 1, top5: 2, top10: 2 }, int8: { top1: 1, top5: 2, top10: 2 }, changed: { top1: 0, top5: 0, top10: 0 }, top10OverlapMean: 1, maxAbsSimDiff: 0.0004 });
 const i8Meta = () => ({ ...bMeta(), quant: INT8_QUANT, fp32Sha256: H("d"), indexBytes: indexBytesInt8(3, 4), int8Loss: loss(), index8Sha256: H("6"), scaleSha256: H("7") });

@@ -20,7 +20,8 @@
 #       (vong 3) Tu bo fp32 <vec>/<model>-<pre>/<muc> tao <muc>-int8 (luong tu int8 doi xung theo tung vector, thang
 #       float16; cach cai o muc "chi muc int8" cuoi file), meta co quant / fp32Sha256 / indexBytes / int8Loss.
 # vec va int8 ghi vao meta: vecPySha256 (sha256 file nay), gitHead, gitDirty, vecPyPath (lens-chay --do kiem); ca hai
-# dung ngay (ma 3) khi worktree ban DAU luot va doi provenance cuoi luot trung luc dau (vong 3 A').
+# dung ngay (ma 3) khi worktree ban DAU luot va doi provenance cuoi luot trung luc dau (vong 3 A'). Chu ky chay noi cua
+# vec khong co gitHead (vong 3 A''): HEAD tung luot ghi o phan/heads.jsonl.
 # EXIF: moi lenh xoay theo EXIF (ImageOps.exif_transpose) cho ca anh chi muc lan anh truy van.
 #
 # Tien xu ly (giong ImageProcessor cua transformers.js tren Node, dung sharp):
@@ -434,9 +435,12 @@ def cmd_vec(a):
     do lens-do.mjs simsFrom ap), codes.json, queries.json, meta.json (gom cac truong chong an gian de lens-chay.mjs kiem).
     Chay noi: vector chi muc luu theo phan (phan/idx-<k>.npy, ghi tam roi doi ten); het --phut thi thoat ma 10. Phan cu
     khac dau vao / model / so luong -> dung, thoat ma 3. Truot kiem nhieu luong -> khong ghi bo sim, thoat ma 3.
-    Vong 3 A' (NGHIEM TRONG 1 review moc 4): provenance goi DAU luot (ban -> ma 3, truoc khi ghi chu ky / nhung anh); chu
-    ky chay noi co vecPySha256 + gitHead (lens-vec.py / HEAD doi giua hai luot -> ma 3, phan cu khong dung lai); cuoi luot
-    provenance phai trung luc dau; meta mang provenance luc dau."""
+    Vong 3 A' (NGHIEM TRONG 1 review moc 4): provenance goi DAU luot (ban -> ma 3, truoc khi ghi chu ky / nhung anh); cuoi
+    luot provenance phai trung luc dau; meta mang provenance luc dau.
+    Vong 3 A'' (NEN SUA 1 review moc 5): chu ky chay noi (phan/dau.json) co vecPySha256 nhung KHONG co gitHead: lens-vec.py
+    khong import file nao khac nen vecPySha256 + onnxSha256 + vaoSha256 du; commit file khac (vd PLAN.md) giua hai luot
+    khong lam hong phan da dung. lens-vec.py doi giua hai luot -> ma 3. HEAD tung luot ghi rieng vao phan/heads.jsonl
+    (moi luot mot dong: at, gitHead, vecPySha256), chi de tra lai, khong vao chu ky."""
     name, mode = a.model, a.pre
     if name not in MODELS or mode not in ("cat", "vien"):
         sys.exit(f"model / tien xu ly la: {name} {mode}")
@@ -450,7 +454,7 @@ def cmd_vec(a):
     part_dir = os.path.join(out_dir, "phan")
     os.makedirs(part_dir, exist_ok=True)
     sig = {"vaoSha256": file_sha256(a.vao), "model": name, "pre": mode, "onnxSha256": MODELS[name]["sha256"], "chunk": CHUNK,
-           "threads": a.threads, "vecPySha256": p0["vecPySha256"], "gitHead": p0["gitHead"]}
+           "threads": a.threads, "vecPySha256": p0["vecPySha256"]}
     sig_file = os.path.join(part_dir, "dau.json")
     if os.path.exists(sig_file):
         with open(sig_file, encoding="utf-8") as f:
@@ -460,6 +464,10 @@ def cmd_vec(a):
             sys.exit(3)
     else:
         atomic_json(sig_file, sig)
+    # nhat ky HEAD tung luot (khong vao chu ky): them mot dong moi luot da qua kiem chu ky
+    with open(os.path.join(part_dir, "heads.jsonl"), "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "gitHead": p0["gitHead"],
+                            "vecPySha256": p0["vecPySha256"]}, ensure_ascii=False) + "\n")
     cfg = load_cfg(a.model_dir, name)
     onnx_path = os.path.join(a.model_dir, MODELS[name]["dir"], MODELS[name]["onnx"])
     if file_sha256(onnx_path) != MODELS[name]["sha256"]:

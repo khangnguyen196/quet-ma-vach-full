@@ -44,7 +44,7 @@ function runVecPy(file, args) {
   return { status: r.status, err: `${r.stderr}${r.stdout}` };
 }
 
-test("A'1 lens-vec.py vec: dau.json cũ có vecPySha256 / gitHead khác → mã 3; worktree bẩn đầu lượt vec / int8 → mã 3 trước khi nhúng ảnh", (t) => {
+test("A''1 lens-vec.py vec: chữ ký chạy nối KHÔNG có gitHead (commit file khác giữa 2 lượt → chạy nối được, HEAD từng lượt ghi phan/heads.jsonl); lens-vec.py đổi → mã 3; worktree bẩn đầu lượt vec / int8 → mã 3 trước khi nhúng ảnh", (t) => {
   if (!fs.existsSync(PY)) { t.skip(`không có Python của venv đợt lens (${PY})`); return; }
   const repo = cleanRepo("sig");
   const work = path.join(TAM, `vec-${process.pid}-sig`);
@@ -53,30 +53,50 @@ test("A'1 lens-vec.py vec: dau.json cũ có vecPySha256 / gitHead khác → mã 
   try {
     const vao = path.join(work, "vec-vao-b.json");
     fs.writeFileSync(vao, JSON.stringify({ level: "b", index: [], queries: [] }), "utf8");
-    // model dir không tồn tại → lượt 1 ghi dau.json rồi dừng (mã 1) ở chỗ nạp cấu hình model, không nhúng ảnh nào
+    // model dir không tồn tại → mỗi lượt kiểm / ghi dau.json + heads.jsonl rồi dừng (mã 1) ở chỗ nạp cấu hình model, không nhúng ảnh nào
     const args = ["vec", "--model", "clip-fp32", "--pre", "cat", "--vao", vao, "--vec", work, "--model-dir", path.join(work, "khong-co-model")];
+    const head = () => repo.git("rev-parse", "HEAD").trim();
+    const partDir = path.join(work, "clip-fp32-cat", "b", "phan");
+    const sigFile = path.join(partDir, "dau.json");
+    const headsFile = path.join(partDir, "heads.jsonl");
+    const heads = () => fs.readFileSync(headsFile, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const h1 = head();
     const r1 = runVecPy(repo.file, args);
     assert.notEqual(r1.status, 3, `lượt 1 không được dừng vì chữ ký: ${r1.err}`);
-    const sigFile = path.join(work, "clip-fp32-cat", "b", "phan", "dau.json");
     const sig = JSON.parse(fs.readFileSync(sigFile, "utf8"));
     assert.equal(sig.vecPySha256, sha(fs.readFileSync(repo.file)), "chữ ký có sha lens-vec.py đang chạy");
-    assert.match(sig.gitHead ?? "", /^[0-9a-f]{40}$/, "chữ ký có git HEAD");
-    // lens-vec.py đổi (đã commit, repo sạch) → phần cũ không được dùng lại
+    assert.ok(!Object.hasOwn(sig, "gitHead"), "chữ ký KHÔNG có gitHead (review mốc 5, NÊN SỬA 1)");
+    assert.deepEqual(Object.keys(sig).sort(), ["chunk", "model", "onnxSha256", "pre", "threads", "vaoSha256", "vecPySha256"]);
+    // (a) chỉ commit MỘT file khác (vd PLAN.md) giữa 2 lượt: HEAD đổi, lens-vec.py không đổi → chạy nối được (không mã 3)
+    fs.writeFileSync(path.join(repo.dir, "PLAN.md"), "chỉ tài liệu\n", "utf8");
+    repo.commit("chỉ đổi tài liệu");
+    const h2 = head();
+    assert.notEqual(h2, h1);
+    const r2 = runVecPy(repo.file, args);
+    assert.notEqual(r2.status, 3, `commit file khác giữa 2 lượt KHÔNG được làm hỏng chạy nối (${r2.err})`);
+    assert.doesNotMatch(r2.err, /Phan cu khac/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sigFile, "utf8")), sig, "chữ ký giữ nguyên");
+    const hs = heads();
+    assert.equal(hs.length, 2, "mỗi lượt một dòng heads.jsonl");
+    assert.deepEqual(hs.map((x) => x.gitHead), [h1, h2], "HEAD từng lượt ghi vào heads.jsonl");
+    assert.ok(hs.every((x) => x.vecPySha256 === sig.vecPySha256 && typeof x.at === "string" && x.at.length > 0));
+    // (b) lens-vec.py đổi (đã commit, repo sạch) → phần cũ không được dùng lại → mã 3
     fs.appendFileSync(repo.file, "\n# doi tien xu ly giua hai luot (gia)\n");
     repo.commit("đổi lens-vec.py");
-    const r2 = runVecPy(repo.file, args);
-    assert.equal(r2.status, 3, `sha lens-vec.py khác chữ ký cũ → mã 3 (${r2.err})`);
-    assert.match(r2.err, /Phan cu khac/);
+    const r3 = runVecPy(repo.file, args);
+    assert.equal(r3.status, 3, `sha lens-vec.py khác chữ ký cũ → mã 3 (${r3.err})`);
+    assert.match(r3.err, /Phan cu khac/);
+    assert.equal(heads().length, 2, "lượt bị chặn vì chữ ký không ghi heads.jsonl");
     // repo bẩn đầu lượt → mã 3, báo rõ, kể cả khi chữ ký mới
     fs.rmSync(path.join(work, "clip-fp32-cat"), { recursive: true, force: true });
     fs.appendFileSync(repo.file, "\n# sua do chua commit\n");
-    const r3 = runVecPy(repo.file, args);
-    assert.equal(r3.status, 3, `worktree bẩn → mã 3 (${r3.err})`);
-    assert.match(r3.err, /gitDirty True/);
-    assert.ok(!fs.existsSync(sigFile), "dừng TRƯỚC khi ghi chữ ký / nhúng ảnh");
-    const r4 = runVecPy(repo.file, ["int8", "--model", "clip-fp32", "--pre", "cat", "--muc", "b", "--vec", work]);
-    assert.equal(r4.status, 3, `int8 khi bẩn → mã 3 (${r4.err})`);
+    const r4 = runVecPy(repo.file, args);
+    assert.equal(r4.status, 3, `worktree bẩn → mã 3 (${r4.err})`);
     assert.match(r4.err, /gitDirty True/);
+    assert.ok(!fs.existsSync(sigFile), "dừng TRƯỚC khi ghi chữ ký / nhúng ảnh");
+    const r5 = runVecPy(repo.file, ["int8", "--model", "clip-fp32", "--pre", "cat", "--muc", "b", "--vec", work]);
+    assert.equal(r5.status, 3, `int8 khi bẩn → mã 3 (${r5.err})`);
+    assert.match(r5.err, /gitDirty True/);
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
     fs.rmSync(repo.dir, { recursive: true, force: true });
@@ -116,7 +136,10 @@ test("A'1 lens-vec.py (nguồn): vec / int8 gọi start_provenance đầu lượ
   assert.match(v, /p0 = start_provenance\("vec"\)/);
   assert.ok(v.indexOf("start_provenance(") < v.indexOf("sig = {"), "kiểm bẩn trước chữ ký");
   assert.ok(v.indexOf("start_provenance(") < v.indexOf("embed_files("), "kiểm bẩn trước khi nhúng ảnh");
-  assert.match(v, /sig = \{[^}]*"vecPySha256": p0\["vecPySha256"\], "gitHead": p0\["gitHead"\]/s);
+  assert.match(v, /sig = \{[^}]*"vecPySha256": p0\["vecPySha256"\]\}/s);
+  assert.doesNotMatch(v.slice(v.indexOf("sig = {"), v.indexOf("sig_file =")), /gitHead/, "chữ ký không có gitHead (review mốc 5)");
+  const iHeads = v.indexOf('"heads.jsonl"');
+  assert.ok(iHeads > v.indexOf("sig_file =") && iHeads < v.indexOf("embed_files("),"ghi HEAD từng lượt sau kiểm chữ ký, trước khi nhúng ảnh");
   assert.ok(v.indexOf("require_same_provenance(p0") < v.indexOf("save_vec_outputs("), "cuối lượt so provenance trước khi ghi bộ sim");
   assert.match(v, /\*\*p0,/);
   assert.doesNotMatch(v, /\*\*provenance\(\)/);
@@ -284,7 +307,7 @@ test("A'3 + A'4 lens-vec.py int8: ghi nTruth + số bỏ theo lý do, sha index-
 });
 
 const L = () => ({ n: 2, nTruth: 4, skipped: { noTruth: 1, notInIndex: 1, hidden: 1 }, fp32: { top1: 1, top5: 2, top10: 2 }, int8: { top1: 1, top5: 2, top10: 2 }, changed: { top1: 0, top5: 0, top10: 0 }, top10OverlapMean: 1, maxAbsSimDiff: 0.0004 });
-const bM = () => ({ model: "clip-fp32", pre: "cat", level: "b", sha256: H("e"), vaoSha256: H("f"), nIndex: 3, dims: 4, vecPySha256: H("a"), gitHead: "c".repeat(40), gitDirty: false });
+const bM = () => ({ model: "clip-fp32", pre: "cat", level: "b", sha256: H("e"), vaoSha256: H("f"), nIndex: 3, dims: 4, nQueries: 5, vecPySha256: H("a"), gitHead: "c".repeat(40), gitDirty: false });
 const iM = (loss = L()) => ({ ...bM(), quant: INT8_QUANT, fp32Sha256: H("d"), indexBytes: indexBytesInt8(3, 4), int8Loss: loss, index8Sha256: H("6"), scaleSha256: H("7") });
 const lists = () => ({ codes: H("3"), queries: H("4") });
 const okArgs = () => ({ bMeta: bM(), int8Meta: iM(), fp32Sha256: H("d"), vecPySha256: H("a"), bListSha256: lists(), int8ListSha256: lists(), int8FileSha256: { index: H("6"), scale: H("7") } });
@@ -297,6 +320,17 @@ test("A'3 int8MetaErrors: n ≥ 1, có nTruth + skipped và cộng khớp; n = 0
   bad({ ...L(), nTruth: undefined }, /thiếu nTruth/);
   bad({ ...L(), skipped: { noTruth: 1, notInIndex: 1 } }, /skipped/);
   bad({ ...L(), nTruth: 5 }, /không khớp/);
+});
+
+test("A''2 int8MetaErrors: nTruth + skipped.noTruth phải bằng meta.nQueries; thiếu / sai dạng nQueries → lỗi", () => {
+  assert.deepEqual(int8MetaErrors(iM(), { fp32Sha256: H("d") }), [], "nTruth 4 + noTruth 1 = nQueries 5");
+  const bad = (meta, re) => { const e = int8MetaErrors(meta, { fp32Sha256: H("d") }); assert.ok(e.some((x) => re.test(x)), `${re}: ${e.join(" | ")}`); };
+  bad({ ...iM(), nQueries: 6 }, /nTruth 4 \+ noTruth 1 ≠ meta\.nQueries 6/);
+  bad({ ...iM(), nQueries: 4 }, /≠ meta\.nQueries 4/);
+  bad({ ...iM(), nQueries: undefined }, /meta\.nQueries sai dạng/);
+  bad({ ...iM(), nQueries: "5" }, /meta\.nQueries sai dạng/);
+  // n + notInIndex + hidden vẫn khớp nTruth nhưng noTruth sai → chỉ kiểm mới bắt được
+  bad(iM({ ...L(), skipped: { noTruth: 0, notInIndex: 1, hidden: 1 } }), /nTruth 4 \+ noTruth 0 ≠ meta\.nQueries 5/);
 });
 
 test("A'4 doInputCheck: sha codes.json / queries.json của (b) và int8 phải trùng; sha file int8 trùng meta; thiếu → mã 3", () => {
@@ -321,7 +355,8 @@ test("A'4 lens-chay --do (nguồn): sha lens-vec.py null → stop; doInputCheck 
   const src = fs.readFileSync(new URL("../lens-chay.mjs", import.meta.url), "utf8");
   const d = src.slice(src.indexOf('if (mode === "do")'), src.indexOf("out.offStats"));
   assert.match(d, /if \(!HEX64_RE\.test\(vecPySha \?\? ""\)\) stop\(/);
-  assert.ok(d.indexOf("HEX64_RE.test(vecPySha") < d.indexOf("vecMetaErrors") || !d.includes("vecMetaErrors"));
+  const iSha = d.indexOf("HEX64_RE.test(vecPySha");
+  assert.ok(iSha > 0 && iSha < d.indexOf("doInputCheck("), "kiểm sha lens-vec.py null TRƯỚC doInputCheck (chỗ dùng vecPySha256)");
   assert.match(d, /try \{\n(?:.*\n){0,3}\s*dc = doInputCheck\(/, "doInputCheck trong try");
   assert.match(d, /\} catch \(e\) \{ stop\("KHÔNG KIỂM ĐƯỢC ĐẦU VÀO --do"/);
   const iDc = d.indexOf("doInputCheck(");

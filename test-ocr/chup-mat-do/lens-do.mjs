@@ -861,6 +861,9 @@ export function int8MetaErrors(meta, { fp32Sha256 }) {
       if (!Number.isInteger(L.nTruth)) errs.push(`int8: meta.int8Loss nTruth sai dạng (${L.nTruth})`);
       if (!skOk) errs.push("int8: meta.int8Loss.skipped phải có noTruth / notInIndex / hidden là số nguyên ≥ 0");
       if (skOk && Number.isInteger(L.nTruth) && L.n + S.notInIndex + S.hidden !== L.nTruth) errs.push(`int8: meta.int8Loss n ${L.n} + notInIndex ${S.notInIndex} + hidden ${S.hidden} không khớp nTruth ${L.nTruth}`);
+      // vòng 3 A'' (gợi ý 2 review mốc 5): nTruth + noTruth = số truy vấn của bộ (meta.nQueries)
+      if (!Number.isInteger(m.nQueries) || m.nQueries < 0) errs.push(`int8: meta.nQueries sai dạng (${m.nQueries})`);
+      else if (skOk && Number.isInteger(L.nTruth) && L.nTruth + S.noTruth !== m.nQueries) errs.push(`int8: meta.int8Loss nTruth ${L.nTruth} + noTruth ${S.noTruth} ≠ meta.nQueries ${m.nQueries}`);
     }
   }
   if (!HEX64.test(m.index8Sha256 ?? "") || !HEX64.test(m.scaleSha256 ?? "")) errs.push(`int8: meta.index8Sha256 / scaleSha256 thiếu / sai dạng (${m.index8Sha256} / ${m.scaleSha256})`);
