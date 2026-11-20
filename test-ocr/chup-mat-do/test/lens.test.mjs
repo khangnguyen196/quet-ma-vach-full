@@ -13,8 +13,9 @@ import { ruleBlockOf, sha256Of } from "../g2-di-qua-do.mjs";
 import { mergeLocal, BASE_PARAMS } from "../khau-gop-do.mjs";
 import {
   rrfFuse, serverTier, imageRank, lensOf, isUnsureU, appTier, cellOf, judgeR, targetsM, achieves, pickMethod, pickModel,
-  earlyGate, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
-  RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES, HASH_OK_MIN, S_GRID,
+  earlyGate, gateG2, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
+  guardWant, checkIndexGuard, RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES,
+  HASH_OK_MIN, S_GRID,
 } from "../lens-do.mjs";
 import { execSync } from "node:child_process";
 
@@ -45,12 +46,22 @@ test("khối luật: sha256 trùng RULE_SHA256; đổi 1 ký tự → tự kiể
   assert.equal(selfCheck({ now: block, old: null, dirty: true }, { ruleSha: null }).exitCode, 3, "worktree bẩn → không đo");
   assert.equal(selfCheck({ now: block, old: bad, dirty: false }, { ruleSha: "abc1234" }).exitCode, 3, "khác từng byte commit luật");
   assert.equal(selfCheck({ now: block, old: block, dirty: false }, { ruleSha: "abc1234" }).exitCode, 0);
-  // khối luật hiện tại trùng từng byte commit luật (git show; không có git thì bỏ qua phần này)
-  let old = null;
-  try { old = ruleBlockOf(execSync(`git show ${RULE_SHA}:${RULE_FILE}`, { cwd: new URL("../../..", import.meta.url), stdio: ["ignore", "pipe", "ignore"] }).toString("utf8")); } catch { old = null; }
-  if (old !== null) assert.equal(old, block, `khối luật khác commit ${RULE_SHA}`);
   assert.equal(modeOf(["--do"]), "do");
   assert.equal(modeOf(["--do", "--cong"]), null);
+});
+
+/** Khối luật ở một commit (git show); không có git / không có commit → null. */
+function blockAt(sha) {
+  try {
+    return ruleBlockOf(execSync(`git show ${sha}:${RULE_FILE}`, { cwd: new URL("../../..", import.meta.url), stdio: ["ignore", "pipe", "ignore"] }).toString("utf8"));
+  } catch { return null; }
+}
+
+test("khối luật hiện tại trùng từng byte commit luật RULE_SHA (git show)", (t) => {
+  const old = blockAt(RULE_SHA);
+  // gợi ý 2 của code-reviewer vòng 1: không âm thầm bỏ qua; thiếu git / commit thì skip CÓ lý do (hiện trong kết quả test)
+  if (old === null) { t.skip(`không chạy được git show ${RULE_SHA} (không có git hoặc thiếu commit)`); return; }
+  assert.equal(old, ruleBlockOf(SRC), `khối luật khác commit ${RULE_SHA}`);
 });
 
 test("khối luật đủ nội dung bắt buộc (P1e) và không chứa mã nhãn / tên file ảnh thật", () => {
@@ -132,7 +143,8 @@ test("tầng app: A0 / A1 / A2 không lens = nền (7Up nhánh ảnh tắt; R5 x
     assert.equal(m1.length <= 5, true);
     assert.equal(new Set(codes(m1)).size, m1.length, "không trùng mã");
     const rest = mergeLocal(ctx, c.found, NET, S, { ...BASE_PARAMS, offMax: m1[0].source === "off" ? 0 : 1 }).filter((x) => x.code !== target).slice(0, 4);
-    assert.deepEqual(m1.slice(1), base0[0]?.code === target ? base0.slice(1) : rest, "4 mục sau: offMax tính cả mục đẩy");    if (base0[0]?.code !== target) pushed++;
+    assert.deepEqual(m1.slice(1), base0[0]?.code === target ? base0.slice(1) : rest, "4 mục sau: offMax tính cả mục đẩy");
+    if (base0[0]?.code !== target) pushed++;
     const notPushed = appTier(ctx, c, S, "i", { id: "A1-0.95-0.1", kind: "A1", tau: 0.95, mu: 0.1 }, { lens, simOf, base0 });
     assert.deepEqual(notPushed, base0, "dưới τ → nền");
     const notInS = appTier(ctx, c, S, "i", { id: "A1-0-0", kind: "A1", tau: 0, mu: 0 }, { lens: { ...lens, top1Code: "0000000000000" }, simOf, base0 });
@@ -159,8 +171,11 @@ test("ô / R1: 'không chắc' mà nền đúng vị trí 1 = MẤT vị trí 1;
   assert.equal(judgeR({ ab: okRow(base), ...common }).pass, true);
   const v = judgeR({ ab: okRow(unsure), ...common });
   assert.equal(v.gates.R1, false);
-  const wrongJudge = (rows) => rows.every((r) => r.got.pos === 1 || r.base.pos !== 1); // mẫu sai: chỉ nhìn vị trí, bỏ U
-  assert.equal(wrongJudge(okRow(unsure)), true, "mẫu sai cho qua → test bắt được");
+  // mẫu sai gọi judgeR THẬT với ô tính kiểu "bỏ U" (cellOf không truyền cờ không chắc): cho qua R1 → khác hẳn ô đúng (bị
+  // đánh "không chắc") ở trên, nên một bản cài quên U sẽ bị test này bắt.
+  const ignoreU = cellOf(m, "1234567890123", false);
+  assert.equal(judgeR({ ab: okRow(ignoreU), ...common }).gates.R1, true, "mẫu sai (bỏ U) cho qua");
+  assert.notEqual(judgeR({ ab: okRow(ignoreU), ...common }).gates.R1, v.gates.R1);
   assert.equal(judgeR({ ab: okRow(cellOf([{ code: "2222222222222" }], "1234567890123", false)), ...common }).gates.R1, false, "rơi khỏi 5");
   assert.equal(judgeR({ ab: okRow(base).slice(1), ...common }).gates.R1, false, "thiếu ô");
   assert.equal(judgeR({ ab: okRow(base), ...common, noImgSame: false }).gates.R3, false, "7Up / ca không ảnh khác nền → trượt");
@@ -208,10 +223,109 @@ test("chống ăn gian: cùng imgid / mã băm gần (≤ 24 bit) → loại; kh
   assert.equal(none.chosen, null);
   assert.equal(none.rejected[2].reason, "trùng imgid ứng viên trước");
   assert.equal(chooseSubstitute([{ key: "front_vi.3", imgid: "8", distance: null }], "7").chosen, null, "không có mã băm → không nhận");
-  // mẫu sai: chỉ so imgid (bỏ mã băm) sẽ nhận front_en.5 (24 bit)
-  const wrong = [{ key: "front_en.5", imgid: "9", distance: 24 }].find((c) => c.imgid !== "7");
-  assert.equal(wrong.key, "front_en.5");
+  // mẫu sai gọi chooseSubstitute THẬT: cùng ứng viên, chỉ đổi mã băm 24 → 25 bit thì được nhận → hàm thật đúng là xét mã băm
   assert.equal(chooseSubstitute([{ key: "front_en.5", imgid: "9", distance: 24 }], "7").chosen, null);
+  assert.equal(chooseSubstitute([{ key: "front_en.5", imgid: "9", distance: 25 }], "7").chosen?.key, "front_en.5");
+});
+
+test("chống ăn gian (NÊN SỬA 1): imgid ảnh đo HOẶC ứng viên không rõ → từ chối 'không biết imgid'", () => {
+  const far = { key: "front_fr.6", imgid: "10", distance: 60 };
+  for (const t of [null, undefined, "", "  "]) {
+    const r = chooseSubstitute([far], t);
+    assert.equal(r.chosen, null, `ảnh đo imgid ${JSON.stringify(t)}`);
+    assert.deepEqual(r.rejected, [{ key: "front_fr.6", reason: "không biết imgid ảnh đo" }]);
+  }
+  for (const im of [null, undefined, ""]) {
+    const r = chooseSubstitute([{ key: "front_vi.3", imgid: im, distance: 60 }, far], "7");
+    assert.equal(r.rejected[0].reason, "không biết imgid", `ứng viên imgid ${JSON.stringify(im)}`);
+    assert.equal(r.chosen.key, "front_fr.6", "ứng viên sau vẫn được xét");
+  }
+  // mẫu sai (bản vòng 1: chỉ loại khi c.imgid != null và trùng): hàm thật với imgid biết + xa thì nhận; với imgid null thì
+  // KHÔNG nhận — nên bản cũ (nhận) bị test trên bắt
+  assert.equal(chooseSubstitute([{ key: "front_vi.3", imgid: "8", distance: 60 }], "7").chosen?.key, "front_vi.3");
+  assert.equal(chooseSubstitute([{ key: "front_vi.3", imgid: null, distance: 60 }], "7").chosen, null);
+  assert.equal(chooseSubstitute([{ key: "front_vi.3", imgid: "8", distance: 60 }], null).chosen, null);
+});
+
+test("cổng G2 (NÊN SỬA 4): mọi top1 phải là số hữu hạn; null / NaN / thiếu ảnh → G2 false kèm lý do", () => {
+  const good = GOOD_IMGS.map((img, i) => ({ img, top1: 0.8 + i * 0.01 }));
+  const none3 = [17, 18, 19, 20, 21, 22].map((img, i) => ({ img, top1: i < 2 ? 0.7 : 0.9 }));
+  assert.deepEqual(gateG2(good, none3), { G2: true, g2n: 2, minGood: 0.8, g2Why: null });
+  const nullNone = none3.map((x, i) => (i === 2 ? { ...x, top1: null } : x));
+  const r = gateG2(good, nullNone);
+  assert.equal(r.G2, false);
+  assert.match(r.g2Why, /top1 không phải số hữu hạn: #19/);
+  // mẫu sai: trong JS null < 0,8 là đúng → cách đếm cũ đếm cả ảnh null, ra 3 ≥ 2 (cổng mở nhầm)
+  assert.equal(nullNone.filter((x) => x.top1 < 0.8).length, 3);
+  const nullGood = good.map((x, i) => (i === 0 ? { ...x, top1: null } : x));
+  assert.equal(gateG2(nullGood, none3).G2, false, "ảnh đang đúng null (Math.min ra 0) → không đóng / mở nhầm");
+  assert.equal(gateG2(good, none3.map((x) => (x.img === 17 ? { ...x, top1: NaN } : x))).G2, false);
+  assert.match(gateG2(good.slice(1), none3).g2Why, /cần 8 ảnh đang đúng/);
+  assert.match(gateG2(good, none3.slice(1)).g2Why, /cần 6 ảnh thư mục 3/);
+  const wrong = [{ img: 2, inIndex: true, pos: 1 }, { img: 4, inIndex: true, pos: 2 }];
+  const g = earlyGate({ ab: Array.from({ length: 10 }, (_, i) => ({ code: String(i), measurable: true, pos: 1 })), wrong: [], none3: nullNone, good });
+  assert.equal(g.G2, false);
+  assert.equal(g.pass, false, "G1 0 + G2 false → không qua");
+  assert.match(g.detail.g2Why, /#19/);
+  assert.equal(earlyGate({ ab: Array.from({ length: 10 }, (_, i) => ({ code: String(i), measurable: true, pos: 1 })), wrong, none3: nullNone, good }).pass, true, "G1 đủ vẫn qua");
+});
+
+test("lưới: tên cách mang chỉ số phân vị, 2 phân vị cùng giá trị không trùng tên (gợi ý 10)", () => {
+  const g = methodGrid([0.5, 0.5, 0.6, 0.7, 0.8], [0.1, 0.1, 0.1, 0.2, 0.3]);
+  assert.equal(g.length, METHOD_COUNT);
+  assert.equal(new Set(g.map((x) => x.name)).size, METHOD_COUNT, "không tên trùng");
+  assert.ok(g.some((x) => x.name === "S0|A1-τp25-μp50|U0"));
+  assert.ok(g.some((x) => x.name === "S0|A0|U-or-τp10-μp90"));
+  const a = g.find((x) => x.a.id === "A1-τp25-μp50").a;
+  assert.deepEqual([a.tau, a.mu], [0.5, 0.1]);
+  assert.throws(() => methodGrid([1, 2, 3], [1, 2, 3, 4, 5]));
+});
+
+test("chỉ mục đã áp chống ăn gian (NÊN SỬA 5): sha256, excluded, override, ảnh truy vấn không nằm trong chỉ mục", () => {
+  const ac = {
+    items: [
+      { code: "1111111111111", testImgid: "3", chosen: "front_en.9", candidates: [{ key: "front_en.9", imgid: "5" }] },
+      { code: "2222222222222", testImgid: "1", chosen: null },
+    ],
+    excluded: ["2222222222222"], override: { "1111111111111": "front_en.9" },
+  };
+  const bop = { items: [{ qid: "p-3333333333333", code: "3333333333333", query: { imgid: "4" }, index: { key: "imgid:7", imgid: "7" } }] };
+  const acText = JSON.stringify(ac);
+  const bopText = JSON.stringify(bop);
+  const want = guardWant(acText, bopText);
+  assert.deepEqual(want.override, { "1111111111111": "front_en.9", "3333333333333": "imgid:7" });
+  assert.deepEqual(want.guard, [{ code: "1111111111111", queryImgid: "3", qid: "ab-1111111111111" }, { code: "3333333333333", queryImgid: "4", qid: "p-3333333333333" }]);
+  const codesOk = ["1111111111111", "3333333333333", "4444444444444"];
+  const metaOk = {
+    antiCheatSha256: want.antiCheatSha256, boPSha256: want.boPSha256, excluded: ["2222222222222"], override: { ...want.override },
+    indexKey: { "1111111111111": "front_en.9", "3333333333333": "imgid:7", "4444444444444": "front_vi.2" },
+    indexImgid: { "1111111111111": "5", "3333333333333": "7" },
+  };
+  assert.deepEqual(checkIndexGuard(metaOk, codesOk, want), []);
+  // mẫu sai, mỗi mẫu một lỗi
+  const bad = (patch, codes = codesOk) => checkIndexGuard({ ...metaOk, ...patch }, codes, want);
+  assert.match(bad({}, [...codesOk, "2222222222222"]).join(), /\(i\) mã bị loại vẫn có trong chỉ mục: 2222222222222/);
+  assert.match(bad({ indexKey: { ...metaOk.indexKey, "1111111111111": "front_vi.1" } }).join(), /\(ii\) 1111111111111 dùng ảnh front_vi.1/);
+  assert.match(bad({ indexImgid: { ...metaOk.indexImgid, "1111111111111": "3" } }).join(), /\(iii\) ảnh truy vấn ab-1111111111111 nằm trong chỉ mục/);
+  assert.match(bad({ indexImgid: { "1111111111111": "5" } }).join(), /\(iii\) không biết imgid ảnh chỉ mục của 3333333333333/);
+  assert.match(bad({ antiCheatSha256: "khac" }).join(), /meta.antiCheatSha256/);
+  assert.match(bad({ boPSha256: null }).join(), /meta.boPSha256/);
+  assert.match(bad({ excluded: [] }).join(), /meta.excluded/);
+  assert.match(bad({}, ["1111111111111"]).join(), /mã bộ P không có trong chỉ mục: 3333333333333/);
+  assert.match(checkIndexGuard(metaOk, codesOk, guardWant(JSON.stringify({ ...ac, override: {} }), bopText)).join(), /meta.override/);
+  // bộ P mâu thuẫn override A / B → lỗi
+  const clash = guardWant(acText, JSON.stringify({ items: [{ qid: "ab-1111111111111", code: "1111111111111", query: { imgid: "3" }, index: { key: "front_fr.2", imgid: "8" } }] }));
+  assert.match(checkIndexGuard(metaOk, codesOk, clash).join(), /override mâu thuẫn/);
+});
+
+test("kết quả đo ghi sha256 của lens-do.mjs, lens-chay.mjs, lens-vec.py (gợi ý 1)", async () => {
+  const { codeSha256s, CODE_FILES } = await import("../lens-chay.mjs");
+  assert.deepEqual([...CODE_FILES], ["lens-do.mjs", "lens-chay.mjs", "lens-vec.py"]);
+  const s = codeSha256s();
+  for (const f of CODE_FILES) assert.match(s[f], /^[0-9a-f]{64}$/, f);
+  const want = (await import("node:crypto")).createHash("sha256").update(fs.readFileSync(new URL("../lens-do.mjs", import.meta.url))).digest("hex");
+  assert.equal(s["lens-do.mjs"], want);
+  assert.equal(codeSha256s("D:\\khong-co-thu-muc-nay")["lens-do.mjs"], null);
 });
 
 test("chọn model: R6 / R7 lọc, rồi A/B top 5, ảnh thật top 5, Apache-2.0, nhẹ hơn, 'cat' trước", () => {
@@ -237,7 +351,9 @@ test("cổng dừng sớm: G3 và (G1 hoặc G2)", () => {
   assert.equal(earlyGate({ ab: ab(9), wrong, none3: [], good }).pass, false, "G3 45 %");
   const w1 = [{ img: 2, inIndex: true, pos: 6 }, { img: 4, inIndex: true, pos: 5 }];
   assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: [], good }).pass, false, "G1 chỉ 1, G2 0");
-  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: [{ img: 17, top1: 0.7 }, { img: 18, top1: 0.79 }, { img: 19, top1: 0.8 }], good }).pass, true, "G2: 2 ảnh dưới min 0,8");
+  const six = [{ img: 17, top1: 0.7 }, { img: 18, top1: 0.79 }, { img: 19, top1: 0.8 }, { img: 20, top1: 0.9 }, { img: 21, top1: 0.85 }, { img: 22, top1: 0.81 }];
+  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: six, good }).pass, true, "G2: 2 / 6 ảnh dưới min 0,8");
+  assert.equal(earlyGate({ ab: ab(10), wrong: w1, none3: six.slice(0, 3), good }).pass, false, "G2 đòi đủ 6 ảnh thư mục 3");
   const notMeas = [...ab(10), ...Array.from({ length: 5 }, () => ({ measurable: false, pos: null }))];
   assert.equal(earlyGate({ ab: notMeas, wrong, none3: [], good }).detail.abMeasurable, 20, "mã bị loại không vào mẫu số");
 });

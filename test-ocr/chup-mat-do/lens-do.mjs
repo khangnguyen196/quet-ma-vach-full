@@ -169,12 +169,10 @@ export const PRE_ORDER = Object.freeze(["cat", "vien"]);
 // ---------------- code đo (cài đúng định nghĩa trong khối luật ở trên) ----------------
 import fs from "node:fs";
 import path from "node:path";
-import zlib from "node:zlib";
 import { pathToFileURL } from "node:url";
 import { serverJoin } from "../../src/front-server.js";
 import { photoOutcome } from "../../src/front-photo.js";
-import { ruleBlockOf, sha256Of, keyOf, rankIn } from "./g2-di-qua-do.mjs";
-import { splitHalves, lossRows } from "./may-chu-loc-do.mjs";
+import { sha256Of, rankIn } from "./g2-di-qua-do.mjs";
 import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.mjs";
 
 /** Commit luật "test(lens): luật chốt trước" (2026-11-20 22:44:37 +0700); tự kiểm so từng byte khối luật bằng git show. */
@@ -209,15 +207,22 @@ export function percentiles(xs) {
   return PERCENTS.map((p) => quantileNR(xs, p / 100));
 }
 
-/** Lưới cách đủ (theo thứ tự khai báo) từ τ (5 số) và μ (5 số). Trả [{ name, s, a, u }]. */
+/**
+ * Lưới cách đủ (theo thứ tự khai báo) từ τ (5 số) và μ (5 số), τ[i] / μ[j] là phân vị PERCENTS[i] / PERCENTS[j]. Tên
+ * cách mang CHỈ SỐ PHÂN VỊ (vd "A1-τp25-μp50"), không mang giá trị, để 2 phân vị cùng giá trị không cho 2 cách trùng tên
+ * (gợi ý 10 của code-reviewer vòng 1). Trả [{ name, s, a, u }].
+ */
 export function methodGrid(taus, mus) {
+  if (taus.length !== PERCENTS.length || mus.length !== PERCENTS.length) throw new Error(`lens: cần ${PERCENTS.length} τ và ${PERCENTS.length} μ`);
+  const tp = (i) => `τp${PERCENTS[i]}`;
+  const mp = (j) => `μp${PERCENTS[j]}`;
   const A = [{ id: "A0" }, ...A_W.map((w) => ({ id: `A2-${w}`, kind: "A2", w }))];
-  for (const tau of taus) for (const mu of mus) A.push({ id: `A1-${tau}-${mu}`, kind: "A1", tau, mu });
+  taus.forEach((tau, i) => mus.forEach((mu, j) => A.push({ id: `A1-${tp(i)}-${mp(j)}`, kind: "A1", tau, mu })));
   const U = [{ id: "U0" }];
-  for (const tau of taus) U.push({ id: `U-sim-${tau}`, kind: "U-sim", tau });
-  for (const mu of mus) U.push({ id: `U-gap-${mu}`, kind: "U-gap", mu });
-  for (const tau of taus) U.push({ id: `U-simchu-${tau}`, kind: "U-simchu", tau });
-  for (const tau of taus) for (const mu of mus) U.push({ id: `U-or-${tau}-${mu}`, kind: "U-or", tau, mu });
+  taus.forEach((tau, i) => U.push({ id: `U-sim-${tp(i)}`, kind: "U-sim", tau }));
+  mus.forEach((mu, j) => U.push({ id: `U-gap-${mp(j)}`, kind: "U-gap", mu }));
+  taus.forEach((tau, i) => U.push({ id: `U-simchu-${tp(i)}`, kind: "U-simchu", tau }));
+  taus.forEach((tau, i) => mus.forEach((mu, j) => U.push({ id: `U-or-${tp(i)}-${mp(j)}`, kind: "U-or", tau, mu })));
   const out = [];
   for (const s of S_GRID) for (const a of A) for (const u of U) out.push({ name: `${s}|${a.id}|${u.id}`, s, a, u });
   return out;
@@ -439,19 +444,47 @@ export function earlyGate({ ab, wrong, none3, good }) {
   const inIdx = (wrong || []).filter((x) => x.inIndex);
   const g1n = inIdx.filter((x) => x.pos != null && x.pos <= 5).length;
   const G1 = g1n >= G1_MIN;
-  const minGood = (good || []).length ? Math.min(...good.map((x) => x.top1)) : -Infinity;
-  const g2n = (none3 || []).filter((x) => x.top1 < minGood).length;
-  const G2 = (good || []).length === GOOD_IMGS.length && g2n >= G2_MIN;
-  return { G1, G2, G3, pass: G3 && (G1 || G2), detail: { abMeasurable: meas.length, abHit5: hit, rate, wrongInIndex: inIdx.length, g1n, minGood, g2n } };
+  const { G2, g2n, minGood, g2Why } = gateG2(good, none3);
+  return { G1, G2, G3, pass: G3 && (G1 || G2), detail: { abMeasurable: meas.length, abHit5: hit, rate, wrongInIndex: inIdx.length, g1n, minGood, g2n, g2Why } };
+}
+
+/** Số ảnh thư mục 3 ("không có dữ liệu") của bộ ảnh thật. */
+export const NONE3_N = 6;
+
+/**
+ * G2 (NÊN SỬA 4 của code-reviewer vòng 1): đủ 8 ảnh đang đúng + 6 ảnh thư mục 3 và MỌI top1 là số hữu hạn; thiếu / null /
+ * NaN → G2 = false kèm lý do (trước đây null < số = đúng trong JS làm cổng mở nhầm). Trả { G2, g2n, minGood, g2Why }.
+ */
+export function gateG2(good, none3) {
+  const G = good || [];
+  const N = none3 || [];
+  const bad = [...G, ...N].filter((x) => !Number.isFinite(x?.top1)).map((x) => `#${x?.img}`);
+  let g2Why = null;
+  if (G.length !== GOOD_IMGS.length) g2Why = `cần ${GOOD_IMGS.length} ảnh đang đúng, có ${G.length}`;
+  else if (N.length !== NONE3_N) g2Why = `cần ${NONE3_N} ảnh thư mục 3, có ${N.length}`;
+  else if (bad.length) g2Why = `top1 không phải số hữu hạn: ${bad.join(" ")}`;
+  if (g2Why) return { G2: false, g2n: null, minGood: null, g2Why };
+  const minGood = Math.min(...G.map((x) => x.top1));
+  const g2n = N.filter((x) => x.top1 < minGood).length;
+  return { G2: g2n >= G2_MIN, g2n, minGood, g2Why: null };
+}
+
+/** imgid biết được: chuỗi / số khác rỗng. */
+export function knownImgid(x) {
+  return (typeof x === "string" || typeof x === "number") && String(x).trim() !== "";
 }
 
 /** Chọn ảnh chỉ mục thay cho mã A / B (chống ăn gian). cands = [{ key ("front_xx.rev"), imgid, distance | null }] theo
- *  thứ tự ứng viên. Trả { chosen | null, rejected: [{ key, reason }] }. */
+ *  thứ tự ứng viên. imgid ảnh đo HOẶC ứng viên không rõ (null / rỗng) → từ chối ứng viên "không biết imgid" (NÊN SỬA 1
+ *  của code-reviewer vòng 1: không để chỉ mã băm bảo vệ). Trả { chosen | null, rejected: [{ key, reason }] }. */
 export function chooseSubstitute(cands, testImgid) {
   const rejected = [];
   const seen = new Set();
+  const testKnown = knownImgid(testImgid);
   for (const c of cands || []) {
-    if (c.imgid != null && String(c.imgid) === String(testImgid)) { rejected.push({ key: c.key, reason: "cùng imgid" }); continue; }
+    if (!testKnown) { rejected.push({ key: c.key, reason: "không biết imgid ảnh đo" }); continue; }
+    if (!knownImgid(c.imgid)) { rejected.push({ key: c.key, reason: "không biết imgid" }); continue; }
+    if (String(c.imgid) === String(testImgid)) { rejected.push({ key: c.key, reason: "cùng imgid" }); continue; }
     if (seen.has(String(c.imgid))) { rejected.push({ key: c.key, reason: "trùng imgid ứng viên trước" }); continue; }
     seen.add(String(c.imgid));
     if (!Number.isFinite(c.distance)) { rejected.push({ key: c.key, reason: "không có mã băm" }); continue; }
@@ -500,6 +533,65 @@ export function loadSims(dir) {
     return cache.get(qid);
   };
   return { meta, codes, rowOf };
+}
+
+/**
+ * Điều chỉ mục ảnh PHẢI thỏa theo chống ăn gian (NÊN SỬA 5 của code-reviewer vòng 1), dựng từ NỘI DUNG file
+ * chong-an-gian.json (acText) và bo-p.json (bopText, null = chưa có). Trả { antiCheatSha256, boPSha256, excluded,
+ * override: { mã: khóa ảnh chỉ mục bắt buộc } (ảnh thay A / B + ảnh chỉ mục bộ P), guard: [{ code, queryImgid, qid }]
+ * (ảnh truy vấn có imgid OFF: A / B dùng được + bộ P), mustHave: [mã bộ P] }.
+ */
+export function guardWant(acText, bopText) {
+  const ac = JSON.parse(acText);
+  const bop = bopText == null ? null : JSON.parse(bopText);
+  const override = { ...(ac.override || {}) };
+  const guard = [];
+  const seen = new Set();
+  const add = (g) => { const k = `${g.code}|${g.queryImgid}`; if (!seen.has(k)) { seen.add(k); guard.push(g); } };
+  for (const x of ac.items || []) if (x.chosen) add({ code: x.code, queryImgid: x.testImgid ?? null, qid: `ab-${x.code}` });
+  for (const p of bop?.items || []) {
+    if (Object.hasOwn(override, p.code) && override[p.code] !== p.index?.key) override[p.code] = `XUNG-DOT:${override[p.code]}|${p.index?.key}`;
+    else override[p.code] = p.index?.key;
+    add({ code: p.code, queryImgid: p.query?.imgid ?? null, qid: p.qid });
+  }
+  return {
+    antiCheatSha256: sha256Of(acText), boPSha256: bopText == null ? null : sha256Of(bopText), excluded: [...(ac.excluded || [])],
+    override, guard, mustHave: (bop?.items || []).map((p) => p.code),
+  };
+}
+
+/**
+ * Kiểm chỉ mục ảnh (meta.json + codes.json do lens-vec.py ghi) đã áp đúng chống ăn gian: meta ghi đúng sha256 của
+ * chong-an-gian.json / bo-p.json, đúng excluded / override; (i) excluded ∩ codes = ∅; (ii) mọi mã có override dùng đúng
+ * khóa override (meta.indexKey); (iii) không ảnh truy vấn A / B / P nào nằm trong chỉ mục (cùng mã + cùng imgid; imgid
+ * ảnh chỉ mục phải biết, meta.indexImgid); mã bộ P phải có trong chỉ mục. Trả mảng lỗi (rỗng = đạt).
+ */
+export function checkIndexGuard(meta, codes, want) {
+  const errs = [];
+  const m = meta || {};
+  const w = want || {};
+  const inIdx = new Set(codes || []);
+  const sortedJson = (o) => JSON.stringify(Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  if (!w.antiCheatSha256 || m.antiCheatSha256 !== w.antiCheatSha256) errs.push(`meta.antiCheatSha256 ${m.antiCheatSha256} ≠ chong-an-gian.json ${w.antiCheatSha256}`);
+  if (m.boPSha256 !== w.boPSha256) errs.push(`meta.boPSha256 ${m.boPSha256} ≠ bo-p.json ${w.boPSha256}`);
+  if (JSON.stringify([...(m.excluded || [])].sort()) !== JSON.stringify([...(w.excluded || [])].sort())) errs.push("meta.excluded khác chong-an-gian.json");
+  if (sortedJson(m.override) !== sortedJson(w.override)) errs.push("meta.override khác chong-an-gian.json + bo-p.json");
+  for (const [c, k] of Object.entries(w.override || {})) if (String(k).startsWith("XUNG-DOT:")) errs.push(`override mâu thuẫn cho ${c}: ${k}`);
+  const leak = (w.excluded || []).filter((c) => inIdx.has(c));
+  if (leak.length) errs.push(`(i) mã bị loại vẫn có trong chỉ mục: ${leak.join(" ")}`);
+  const keyOfIdx = m.indexKey || {};
+  for (const [c, k] of Object.entries(w.override || {})) if (inIdx.has(c) && keyOfIdx[c] !== k) errs.push(`(ii) ${c} dùng ảnh ${keyOfIdx[c]} thay vì ${k}`);
+  const imgidOfIdx = m.indexImgid || {};
+  for (const g of w.guard || []) {
+    if (!knownImgid(g.queryImgid)) { errs.push(`(iii) không biết imgid ảnh truy vấn ${g.qid}`); continue; }
+    if (!inIdx.has(g.code)) continue;
+    const ii = imgidOfIdx[g.code];
+    if (!knownImgid(ii)) errs.push(`(iii) không biết imgid ảnh chỉ mục của ${g.code}`);
+    else if (String(ii) === String(g.queryImgid)) errs.push(`(iii) ảnh truy vấn ${g.qid} nằm trong chỉ mục (cùng mã + imgid ${ii})`);
+  }
+  const miss = (w.mustHave || []).filter((c) => !inIdx.has(c));
+  if (miss.length) errs.push(`mã bộ P không có trong chỉ mục: ${miss.join(" ")}`);
+  return errs;
 }
 
 /** Mã truy vấn ảnh của một ca (null = ca không có ảnh). */

@@ -3,12 +3,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { pathToFileURL } from "node:url";
+import crypto from "node:crypto";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   selfCheck, modeOf, methodGrid, serverTier, isUnsureU, appTier, cellOf, judgeR, targetsM, pickMethod, pickModel, earlyGate,
-  percentiles, loadSims, qidOf, indexBytesInt8, RULE_SHA, RULE_FILE, RULE_SHA256, METHOD_COUNT, SERVER_K, FOUND_K, CONDS,
-  FOLDERS, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, GOOD_IMGS, WRONG_IMGS, MODEL_VARIANTS, PRE_ORDER, R6_P95_MS,
+  percentiles, loadSims, qidOf, indexBytesInt8, guardWant, checkIndexGuard, RULE_SHA, RULE_FILE, RULE_SHA256, METHOD_COUNT,
+  SERVER_K, FOUND_K, CONDS, FOLDERS, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, GOOD_IMGS, WRONG_IMGS, MODEL_VARIANTS, PRE_ORDER,
+  R6_P95_MS,
 } from "./lens-do.mjs";
+
+/** File code của khung đo: sha256 của từng file ghi vào MỌI file kết quả (gợi ý 1 của code-reviewer vòng 1). */
+export const CODE_FILES = Object.freeze(["lens-do.mjs", "lens-chay.mjs", "lens-vec.py"]);
+
+/** sha256 (hex, trên byte file) của CODE_FILES trong thư mục dir; file không đọc được → null. */
+export function codeSha256s(dir = path.dirname(fileURLToPath(import.meta.url))) {
+  return Object.fromEntries(CODE_FILES.map((f) => {
+    try { return [f, crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, f))).digest("hex")]; } catch { return [f, null]; }
+  }));
+}
 import { ruleBlockOf, keyOf, rankIn } from "./g2-di-qua-do.mjs";
 import { splitHalves } from "./may-chu-loc-do.mjs";
 import { mergeLocal, scoreTable, BASE_PARAMS } from "./khau-gop-do.mjs";
@@ -215,7 +227,7 @@ export async function runMain(argv, selfUrl) {
   console.log(`Kiểm chéo mergeLocal(BASE) = serverMerge src: ${k0.ok ? "ĐẠT" : "LỆCH"} ${k0.same}/${k0.cells} ${k0.diff.slice(0, 5).join(", ")}`);
   console.log(`Kiểm chéo nền = khau-gop nen.json từng ô: ${kc.ok ? "ĐẠT" : "LỆCH"} MÁY ${kc.may}/${kc.cells}, LÙI ${kc.lui}/${kc.cells}, thiếu ${kc.missing} (khau-gop allOk ${kc.kgAllOk}, mode ${kc.kgMode}) ${kc.diff.slice(0, 8).join(", ")}`);
   console.log(`Bảng nền: ${JSON.stringify(tab)}; ảnh thật đúng vị trí 1 ${JSON.stringify(good)}; đang sai ${JSON.stringify(wrongNow)}; thư mục 3 tự mở ${none3.filter((c) => CONDS.every((cond) => posOf(c, cond).auto)).length}/6 → ${kt.ok ? "ĐẠT" : "LỆCH " + kt.diff.join("; ")}`);
-  const out = { at: new Date().toISOString(), startedAt, mode, sha, dirty, ruleSha: RULE_SHA, ruleSha256: RULE_SHA256, checks: ck, allOk, split, baseTable: tab, good, wrong: wrongNow, cacheOnly: true, azureCalls: 0 };
+  const out = { at: new Date().toISOString(), startedAt, mode, sha, dirty, ruleSha: RULE_SHA, ruleSha256: RULE_SHA256, codeSha256: codeSha256s(), checks: ck, allOk, split, baseTable: tab, good, wrong: wrongNow, cacheOnly: true, azureCalls: 0 };
   if (!allOk) {
     const bad = path.join(outDir, `${mode}.loi.json`);
     fs.writeFileSync(bad, JSON.stringify(out, null, 1), "utf8");
@@ -241,8 +253,27 @@ export async function runMain(argv, selfUrl) {
   }
 
   // ---- dữ liệu ảnh ----
-  const ac = JSON.parse(fs.readFileSync(path.join(lensDir, "chong-an-gian.json"), "utf8"));
-  if (ac.complete !== true || (ac.items || []).length !== 30) { console.error("chong-an-gian.json chưa đủ 30 mã A / B (chạy lại lens-tai.mjs --chong-an-gian): không đo."); process.exit(3); }
+  const acText = fs.readFileSync(path.join(lensDir, "chong-an-gian.json"), "utf8");
+  const ac = JSON.parse(acText);
+  if (ac.complete !== true || (ac.items || []).length !== 30 || (ac.incomplete || []).length) { console.error("chong-an-gian.json chưa đủ 30 mã A / B hoặc còn mã chưa xét (chạy lại lens-tai.mjs --chong-an-gian): không đo."); process.exit(3); }
+  const bopFile = path.join(lensDir, "bo-p.json");
+  if (!fs.existsSync(bopFile)) { console.error("Chưa có bo-p.json (lens-tai.mjs --bo-p): không đo."); process.exit(3); }
+  const bopText = fs.readFileSync(bopFile, "utf8");
+  const want = guardWant(acText, bopText);
+  /** Đọc bộ sim + kiểm chỉ mục đã áp chống ăn gian; lệch → <mode>.loi.json, thoát mã 3. */
+  const loadChecked = (dir) => {
+    const s = loadSims(dir);
+    const errs = checkIndexGuard(s.meta, s.codes, want);
+    if (errs.length) {
+      const bad = path.join(outDir, `${mode}.loi.json`);
+      fs.writeFileSync(bad, JSON.stringify({ ...out, indexDir: dir, guardErrors: errs }, null, 1), "utf8");
+      console.error(`CHỈ MỤC CHƯA ÁP ĐÚNG CHỐNG ĂN GIAN (${dir}): ${errs.slice(0, 5).join("; ")}. Ghi ${bad}.`);
+      process.exit(3);
+    }
+    return s;
+  };
+  out.antiCheatSha256 = want.antiCheatSha256;
+  out.boPSha256 = want.boPSha256;
   const excluded = new Set(ac.excluded || []);
   const abCodes = [...new Set(live.filter((c) => c.set === "A" || c.set === "B").map((c) => c.code))];
   const realLab = real.filter((c) => c.code);
@@ -260,7 +291,7 @@ export async function runMain(argv, selfUrl) {
     const nB = planList(readCatalog(LEVEL_FILES.b)).items.length;
     const vs = [];
     for (const vd of variantDirs("a")) {
-      const sims = loadSims(vd.dir);
+      const sims = loadChecked(vd.dir);
       const inIdx = new Set(sims.codes);
       const abMeas = abCodes.filter((code) => !excluded.has(code) && inIdx.has(code));
       const abTop5 = abMeas.filter((code) => imgTop5(sims, code, `ab-${code}`) != null).length;
@@ -279,7 +310,7 @@ export async function runMain(argv, selfUrl) {
     const cm = JSON.parse(fs.readFileSync(path.join(outDir, "chon-model.json"), "utf8"));
     if (cm.ruleSha256 !== RULE_SHA256 || !cm.pick?.name) { console.error("chon-model.json khác RULE_SHA256 hoặc chưa chọn biến thể."); process.exit(3); }
     const [vname, pre] = cm.pick.name.split("|");
-    const sims = loadSims(path.join(vecDir, `${vname}-${pre}`, "a"));
+    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, "a"));
     const inIdx = new Set(sims.codes);
     const ab = abCodes.map((code) => ({ code, measurable: !excluded.has(code) && inIdx.has(code), pos: imgTop5(sims, code, `ab-${code}`) }));
     const byImg = new Map(real.map((c) => [c.img, c]));
@@ -296,7 +327,7 @@ export async function runMain(argv, selfUrl) {
     const cg = JSON.parse(fs.readFileSync(path.join(outDir, "cong.json"), "utf8"));
     if (cm.ruleSha256 !== RULE_SHA256 || cg.ruleSha256 !== RULE_SHA256 || !cg.gate?.pass) { console.error("Chưa qua cổng dừng sớm / khác RULE_SHA256: không đo."); process.exit(3); }
     const [vname, pre] = cm.pick.name.split("|");
-    const sims = loadSims(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`));
+    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`));
     const meta = sims.meta;
     const abCells = live.filter((c) => c.set === "A" || c.set === "B");
     const tops = abCells.map((c) => sims.rowOf(c.qid)?.lens).filter(Boolean);
