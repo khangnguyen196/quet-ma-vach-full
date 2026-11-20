@@ -44,7 +44,10 @@
 //   CHỐNG ĂN GIAN (A / B): chỉ mục KHÔNG chứa chính ảnh đo. Với mỗi mã A / B: ứng viên = khóa ảnh của danh mục rồi các
 //     front_xx khác (OFF API sản phẩm, app_name, giãn ≥ 1 giây, ≤ 60 lượt); nhận ứng viên đầu tiên có imgid KHÁC imgid
 //     ảnh đo VÀ khoảng cách dHash / pHash vùng giữa (cropHashSet / compareHashSets của lib.mjs: 100 / 90 / 80 / 70 %,
-//     min của 2 mã băm) > 24 bit. Không có → mã "loại khỏi đo ảnh": sản phẩm BỊ XÓA khỏi chỉ mục ảnh (mọi mức), ca vẫn
+//     min của 2 mã băm) > 24 bit. Không có → mã "loại khỏi đo ảnh": sản phẩm bị ẨN trên hàng của chính truy vấn ab-<mã>
+//     (mọi mức, mọi chỗ dùng độ giống: hạng ảnh toàn cục, lens, sim ứng viên, S1/S2/S3, τ/μ): trên hàng đó mã coi như
+//     không có ảnh. Mọi truy vấn khác (ab khác, ảnh thật, buldak, ruaypuan, bộ P) thấy chỉ mục đầy đủ, mã dùng khóa ảnh
+//     danh mục (LỆCH LUẬT 2). Ca vẫn
 //     chạy mọi cách (kiểm "không hại"); R1 áp cho cả 60. Ảnh thật / buldak / ruaypuan: chỉ mục dùng ảnh OFF bình thường;
 //     ảnh thật có dHash so ảnh chỉ mục của mã đúng ≤ 10 bit → ghi chú "có thể trùng ảnh" (chỉ báo).
 // ---- Hai tầng cách (lưới cố định; tổng số cách ghi ở METHOD_COUNT; không thêm cách sau khi thấy số) ----
@@ -74,7 +77,7 @@
 //     U-or-τ-μ (nguyên văn prompt): lens.top1 < τ HOẶC lens.margin < μ HOẶC (lens.top1 < τ VÀ chu < 2) (mệnh đề 3 nằm
 //       trong mệnh đề 1, ghi đủ cho đúng nguyên văn; vì vậy U-simchu tách riêng thành một họ).
 //   τ, μ KHÔNG dùng nhãn: τ ∈ phân vị {10, 25, 50, 75, 90} % của lens.top1, μ ∈ phân vị {10, 25, 50, 75, 90} % của
-//     lens.margin, tính trên 60 ô ảnh A / B (30 mã × 2 bộ; đã chống ăn gian; mã bị loại vẫn tính với chỉ mục đã xóa mã)
+//     lens.margin, tính trên 60 ô ảnh A / B (30 mã × 2 bộ; đã chống ăn gian; mã bị loại vẫn tính với chỉ mục đã ẩn mã trên hàng đó)
 //     của chỉ mục đang đo; phân vị nearest rank (quantileNR của khau-gop).
 //   Số cách: tầng máy chủ 8 (S0, S1, S2 × 3, S3 × 3) × tầng app 29 (A0, A1 × 25, A2 × 3) × U 41 (U0, U-sim × 5, U-gap × 5,
 //     U-simchu × 5, U-or × 25) = 9.512 cách. Thứ tự khai báo (dùng khi hòa, "đơn giản / nhẹ hơn" trước): S0, S3-1, S3-2,
@@ -95,6 +98,8 @@
 //   R6 thời gian thêm (tiền xử lý + vector ảnh + tìm trên chỉ mục cỡ mức (b)), onnxruntime 1 luồng trên máy này (ghi CPU),
 //      20 ảnh: p95 (nearest rank) ≤ 1.500 ms. (Số CI --cpus=1 là cổng ở bước máy chủ sau.) RAM toàn máy chủ ≤ 1.536 MiB
 //      (vòng này chỉ ước: RAM máy chủ hiện có + RAM thêm khi nạp model + cỡ chỉ mục; đo kiểu do_h2h3 ở bước máy chủ).
+//      Số R6 dùng cho bước chọn model (1) và cho cổng R6 (LỆCH LUẬT 2) = số đo trên ảnh truy vấn thu cạnh dài 1.600 px,
+//      JPEG chất lượng 0,9 (như prepareImage), máy rảnh; thiếu số của biến thể → không chọn (thoát mã 3).
 //   R7 chỉ mục chọn (mức (b), dạng sẽ đóng gói, gồm vector + mã) ≤ 25.000.000 byte.
 // ---- Mục tiêu (chỉ xét cách qua R1–R7; đếm theo Ô = ảnh × (i)(ii); "nửa chỉnh" / "nửa giữ riêng" như trên) ----
 //   M1 số ô ảnh thật CÓ nhãn mã (thư mục 1 + 2, kể cả preset) ở nửa CHỈNH đúng vị trí 1 — tăng.
@@ -119,6 +124,8 @@
 //     imgid KHÁC queryImgid và mã băm vùng giữa (cách của lens: sharp xám, cạnh 256, cropHashSet / compareHashSets) > 24
 //     bit; không thì dùng ảnh indexImgid (override), cũng phải > 24 bit; không đạt thì bỏ cặp. Truy vấn P chỉ dùng cho G3
 //     và chọn model, KHÔNG vào R1–R5 / M.
+//     (LỆCH LUẬT 2) Ảnh chỉ mục riêng (override) của bộ P chỉ áp ở chỉ mục (a); override chống ăn gian của mã A / B
+//     (8935049501503 → front_ru.17) áp mọi mức như cũ.
 //   Thứ tự chọn: (1) qua R6 (p95 1 luồng ≤ 1.500 ms) và R7 ước ở mức (b) (số sản phẩm có ảnh mức (b) × số chiều × 1 byte
 //     int8 + 2 byte thang / vector + mã ≤ 25.000.000 byte); (2) ảnh thật nửa CHỈNH có nhãn mã (thư mục 1 + 2) mà mã có
 //     trong chỉ mục (a): số ảnh có mã đúng trong top 5 chỉ ảnh — lớn; (3) bộ P top 5 chỉ ảnh: số mã P có mã đúng trong 5
@@ -145,6 +152,17 @@
 //   thì không chặn; (iii) thứ tự chọn model xét ảnh thật nửa chỉnh trước, bộ P sau. Mọi phần khác giữ nguyên (R1 cho cả
 //   60 ảnh với sản phẩm bị loại xóa khỏi chỉ mục; τ / μ theo phân vị trên 60 ô A / B; G1, G2; lưới 9.512 cách). Khối
 //   cũ: commit 81d04e5, sha256 d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a.
+// ---- LỆCH LUẬT 2 (vòng 2 lượt 2b-1, viết 2026-11-21 khoảng 00:0x +0700, TRƯỚC mọi phép tính độ giống ảnh trên ca có
+//   nhãn: D:\tmp\lens\vec chưa tồn tại) ----
+//   Lý do: ảnh thật #1 (1 trong 8 ảnh đang đúng) có mã đúng thuộc 29 mã A / B bị loại; câu cũ "sản phẩm BỊ XÓA khỏi chỉ
+//   mục ảnh (mọi mức)" mâu thuẫn với "Ảnh thật / buldak / ruaypuan: chỉ mục dùng ảnh OFF bình thường" (xóa thì #1 mất mã
+//   đúng khỏi chỉ mục, đo trong tình huống app thật không gặp). dieu-phoi quyết sửa đúng 3 điểm: (i) mã bị loại chỉ bị ẨN
+//   trên hàng của chính truy vấn ab-<mã>, truy vấn khác thấy chỉ mục đầy đủ (mục CHỐNG ĂN GIAN; dòng τ / μ đổi "đã xóa
+//   mã" thành "đã ẩn mã trên hàng đó"; câu "R1 cho cả 60 ảnh với sản phẩm bị loại xóa khỏi chỉ mục" trong đoạn LỆCH LUẬT
+//   1 giữ nguyên văn, từ nay đọc là "ẩn trên hàng ab-<mã>"); (ii) số R6 cho bước chọn model (1) và cổng R6 = số đo ảnh
+//   1.600 px JPEG 0,9, máy rảnh, thiếu số → không chọn (thoát mã 3) (mục R6); (iii) override ảnh của bộ P chỉ ở mức (a),
+//   override A / B mọi mức (mục BỘ P). Mọi phần khác giữ nguyên. Khối trước: commit 4424292, sha256
+//   e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a.
 // ===================================================================================================================
 export const SERVER_K = 10;
 export const MERGE_K = 5;
@@ -193,13 +211,17 @@ import { sha256Of, rankIn } from "./g2-di-qua-do.mjs";
 import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.mjs";
 
 /**
- * Commit của khối luật đang dùng (LỆCH LUẬT 1, "test(lens): LỆCH LUẬT 1 — G3 và chọn model dùng bộ P",
- * 2026-11-20 23:42:03 +0700); tự kiểm so từng byte khối luật bằng git show.
+ * Commit của khối luật đang dùng (LỆCH LUẬT 2, "test(lens): LỆCH LUẬT 2 — ẩn mã bị loại theo hàng, R6 1.600 px, override
+ * bộ P chỉ mức a"); tự kiểm so từng byte khối luật bằng git show. null ở chính commit LỆCH LUẬT 2 (chưa biết sha của nó),
+ * đặt ở commit ngay sau.
  */
-export const RULE_SHA = "4424292";
+export const RULE_SHA = null;
 export const RULE_FILE = "test-ocr/chup-mat-do/lens-do.mjs";
-/** sha256 (hex) của khối luật (ruleBlockOf) — bản LỆCH LUẬT 1. */
-export const RULE_SHA256 = "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a";
+/** sha256 (hex) của khối luật (ruleBlockOf) — bản LỆCH LUẬT 2. */
+export const RULE_SHA256 = "10ec71685d573a62562f33fd224c6ba722b3bb9664c81866f24b7b3c9cfeb11a";
+/** Khối luật LỆCH LUẬT 1 (trước LỆCH LUẬT 2): commit 4424292 (2026-11-20 23:42:03 +0700); test kiểm bằng git show. */
+export const PREV_RULE_SHA = "4424292";
+export const PREV_RULE_SHA256 = "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a";
 /** Khối luật GỐC (trước LỆCH LUẬT 1): commit 81d04e5 (2026-11-20 22:44:37 +0700), sha256 dưới đây; test kiểm bằng git show. */
 export const OLD_RULE_SHA = "81d04e5";
 export const OLD_RULE_SHA256 = "d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a";

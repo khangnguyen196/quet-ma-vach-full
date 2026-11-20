@@ -15,7 +15,7 @@ import {
   rrfFuse, serverTier, imageRank, lensOf, isUnsureU, appTier, cellOf, judgeR, targetsM, achieves, pickMethod, pickModel,
   earlyGate, gateG2, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
   guardWant, checkIndexGuard, RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES,
-  HASH_OK_MIN, S_GRID, OLD_RULE_SHA, OLD_RULE_SHA256, G3_P_MIN, G3_SMALL,
+  HASH_OK_MIN, S_GRID, OLD_RULE_SHA, OLD_RULE_SHA256, G3_P_MIN, G3_SMALL, PREV_RULE_SHA, PREV_RULE_SHA256,
 } from "../lens-do.mjs";
 import { execSync } from "node:child_process";
 
@@ -79,6 +79,106 @@ test("LỆCH LUẬT 1: khối GỐC ở 81d04e5 vẫn đúng sha256 cũ; khối 
   assert.notEqual(old, now);
   // phần giữ nguyên: R1 cho cả 60 ảnh, lưới 9.512, G1, G2 (so từng dòng)
   for (const line of old.split("\n").filter((l) => /R1 60 ảnh|9\.512 cách|G1 trong 7 ảnh|G2 ≥ 2 \/ 6 ảnh/.test(l))) assert.ok(now.includes(line), `dòng gốc bị đổi: ${line}`);
+});
+
+// ---- So chặt từng byte giữa các bản khối luật (gợi ý 1 của code-reviewer trước đo): bỏ các dòng ĐƯỢC PHÉP đổi (liệt kê
+// tường minh dưới đây) khỏi 2 khối rồi phần còn lại phải trùng từng byte, theo đúng thứ tự. ----
+const lines = (s) => s.split("\n").filter((l) => l !== "");
+/** 81d04e5 → 4424292 (LỆCH LUẬT 1): dòng bỏ khỏi khối cũ / dòng thêm vào khối mới. */
+const L1_REMOVED = lines(String.raw`//     int8 + 2 byte thang / vector + mã ≤ 25.000.000 byte); (2) A / B top 5 chỉ ảnh: số mã A / B đo được (không bị loại,
+//     có trong chỉ mục) có mã đúng trong 5 hạng ảnh đầu — lớn; (3) ảnh thật top 5 chỉ ảnh, nửa CHỈNH (ảnh có nhãn mã thư
+//     mục 1 + 2) — lớn; (4) hòa → giấy phép Apache-2.0 trước, rồi model nhẹ hơn (cỡ file ONNX nhỏ), rồi "cat" trước "vien".
+//   G3 A / B đo được: tỉ lệ mã có mã đúng trong 5 hạng ảnh đầu ≥ 50 %.
+`);
+const L1_ADDED = lines(String.raw`//   BỘ P (LỆCH LUẬT 1): P = mã A / B đo được (có ảnh thay hợp lệ, có trong chỉ mục (a); đếm 1 lần mỗi mã; ảnh truy vấn =
+//     ảnh đo, ảnh chỉ mục = ảnh thay) ∪ cặp VN leave-one-out của D:\tmp\chup-mat-do\chi-muc\loo.json có mã trong danh mục
+//     (a) và không trùng mã A / B. Ảnh truy vấn của cặp = ảnh queryImgid. Ảnh chỉ mục của mã đó: giữ khóa danh mục nếu
+//     imgid KHÁC queryImgid và mã băm vùng giữa (cách của lens: sharp xám, cạnh 256, cropHashSet / compareHashSets) > 24
+//     bit; không thì dùng ảnh indexImgid (override), cũng phải > 24 bit; không đạt thì bỏ cặp. Truy vấn P chỉ dùng cho G3
+//     và chọn model, KHÔNG vào R1–R5 / M.
+//     int8 + 2 byte thang / vector + mã ≤ 25.000.000 byte); (2) ảnh thật nửa CHỈNH có nhãn mã (thư mục 1 + 2) mà mã có
+//     trong chỉ mục (a): số ảnh có mã đúng trong top 5 chỉ ảnh — lớn; (3) bộ P top 5 chỉ ảnh: số mã P có mã đúng trong 5
+//     hạng ảnh đầu — lớn; (4) hòa → giấy phép Apache-2.0 trước, rồi model nhẹ hơn (cỡ file ONNX nhỏ), rồi "cat" trước
+//     "vien".
+//   G3 (LỆCH LUẬT 1) bộ P: |P| ≥ 10 → G3 = tỉ lệ mã P có mã đúng trong 5 hạng ảnh đầu ≥ 50 %. |P| < 10 → G3 = "không đủ
+//      mẫu", KHÔNG chặn (cổng = G1 HOẶC G2), ghi rõ.
+// ---- LỆCH LUẬT 1 (vòng 2, viết 2026-11-20 khoảng 23:4x +0700, TRƯỚC mọi phép tính độ giống ảnh trên ca có nhãn) ----
+//   Lý do: chống ăn gian loại gần cả bộ A / B (ảnh mặt trước duy nhất trên OFF chính là ảnh đo; vài mã có ảnh khác nhưng
+//   mã băm gần ảnh đo), nên G3 cũ ("≥ 50 % mã A / B đo được") và bước (2) chọn model cũ ("A / B top 5") chỉ còn dựa trên
+//   1–2 mã. dieu-phoi quyết ở vòng 2 sửa đúng 3 điểm: (i) thêm BỘ P (mục "Chọn model"); (ii) G3 tính trên bộ P, |P| < 10
+//   thì không chặn; (iii) thứ tự chọn model xét ảnh thật nửa chỉnh trước, bộ P sau. Mọi phần khác giữ nguyên (R1 cho cả
+//   60 ảnh với sản phẩm bị loại xóa khỏi chỉ mục; τ / μ theo phân vị trên 60 ô A / B; G1, G2; lưới 9.512 cách). Khối
+//   cũ: commit 81d04e5, sha256 d0d5a1ffa510a5dae2a411cdf76fdbd4a9f328d9e7f5c77208db830d72db165a.
+export const G3_P_MIN = 10;
+export const G3_SMALL = "khong-du-mau";
+`);
+/** 4424292 → LỆCH LUẬT 2: đúng 3 điểm (ẩn theo hàng + dòng τ / μ, R6 1.600 px, override bộ P chỉ mức a) + đoạn lý do. */
+const L2_REMOVED = lines(String.raw`//     min của 2 mã băm) > 24 bit. Không có → mã "loại khỏi đo ảnh": sản phẩm BỊ XÓA khỏi chỉ mục ảnh (mọi mức), ca vẫn
+//     lens.margin, tính trên 60 ô ảnh A / B (30 mã × 2 bộ; đã chống ăn gian; mã bị loại vẫn tính với chỉ mục đã xóa mã)
+`);
+const L2_ADDED = lines(String.raw`//     min của 2 mã băm) > 24 bit. Không có → mã "loại khỏi đo ảnh": sản phẩm bị ẨN trên hàng của chính truy vấn ab-<mã>
+//     (mọi mức, mọi chỗ dùng độ giống: hạng ảnh toàn cục, lens, sim ứng viên, S1/S2/S3, τ/μ): trên hàng đó mã coi như
+//     không có ảnh. Mọi truy vấn khác (ab khác, ảnh thật, buldak, ruaypuan, bộ P) thấy chỉ mục đầy đủ, mã dùng khóa ảnh
+//     danh mục (LỆCH LUẬT 2). Ca vẫn
+//     lens.margin, tính trên 60 ô ảnh A / B (30 mã × 2 bộ; đã chống ăn gian; mã bị loại vẫn tính với chỉ mục đã ẩn mã trên hàng đó)
+//      Số R6 dùng cho bước chọn model (1) và cho cổng R6 (LỆCH LUẬT 2) = số đo trên ảnh truy vấn thu cạnh dài 1.600 px,
+//      JPEG chất lượng 0,9 (như prepareImage), máy rảnh; thiếu số của biến thể → không chọn (thoát mã 3).
+//     (LỆCH LUẬT 2) Ảnh chỉ mục riêng (override) của bộ P chỉ áp ở chỉ mục (a); override chống ăn gian của mã A / B
+//     (8935049501503 → front_ru.17) áp mọi mức như cũ.
+// ---- LỆCH LUẬT 2 (vòng 2 lượt 2b-1, viết 2026-11-21 khoảng 00:0x +0700, TRƯỚC mọi phép tính độ giống ảnh trên ca có
+//   nhãn: D:\tmp\lens\vec chưa tồn tại) ----
+//   Lý do: ảnh thật #1 (1 trong 8 ảnh đang đúng) có mã đúng thuộc 29 mã A / B bị loại; câu cũ "sản phẩm BỊ XÓA khỏi chỉ
+//   mục ảnh (mọi mức)" mâu thuẫn với "Ảnh thật / buldak / ruaypuan: chỉ mục dùng ảnh OFF bình thường" (xóa thì #1 mất mã
+//   đúng khỏi chỉ mục, đo trong tình huống app thật không gặp). dieu-phoi quyết sửa đúng 3 điểm: (i) mã bị loại chỉ bị ẨN
+//   trên hàng của chính truy vấn ab-<mã>, truy vấn khác thấy chỉ mục đầy đủ (mục CHỐNG ĂN GIAN; dòng τ / μ đổi "đã xóa
+//   mã" thành "đã ẩn mã trên hàng đó"; câu "R1 cho cả 60 ảnh với sản phẩm bị loại xóa khỏi chỉ mục" trong đoạn LỆCH LUẬT
+//   1 giữ nguyên văn, từ nay đọc là "ẩn trên hàng ab-<mã>"); (ii) số R6 cho bước chọn model (1) và cổng R6 = số đo ảnh
+//   1.600 px JPEG 0,9, máy rảnh, thiếu số → không chọn (thoát mã 3) (mục R6); (iii) override ảnh của bộ P chỉ ở mức (a),
+//   override A / B mọi mức (mục BỘ P). Mọi phần khác giữ nguyên. Khối trước: commit 4424292, sha256
+//   e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a.
+`);
+
+/**
+ * So chặt: mọi dòng trong removed có trong oldB, mọi dòng trong added có trong newB; bỏ chúng đi thì phần còn lại trùng
+ * từng byte (cùng thứ tự). Trả mảng lỗi (rỗng = đạt).
+ */
+function strictBlockDiff(oldB, newB, removed, added) {
+  const errs = [];
+  const O = oldB.split("\n");
+  const N = newB.split("\n");
+  for (const l of removed) if (!O.includes(l)) errs.push(`dòng bỏ không có trong khối cũ: ${l}`);
+  for (const l of added) if (!N.includes(l)) errs.push(`dòng thêm không có trong khối mới: ${l}`);
+  const restO = O.filter((l) => !removed.includes(l)).join("\n");
+  const restN = N.filter((l) => !added.includes(l)).join("\n");
+  if (restO !== restN) errs.push("phần còn lại khác từng byte");
+  return errs;
+}
+
+test("LỆCH LUẬT 2: khối 4424292 đúng sha256 cũ; so chặt 4424292 → khối hiện tại và 81d04e5 → 4424292 (chỉ đổi dòng liệt kê)", (t) => {
+  assert.equal(PREV_RULE_SHA, "4424292");
+  assert.equal(PREV_RULE_SHA256, "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a");
+  const now = ruleBlockOf(SRC);
+  assert.notEqual(RULE_SHA256, PREV_RULE_SHA256);
+  const prev = blockAt(PREV_RULE_SHA);
+  const old = blockAt(OLD_RULE_SHA);
+  if (prev === null || old === null) { t.skip("không chạy được git show 4424292 / 81d04e5 (không có git hoặc thiếu commit)"); return; }
+  assert.equal(sha256Of(prev), PREV_RULE_SHA256, "khối LỆCH LUẬT 1 ở 4424292 không đổi");
+  assert.equal(sha256Of(old), OLD_RULE_SHA256, "khối gốc ở 81d04e5 không đổi");
+  assert.deepEqual(strictBlockDiff(prev, now, L2_REMOVED, L2_ADDED), []);
+  assert.deepEqual(strictBlockDiff(old, prev, L1_REMOVED, L1_ADDED), []);
+  // thử đỏ: đổi 1 ký tự ở dòng KHÔNG được phép đổi (dòng R1) → đỏ
+  const bad = now.replace("R1 60 ảnh A / B", "R1 60 ảnh A / C");
+  assert.notEqual(bad, now);
+  assert.deepEqual(strictBlockDiff(prev, bad, L2_REMOVED, L2_ADDED), ["phần còn lại khác từng byte"]);
+  // đổi thứ tự 2 dòng không được phép đổi → đỏ
+  const N = now.split("\n");
+  const i = N.findIndex((l) => l.includes("R2 8 ảnh thật"));
+  const swapped = [...N.slice(0, i), N[i + 1], N[i], ...N.slice(i + 2)].join("\n");
+  assert.deepEqual(strictBlockDiff(prev, swapped, L2_REMOVED, L2_ADDED), ["phần còn lại khác từng byte"]);
+  // đổi 1 ký tự ở dòng được phép đổi cũng bị bắt (dòng đó không còn khớp danh sách tường minh)
+  assert.ok(strictBlockDiff(prev, now.replace("bị ẨN trên hàng", "bị ẨN trên hang"), L2_REMOVED, L2_ADDED).length > 0);
+  // khối mới ghi lý do + sha khối trước
+  for (const s of ["LỆCH LUẬT 2", "ảnh thật #1", "ab-<mã>", "1.600 px", "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a", "4424292"]) assert.ok(now.includes(s), `khối mới thiếu ${s}`);
 });
 
 test("khối luật đủ nội dung bắt buộc (P1e) và không chứa mã nhãn / tên file ảnh thật", () => {
