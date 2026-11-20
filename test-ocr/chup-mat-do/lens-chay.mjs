@@ -242,6 +242,7 @@ export async function runMain(argv, selfUrl) {
 
   // ---- dữ liệu ảnh ----
   const ac = JSON.parse(fs.readFileSync(path.join(lensDir, "chong-an-gian.json"), "utf8"));
+  if (ac.complete !== true || (ac.items || []).length !== 30) { console.error("chong-an-gian.json chưa đủ 30 mã A / B (chạy lại lens-tai.mjs --chong-an-gian): không đo."); process.exit(3); }
   const excluded = new Set(ac.excluded || []);
   const abCodes = [...new Set(live.filter((c) => c.set === "A" || c.set === "B").map((c) => c.code))];
   const realLab = real.filter((c) => c.code);

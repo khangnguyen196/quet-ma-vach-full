@@ -364,13 +364,20 @@ async function runAntiCheat(arg) {
     return f;
   };
   const items = [];
+  let stopped = null;
   for (const q of ca.queries.filter((x) => x.qid.startsWith("ab-"))) {
     const code = q.qid.slice(3);
     const src = nguon.find((r) => r.code === code && r.file === "front.jpg");
     const testImgid = imgidFromUrl(src?.url);
     const catalogImg = catA.get(code)?.img || "";
     const testSet = await hashOf(q.file);
-    const prod = await getProduct(code);
+    let prod;
+    try { prod = await getProduct(code); } catch (e) {
+      // cầu dao / chạm trần: dừng gọi OFF, ghi phần đã xét (incomplete), lần sau chạy lại dùng cache
+      stopped = `${code}: ${e.message}`;
+      console.log(`DỪNG: ${stopped}`);
+      break;
+    }
     const cands = candidatesFrom(prod?.product, catalogImg);
     for (const c of cands) {
       const f = await ensureImg(code, c.key);
@@ -408,7 +415,7 @@ async function runAntiCheat(arg) {
   }
   const out = {
     at: new Date().toISOString(), rule: `ảnh thay: imgid khác ảnh đo VÀ mã băm vùng giữa > 24 bit (HASH_DUP ${HASH_DUP}; cropHashSet / compareHashSets của lib.mjs, xám bằng sharp, cạnh dài 256 px)`,
-    userAgent: USER_AGENT, appName: APP_NAME, stats, items,
+    userAgent: USER_AGENT, appName: APP_NAME, stats, items, complete: stopped === null, stopped,
     excluded: items.filter((x) => !x.chosen).map((x) => x.code),
     override: Object.fromEntries(items.filter((x) => x.chosen).map((x) => [x.code, x.chosen])),
     real,
