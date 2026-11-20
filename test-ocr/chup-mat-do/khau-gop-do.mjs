@@ -172,8 +172,11 @@ import { frontImageUrl } from "../../src/front-search.js";
 import { keyOf, rankIn, ruleBlockOf, sha256Of } from "./g2-di-qua-do.mjs";
 import { splitHalves, lossRows } from "./may-chu-loc-do.mjs";
 
-/** Commit luật và file (tự kiểm từng byte bằng git show). */
-export const RULE_SHA = "b954513";
+/** Commit luật và file (tự kiểm từng byte bằng git show). Luật sửa ở vòng 2 (LỆCH LUẬT, trước mọi số của cách / ngưỡng). */
+export const RULE_SHA = "55fc738";
+/** Commit luật gốc (vòng 1, sha256 khối 530a08ae…f8b2); chỉ để truy vết, tự kiểm dùng RULE_SHA. */
+export const RULE_SHA_GOC = "b954513";
+export const RULE_SHA256_GOC = "530a08ae4475cc3ab6271548c924daa8ed800145d61e1c79bb324d465fdef8b2";
 export const RULE_FILE = "test-ocr/chup-mat-do/khau-gop-do.mjs";
 /** sha256 (hex) của khối luật ở commit RULE_SHA. */
 export const RULE_SHA256 = "8ef14602ba7d3cf5ae675794567d3b20be431a63c5a99b4de98baefc945e2965";
@@ -214,6 +217,19 @@ export function paramsOf(name) {
 
 // ---------------- gộp tham số (bản sao nhánh f1 của mergeFront với tùy chọn của serverMerge) ----------------
 // mergeLocal(…, BASE_PARAMS) PHẢI trùng serverMerge(…).merged của src từng mục (kiểm chéo (0) lúc chạy + test).
+
+/** Bảng mã → chỉ số trong products (mã đầu tiên), dựng một lần cho mỗi mảng products (WeakMap), dùng chung. */
+const CODE_INDEX = new WeakMap();
+export function codeIndexOf(products) {
+  if (!Array.isArray(products)) return new Map();
+  let m = CODE_INDEX.get(products);
+  if (!m) {
+    m = new Map();
+    products.forEach((p, i) => { if (p && typeof p.code === "string" && !m.has(p.code)) m.set(p.code, i); });
+    CODE_INDEX.set(products, m);
+  }
+  return m;
+}
 
 function catalogItem(p, score = null) {
   return { code: p.code, name: String(p.name ?? ""), brand: String(p.brand ?? ""), img: frontImageUrl(p.code, p.img), source: "catalog", vn: true, score };
@@ -273,8 +289,7 @@ export function applyGuardLocal(ranked, base, { k, lockTop, offMax, free = null 
 export function scoreTable({ t1, rIndex, products }, found, joined, idfMul = 1) {
   const list = Array.isArray(products) ? products : [];
   const index = rIndex.index;
-  const byCode = new Map();
-  list.forEach((p, i) => { if (p && typeof p.code === "string" && !byCode.has(p.code)) byCode.set(p.code, i); });
+  const byCode = codeIndexOf(products);
   const query = Array.isArray(found?.query) ? found.query : [];
   const t1Score = new Map((found?.hits || []).map((h) => [h.code, h.score]));
   const unknownIdf = maxIdfOf(index) * idfMul;
@@ -304,23 +319,27 @@ export function scoreTable({ t1, rIndex, products }, found, joined, idfMul = 1) 
 export function mergeLocal(ctx, found, off, S, params = BASE_PARAMS, k = MERGE_K) {
   const P = { ...BASE_PARAMS, ...params };
   const server = Array.isArray(S) ? S : [];
+  const joined = serverJoin(off, server); // serverJoin MỘT lần, dùng chung cho gộp và bảng điểm của a-top
   if (P.serverTop > 0) {
     // (a) k vị trí đầu = S[0..k−1] theo thứ tự S; phần sau = gộp nền (đủ lớp chặn + offPromote) với k + n, bỏ mã đã đặt
     const n = Math.min(P.serverTop, server.length);
-    const rest = mergeLocal(ctx, found, off, server, { ...P, serverTop: 0 }, k + n);
-    const sc = scoreTable(ctx, found, serverJoin(off, server), P.idfMul);
+    const rest = mergeCore(ctx, found, joined, server, P, k + n);
+    const sc = scoreTable(ctx, found, joined, P.idfMul);
     const top = server.slice(0, n).map((h) => sc(h.code).item ?? offItem(h, 0));
     const have = new Set(top.map((x) => x.code));
     return [...top, ...rest.filter((x) => !have.has(x.code))].slice(0, k);
   }
+  return mergeCore(ctx, found, joined, server, P, k);
+}
+
+/** Phần gộp của mergeLocal (không có a-top): joined = serverJoin(off, server) đã tính. */
+function mergeCore(ctx, found, joined, server, P, k) {
   const { t1, rIndex, products } = ctx;
   const list = Array.isArray(products) ? products : [];
-  const joined = serverJoin(off, server);
   const base = t1Items(list, found, k);
   if (!(joined && joined.ok === true && Array.isArray(joined.hits) && joined.hits.length)) return base;
   const index = rIndex.index;
-  const byCode = new Map();
-  list.forEach((p, i) => { if (p && typeof p.code === "string" && !byCode.has(p.code)) byCode.set(p.code, i); });
+  const byCode = codeIndexOf(products);
   const offs = [];
   const seenOff = new Set();
   for (const h of joined.hits) {
@@ -459,13 +478,28 @@ export function target3(rows) {
 }
 
 /**
- * Chọn cách bước 3: list = [{ name, pass, t: target3 }]. Giữ khi pass, M1 > baseM1 (= 0), holdOk; chọn M1 > M2 > M3,
- * hòa → thứ tự STEP3_GRID. Trả { name | null, kept: [tên], refOnly: [lý do] }.
+ * Chọn cách bước 3 (luật sửa vòng 2): list = [{ name, pass, t: target3 }]. Giữ khi pass, M1 > baseM1 (= 0), holdOk.
+ * Cách được giữ có t.refOnly khác rỗng = "chỉ để tham khảo": KHÔNG được chọn (chỉ báo). Chọn trong các cách được giữ
+ * và không chỉ để tham khảo theo M1 > M2 > M3, hòa → thứ tự STEP3_GRID.
+ * Trả { name | null, kept: [tên], refOnly: [{ name, reasons, M1, M2, M3 }] (theo thứ tự xếp) }.
  */
 export function pickStep3(list, baseM1 = 0, order = Object.keys(STEP3_GRID)) {
   const kept = (list || []).filter((m) => m.pass && m.t.M1 > baseM1 && m.t.holdOk && order.includes(m.name));
   kept.sort((a, b) => b.t.M1 - a.t.M1 || b.t.M2 - a.t.M2 || b.t.M3 - a.t.M3 || order.indexOf(a.name) - order.indexOf(b.name));
-  return { name: kept[0]?.name ?? null, kept: kept.map((m) => m.name), refOnly: kept[0]?.t.refOnly ?? [] };
+  const isRef = (m) => Array.isArray(m.t.refOnly) && m.t.refOnly.length > 0;
+  const normal = kept.filter((m) => !isRef(m));
+  return {
+    name: normal[0]?.name ?? null,
+    kept: kept.map((m) => m.name),
+    refOnly: kept.filter(isRef).map((m) => ({ name: m.name, reasons: [...m.t.refOnly], M1: m.t.M1, M2: m.t.M2, M3: m.t.M3 })),
+  };
+}
+
+/** --do-nguong: mỗi đặc trưng phải có đúng want (120) giá trị A/B. Trả { ok, counts, bad: [đặc trưng] }. */
+export function checkStep4Values(values, want = 120) {
+  const counts = Object.fromEntries(STEP4_FEATURES.map((f) => [f, Array.isArray(values?.[f]) ? values[f].length : 0]));
+  const bad = STEP4_FEATURES.filter((f) => counts[f] !== want);
+  return { ok: bad.length === 0, counts, bad };
 }
 
 // ---------------- bước 4 ----------------
@@ -517,16 +551,18 @@ export function isUnsure(rule, feats) {
 
 /**
  * Phán + mục tiêu một luật bước 4. cells = [{ id, set, folder, group, cond, good (mục 1 đúng + open ở nền bước 4 và
- * thuộc tập cổng), wrongAB (ô A/B mục 1 sai), none3 (ảnh thư mục 3), img, salt, feats }].
+ * thuộc tập cổng), wrongAB (ô A/B mục 1 sai), none3 (ảnh thư mục 3), img, salt, open (kind "open" ở nền bước 4), feats }].
+ * Ô thư mục 3 có danh sách gộp rỗng (feats null) hoặc open === false → "không tự mở" (vốn đã không tự mở).
  * Trả { pass, gateFails: [id], tChinh, tGiu, abUnsure, abWrongUnsure, saltUnsure }.
  */
 export function judge4(rule, cells) {
   const C = Array.isArray(cells) ? cells : [];
   const u = (c) => isUnsure(rule, c.feats);
+  const notOpen = (c) => c.open === false || !c.feats || u(c);
   const gateFails = C.filter((c) => c.good && u(c)).map((c) => c.id);
   const imgs = (group) => {
     const by = new Map();
-    for (const c of C.filter((x) => x.none3 && x.group === group)) by.set(c.img, (by.get(c.img) ?? true) && u(c));
+    for (const c of C.filter((x) => x.none3 && x.group === group)) by.set(c.img, (by.get(c.img) ?? true) && notOpen(c));
     return [...by.values()].filter(Boolean).length;
   };
   return {
@@ -820,9 +856,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
 
   // ---- thời gian gộp (G4) ----
   const timeSet = live.filter((c) => c.S.length && (c.set === "A" || c.set === "B" || c.set === "that")).flatMap((c) => CONDS.map((cond) => ({ c, cond })));
-  const timeOf = (name) => timeCells(timeSet, ({ c, cond }) => (name == null
-    ? fsv.serverMerge(ctx, c.found, c.off[cond], c.S, { called: called(c) })
-    : mergeLocal(ctx, c.found, c.off[cond], c.S, paramsOf(name))));
+  // G4 (luật sửa vòng 2): nền = mergeLocal tham số nền (timeOf(null)); serverMerge src chỉ báo (timeSrc)
+  const timeOf = (name) => { const p = paramsOf(name); return timeCells(timeSet, ({ c, cond }) => mergeLocal(ctx, c.found, c.off[cond], c.S, p)); };
+  const timeSrc = () => timeCells(timeSet, ({ c, cond }) => fsv.serverMerge(ctx, c.found, c.off[cond], c.S, { called: called(c) }));
+  const srcTime = timeSrc();
   const baseTime = timeOf(null);
 
   const coverage = Object.fromEntries(["B", "A", "that", "7up", "muoi", "ruaypuan", "buldak", "ngoai"].map((s) => {
@@ -833,7 +870,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     at: new Date().toISOString(), startedAt, mode, sha, dirty, srcSame, baseSha: BASE_SHA, ruleSha: RULE_SHA, ruleSha256: RULE_SHA256,
     consts, cacheOnly: true, azureCalls: 0, ocrRerun: false, serverRerun: false, sFrom: { that: gocFile, other: nenFile },
     splitCount: Object.fromEntries(FOLDERS.map((f) => [f, { giu: halves.filter((x) => x.folder === f && x.group === "giu").length, chinh: halves.filter((x) => x.folder === f && x.group === "chinh").length }])),
-    coverage, checks, allOk, baseTable, baseSalt, baseNone, realBase, baseTarget, time: { base: baseTime, cells: timeSet.length, repeat: TIME_REPEAT, warm: TIME_WARM },
+    coverage, checks, allOk, baseTable, baseSalt, baseNone, realBase, baseTarget, time: { base: baseTime, src: srcTime, baseIs: "mergeLocal(BASE_PARAMS)", cells: timeSet.length, repeat: TIME_REPEAT, warm: TIME_WARM },
     perCase: Object.fromEntries(live.map((c) => [c.set === "that" ? `anh-${c.img}` : keyOf(c), { may: base[keyOf(c)].may, lui: base[keyOf(c)].lui }])),
   };
 
@@ -849,7 +886,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   console.log("NỀN (MÁY; vị trí 1 / trong 5 theo (i) | (ii)):");
   for (const [k, x] of Object.entries(baseTable)) console.log(`  ${k.padEnd(40)} n ${x.n}: (i) ${x.i.top1}/${x.i.top5} | (ii) ${x.ii.top1}/${x.ii.top5}`);
   console.log(`  muối kind ${JSON.stringify(baseSalt)}; ảnh thư mục 3 kind ${JSON.stringify(baseNone)}`);
-  console.log(`  mục tiêu nền ${JSON.stringify({ M1: baseTarget.M1, M2: baseTarget.M2, M3: baseTarget.M3 })}; thời gian gộp nền (Node, ${timeSet.length} ô × ${TIME_REPEAT} lần) p50 ${baseTime.p50?.toFixed(3)} ms, p95 ${baseTime.p95?.toFixed(3)} ms`);
+  console.log(`  mục tiêu nền ${JSON.stringify({ M1: baseTarget.M1, M2: baseTarget.M2, M3: baseTarget.M3 })}; thời gian gộp nền mergeLocal (Node, ${timeSet.length} ô × ${TIME_REPEAT} lần) p50 ${baseTime.p50?.toFixed(3)} ms, p95 ${baseTime.p95?.toFixed(3)} ms; serverMerge src (chỉ báo) p50 ${srcTime.p50?.toFixed(3)} ms, p95 ${srcTime.p95?.toFixed(3)} ms`);
   if (!allOk) {
     const bad = resultFile(outDir, mode, false);
     fs.writeFileSync(bad.file, JSON.stringify(out, null, 1), "utf8");
@@ -887,18 +924,22 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         if (!sameArr(osx.cleanQuery(c.found.lines, { idf }), c.queries)) offSame = false;
         for (const cond of CONDS) if (!sameArr(res[keyOf(c)].lui[cond], base[keyOf(c)].lui[cond])) luiSame = false;
       }
-      const tb = timeOf(null);
+      const ts = timeSrc(); // chỉ báo
+      const tb = timeOf(null); // nền G4 = mergeLocal tham số nền, ngay trước cách
       const tm = timeOf(name);
       const verdict = judge3({ ab, good, s7, buldak, salt: res[keyOf(salt)].kind, foreign: { base: baseForeign, got: foreignOf(res) }, time: { p95: tm.p95, baseP95: tb.p95 }, srcSame, consts, offSame, luiSame });
-      methods[name] = { table: tableOf(res), t: target3(rr), verdict, time: { base: tb, method: tm }, noneKinds: none3(res), realPos: Object.fromEntries(rr.map((x) => [x.id, x.got])) };
+      methods[name] = { table: tableOf(res), t: target3(rr), verdict, time: { base: tb, method: tm, src: ts }, noneKinds: none3(res), realPos: Object.fromEntries(rr.map((x) => [x.id, x.got])) };
       process.stdout.write(".");
     }
     console.log("");
     const pick = pickStep3(Object.entries(methods).map(([name, x]) => ({ name, pass: x.verdict.pass, t: x.t })), baseTarget.M1);
-    const conclusion = pick.name
-      ? `CHỌN ${pick.name} (${JSON.stringify({ M1: methods[pick.name].t.M1, M2: methods[pick.name].t.M2, M3: methods[pick.name].t.M3 })}${pick.refOnly.length ? `; chỉ để tham khảo: ${pick.refOnly.join(", ")}` : ""})`
-      : "KHÔNG CÁCH NÀO ĐẠT ở bước 3: không giữ gì (bước 4 đo trên nền serverMerge)";
-    for (const [name, x] of Object.entries(methods)) console.log(`${name.padEnd(12)} M ${x.t.M1}/${x.t.M2}/${x.t.M3} giữ riêng ${x.t.holdOk ? "ok" : "MẤT"} p95 ${x.time.method.p95?.toFixed(3)} | ${x.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(x.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
+    const refTxt = pick.refOnly.map((x) => `${x.name} (M ${x.M1}/${x.M2}/${x.M3}; ${x.reasons.join(", ")})`).join("; ");
+    const conclusion = (pick.name
+      ? `CHỌN ${pick.name} (${JSON.stringify({ M1: methods[pick.name].t.M1, M2: methods[pick.name].t.M2, M3: methods[pick.name].t.M3 })})`
+      : "KHÔNG CÁCH NÀO ĐẠT ở bước 3: không giữ gì (bước 4 đo trên nền serverMerge)")
+      + (pick.refOnly.length ? `; chỉ để tham khảo (không được chọn): ${refTxt}` : "");
+    for (const [name, x] of Object.entries(methods)) console.log(`${name.padEnd(12)} M ${x.t.M1}/${x.t.M2}/${x.t.M3} giữ riêng ${x.t.holdOk ? "ok" : "MẤT"} p95 cách ${x.time.method.p95?.toFixed(3)} / nền mergeLocal ${x.time.base.p95?.toFixed(3)} / serverMerge src ${x.time.src.p95?.toFixed(3)} ms | ${x.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(x.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}${x.t.refOnly.length ? ` | refOnly: ${x.t.refOnly.join(", ")}` : ""}`);
+    for (const [name, x] of Object.entries(methods)) if (!x.verdict.pass) console.log(`  ${name}: ${x.verdict.fails.join(" | ")}`);
     console.log(`== Kết luận bước 3: ${conclusion}`);
     Object.assign(out, { methods, pick, conclusion });
   }
@@ -906,6 +947,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   if (mode === "nguong") {
     const chosen = step3?.pick?.name ?? null;
     if (chosen != null && !Object.hasOwn(STEP3_GRID, chosen)) { console.error(`do.json chọn cách lạ ${chosen}`); process.exit(3); }
+    if (chosen != null && (step3?.pick?.refOnly || []).some((x) => x?.name === chosen)) { console.error(`do.json chọn cách chỉ để tham khảo ${chosen}`); process.exit(3); }
     const res = chosen == null ? base : runMethod(chosen);
     const idfMul = paramsOf(chosen).idfMul;
     const cells = [];
@@ -920,10 +962,19 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       cells.push({
         id: `${c.set === "that" ? `anh-${c.img}` : `${c.set}|${c.kind}|${c.code ?? ""}`}|${cond}`, set: c.set, folder: c.folder ?? null, group: c.group ?? null, cond,
         img: c.img ?? null, good: gateSet && open && right, wrongAB: (c.set === "A" || c.set === "B") && !right, none3: c.set === "that" && c.label === "none",
-        salt: c.set === "muoi", feats,
+        salt: c.set === "muoi", open, feats,
       });
     }
     const abVals = Object.fromEntries(STEP4_FEATURES.map((fe) => [fe, cells.filter((x) => (x.set === "A" || x.set === "B") && x.feats).map((x) => x.feats[fe])]));
+    const vc = checkStep4Values(abVals, 120);
+    console.log(`Kiểm số giá trị A/B mỗi đặc trưng (= 120) ${vc.ok ? "ĐẠT" : "LỆCH"}: ${JSON.stringify(vc.counts)}`);
+    if (!vc.ok) {
+      const bad = resultFile(outDir, mode, false);
+      fs.writeFileSync(bad.file, JSON.stringify({ ...out, step3Pick: chosen, valueCheck: vc, cells }, null, 1), "utf8");
+      console.error(`SỐ GIÁ TRỊ A/B LỆCH (${vc.bad.join(", ")}): dừng báo, không chọn ngưỡng. Ghi ${bad.file} (không ghi ${outFile}).`);
+      process.exit(bad.exitCode);
+    }
+    out.valueCheck = vc;
     const rules = step4Rules(abVals).map((ru) => ({ ...ru, r: judge4(ru, cells) }));
     const pick = pickStep4(rules);
     const conclusion = pick.name ? `CHỌN ngưỡng ${pick.name}` : "KHÔNG NGƯỠNG NÀO ĐẠT ở bước 4: không giữ gì";

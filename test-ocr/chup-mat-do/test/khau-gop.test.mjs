@@ -1,7 +1,8 @@
 // Test phần thuần của khau-gop-do.mjs (đợt khau-gop vòng 1): gộp tham số mergeLocal (tham số nền trùng serverMerge của
 // src từng mục; từng cách của lưới bước 3 làm đúng việc đã chốt), phán bước 3 (G1–G5, thử đỏ / xanh), mục tiêu M1 > M2 >
 // M3 + nửa giữ riêng, luật bước 4 (phân vị, chiều "chưa chắc", cổng, nửa giữ riêng), tự kiểm sha256 khối luật, file
-// .loi.json, không có mã nhãn / tên ảnh thật. Dữ liệu giả (danh mục mini + danh mục / kho phụ thật của app); không gọi
+// .loi.json, không có mã nhãn / tên ảnh thật. Vòng 2 (luật sửa 55fc738): pickStep3 không chọn cách chỉ để tham khảo,
+// bảng mã WeakMap, c-rrf đổi vị trí 4–5, b-lock0 qua paramsOf, judge4 ô rỗng / không open, kiểm 120 giá trị A/B. Dữ liệu giả (danh mục mini + danh mục / kho phụ thật của app); không gọi
 // mạng, không đọc dữ liệu đo ở D:\tmp (trừ nhan.json nếu có, chỉ để kiểm không lộ mã nhãn).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,9 +15,10 @@ import { ruleBlockOf, sha256Of } from "../g2-di-qua-do.mjs";
 import { ALL_CODES } from "../nang-t1-do.mjs";
 import {
   mergeLocal, applyGuardLocal, paramsOf, judge3, target3, pickStep3, featuresOf, quantileNR, step4Rules, isUnsure, judge4,
-  pickStep4, selfCheck, resultFile, modeOf, timeCells, BASE_PARAMS, STEP3_GRID, STEP4_FEATURES, RULE_SHA256, CODE_7UP_DIET,
-  BULDAK_CODE, RUAYPUAN_CODE, SERVER_K,
+  pickStep4, selfCheck, resultFile, modeOf, timeCells, codeIndexOf, checkStep4Values, BASE_PARAMS, STEP3_GRID, STEP4_FEATURES,
+  RULE_SHA256, RULE_SHA, RULE_SHA_GOC, RULE_SHA256_GOC, RULE_FILE, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, SERVER_K,
 } from "../khau-gop-do.mjs";
+import { execSync } from "node:child_process";
 
 const SRC_FILE = new URL("../khau-gop-do.mjs", import.meta.url);
 const SELF_FILE = new URL(import.meta.url);
@@ -146,7 +148,33 @@ test("c-idf×: idf từ lạ đổi điểm mục máy chủ (×0,5 thấp hơn,
 test("c-rrf: xếp lại phần sau lớp chặn theo RRF hạng trước chặn + hạng S; lớp chặn giữ", () => {
   const r = run("c-rrf", [P3, P2, P1]);
   assert.equal(r.length, 5);
-  assert.deepEqual(codes(r).slice(1, 4), codes(run(null, [P3, P2, P1])).slice(1, 4)); // 3 vị trí khóa T1 giữ
+  assert.deepEqual(codes(r).slice(0, 3), codes(run(null, [P3, P2, P1])).slice(0, 3)); // 3 vị trí khóa T1 giữ
+  // W khớp 1 từ, điểm dưới các mục T1 còn lại: nền không vào 5; RRF cộng hạng S → lên vị trí 4, vị trí 4–5 KHÁC nền
+  const W = sv("8850000000004", "Mi");
+  const base = run(null, [W]);
+  const rr = run("c-rrf", [W]);
+  assert.deepEqual(codes(rr).slice(0, 3), codes(base).slice(0, 3));
+  assert.deepEqual(codes(rr).slice(0, 3), codes(fMi.hits).slice(0, 3));
+  assert.ok(!codes(base).includes(W.code));
+  assert.equal(rr[3].code, W.code);
+  assert.notDeepEqual(codes(rr).slice(3, 5), codes(base).slice(3, 5));
+  assert.equal(rr[4].code, base[3].code);
+});
+
+test("b-lock0 qua paramsOf: không khóa T1 → mục máy chủ điểm cao lên vị trí 1 (nền giữ T1 ở vị trí 1)", () => {
+  assert.deepEqual(paramsOf("b-lock0"), { ...BASE_PARAMS, lockTop: 0 });
+  const l0 = run("b-lock0", [P1]);
+  assert.equal(l0[0].code, P1.code);
+  assert.equal(run(null, [P1])[0].code, fMi.hits[0].code);
+  assert.deepEqual(codes(l0).slice(1), codes(fMi.hits).slice(0, 4));
+});
+
+test("codeIndexOf: bảng mã dựng một lần cho mỗi mảng products (WeakMap), mã đầu tiên thắng", () => {
+  assert.equal(codeIndexOf(MINI), codeIndexOf(MINI));
+  assert.equal(codeIndexOf(MINI).get("8930000000007"), 6);
+  const dup = [{ code: "x" }, { code: "x" }, null, { code: 5 }];
+  assert.deepEqual([...codeIndexOf(dup)], [["x", 0]]);
+  assert.equal(codeIndexOf(null).size, 0);
 });
 
 test("d-lock-diem: T1 điểm dưới mục máy chủ tốt nhất (khớp ≥ 2 từ) mất khóa; d-s1-w2: S hạng 1 lên vị trí 1", () => {
@@ -231,6 +259,44 @@ test("target3 / pickStep3: M1 chỉ đếm ô xếp hạng sai ở nửa chỉnh
   assert.equal(pickStep3([{ name: "khac", pass: true, t: T(9, 9, 9) }]).name, null);
 });
 
+test("pickStep3 (luật sửa vòng 2): cách chỉ để tham khảo KHÔNG được chọn, vẫn ghi tên / lý do / M1 M2 M3", () => {
+  const T = (M1, M2, M3, refOnly = []) => ({ M1, M2, M3, holdOk: true, refOnly });
+  // chỉ một cách được giữ và nó chỉ để tham khảo → không chọn
+  const only = pickStep3([{ name: "b-gap1", pass: true, t: T(2, 2, 6, ["chỉ nhờ 1 ảnh"]) }, { name: "b-lock2", pass: false, t: T(4, 4, 4) }]);
+  assert.equal(only.name, null);
+  assert.deepEqual(only.kept, ["b-gap1"]);
+  assert.deepEqual(only.refOnly, [{ name: "b-gap1", reasons: ["chỉ nhờ 1 ảnh"], M1: 2, M2: 2, M3: 6 }]);
+  // có cách thường → chọn cách thường dù M1 thấp hơn cách tham khảo
+  const mix = pickStep3([
+    { name: "b-lock2", pass: true, t: T(6, 6, 8, ["chỉ nhờ ảnh thư mục 2"]) },
+    { name: "a-top1", pass: true, t: T(2, 3, 7) },
+    { name: "c-rrf", pass: true, t: T(4, 4, 8, ["chỉ nhờ ảnh preset", "chỉ nhờ 1 ảnh"]) },
+  ]);
+  assert.equal(mix.name, "a-top1");
+  assert.deepEqual(mix.kept, ["b-lock2", "c-rrf", "a-top1"]);
+  assert.deepEqual(mix.refOnly.map((x) => x.name), ["b-lock2", "c-rrf"]);
+  // nối với target3: M1 chỉ nhờ 1 ảnh → refOnly → không chọn
+  const t = target3([row(1, "chinh", 3, 1), row(1, "chinh", 3, 1, "1-ra-dung", false, "ii"), row(4, "giu", 1, 1)]);
+  assert.deepEqual(t.refOnly, ["chỉ nhờ 1 ảnh"]);
+  assert.equal(pickStep3([{ name: "b-lock1", pass: true, t }]).name, null);
+  const t2 = target3([row(1, "chinh", 3, 1), row(2, "chinh", 2, 1), row(4, "giu", 1, 1)]);
+  assert.deepEqual(t2.refOnly, []);
+  assert.equal(pickStep3([{ name: "b-lock1", pass: true, t: t2 }]).name, "b-lock1");
+});
+
+test("checkStep4Values: mỗi đặc trưng đúng 120 giá trị A/B; thiếu / thừa / không có → lệch (đỏ)", () => {
+  const full = Object.fromEntries(STEP4_FEATURES.map((f) => [f, Array.from({ length: 120 }, (_, i) => i)]));
+  const ok = checkStep4Values(full);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.bad, []);
+  assert.equal(checkStep4Values({ ...full, diem: full.diem.slice(1) }).ok, false);
+  assert.deepEqual(checkStep4Values({ ...full, diem: full.diem.slice(1) }).bad, ["diem"]);
+  assert.deepEqual(checkStep4Values({ ...full, "ty-le": [...full["ty-le"], 1] }).bad, ["ty-le"]);
+  const { "hang-may-chu": _drop, ...miss } = full;
+  assert.deepEqual(checkStep4Values(miss).bad, ["hang-may-chu"]);
+  assert.equal(checkStep4Values(null).ok, false);
+});
+
 // ---- bước 4 ----
 test("featuresOf: 5 đặc trưng, mục 2 thiếu / điểm 0 → tỷ lệ +∞, hạng không có = 11", () => {
   const f = featuresOf([{ code: "a", score: 12 }, { code: "b", score: 4 }], { matched: 2, queryN: 4, sCodes: ["x", "a"] });
@@ -290,6 +356,26 @@ test("judge4 / pickStep4 (thử đỏ / xanh): cổng giữ tự mở, mục ti�
   assert.equal(pickStep4([list[2], list[3]]).name, null); // giữ riêng 0 / trượt cổng
 });
 
+test("judge4: ô thư mục 3 có danh sách gộp rỗng (feats null) hoặc kind khác open → 'không tự mở' (thử đỏ / xanh)", () => {
+  const rule = { name: "diem-p10", feature: "diem", thr: 10, dir: "lt" };
+  const cell = (id, o) => ({ id, set: "that", cond: "i", none3: true, open: true, ...o });
+  // ảnh 17 (chỉnh): (i) danh sách rỗng, (ii) điểm thấp → không tự mở cả hai ô
+  // ảnh 19 (giữ): (i) kind "none" (open false) dù điểm cao, (ii) điểm thấp → không tự mở cả hai ô
+  // ảnh 18 (chỉnh): (i) rỗng, (ii) open + điểm cao → vẫn tự mở ở (ii) → không tính
+  const cells = [
+    cell("17i", { group: "chinh", img: 17, feats: null, open: false }), cell("17ii", { group: "chinh", img: 17, cond: "ii", feats: { diem: 3 } }),
+    cell("19i", { group: "giu", img: 19, feats: { diem: 30 }, open: false }), cell("19ii", { group: "giu", img: 19, cond: "ii", feats: { diem: 3 } }),
+    cell("18i", { group: "chinh", img: 18, feats: null }), cell("18ii", { group: "chinh", img: 18, cond: "ii", feats: { diem: 30 } }),
+  ];
+  const r = judge4(rule, cells);
+  assert.equal(r.tChinh, 1);
+  assert.equal(r.tGiu, 1);
+  // feats null mà không có cờ open (ô cũ) cũng tính không tự mở
+  assert.equal(judge4(rule, [cell("a", { group: "giu", img: 20, feats: null, open: undefined })]).tGiu, 1);
+  // ô open + điểm cao → tự mở → không tính
+  assert.equal(judge4(rule, [cell("b", { group: "giu", img: 21, feats: { diem: 30 } })]).tGiu, 0);
+});
+
 test("timeCells: p50 / p95 của thời gian trung bình mỗi ô", () => {
   const t = timeCells([1, 2, 3], () => {}, { repeat: 2, warm: 1 });
   assert.equal(t.n, 3);
@@ -326,8 +412,26 @@ test("tự kiểm: khối luật hiện tại trùng RULE_SHA256; khối sửa /
   assert.equal(selfCheck({ now: block, old: block, dirty: null }).exitCode, 3);
 });
 
+test("luật sửa vòng 2: khối ở RULE_SHA trùng từng byte khối hiện tại; khối luật gốc khác, sha256 gốc giữ", () => {
+  assert.equal(RULE_SHA, "55fc738");
+  assert.equal(RULE_SHA_GOC, "b954513");
+  const cwd = new URL("../../../", import.meta.url);
+  const atRule = execSync(`git show ${RULE_SHA}:${RULE_FILE}`, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString();
+  const atGoc = execSync(`git show ${RULE_SHA_GOC}:${RULE_FILE}`, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString();
+  const block = ruleBlockOf(fs.readFileSync(SRC_FILE, "utf8"));
+  assert.equal(ruleBlockOf(atRule), block);
+  assert.equal(selfCheck({ now: block, old: ruleBlockOf(atRule), dirty: false }).exitCode, 0);
+  const goc = ruleBlockOf(atGoc);
+  assert.equal(sha256Of(goc), RULE_SHA256_GOC);
+  assert.notEqual(goc, block);
+  assert.equal(selfCheck({ now: block, old: goc, dirty: false }).exitCode, 3);
+  assert.match(block, /Sửa luật 2026-11-20 vòng 2 \(LỆCH LUẬT/);
+  assert.match(block, /KHÔNG được chọn/);
+  assert.match(block, /nền đo bằng mergeLocal tham số nền \(BASE_PARAMS\)/);
+});
+
 test("không có mã nhãn / tên ảnh thật trong khung đo, file test và tài liệu", () => {
-  const allowed = new Set([CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, ...MINI.map((p) => p.code), P1.code, P2.code, P3.code, "8850000000005", "8850000000009"]);
+  const allowed = new Set([CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, ...MINI.map((p) => p.code), P1.code, P2.code, P3.code, "8850000000004", "8850000000005", "8850000000009"]);
   for (const f of [SRC_FILE, SELF_FILE]) {
     const runs = fs.readFileSync(f, "utf8").match(/\b\d{8,14}\b/g) || [];
     for (const r of runs) assert.ok(allowed.has(r), `dãy số lạ ${r} trong ${f.pathname}`);
