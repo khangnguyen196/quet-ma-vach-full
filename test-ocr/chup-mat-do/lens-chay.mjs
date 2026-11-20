@@ -8,8 +8,8 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   selfCheck, modeOf, methodGrid, serverTier, isUnsureU, appTier, cellOf, judgeR, targetsM, pickMethod, pickModel, earlyGate,
   percentiles, loadSims, qidOf, indexBytesInt8, guardWant, checkIndexGuard, RULE_SHA, RULE_FILE, RULE_SHA256, METHOD_COUNT,
-  SERVER_K, FOUND_K, CONDS, FOLDERS, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, GOOD_IMGS, WRONG_IMGS, MODEL_VARIANTS, PRE_ORDER,
-  R6_P95_MS,
+  SERVER_K, FOUND_K, CONDS, FOLDERS, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, GOOD_IMGS, WRONG_IMGS,
+  R6_P95_MS, variantPlan, r6From, rowCheck, NO_VEC_VARIANTS,
 } from "./lens-do.mjs";
 
 /** File code của khung đo: sha256 của từng file ghi vào MỌI file kết quả (gợi ý 1 của code-reviewer vòng 1). */
@@ -21,7 +21,7 @@ export function codeSha256s(dir = path.dirname(fileURLToPath(import.meta.url))) 
     try { return [f, crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, f))).digest("hex")]; } catch { return [f, null]; }
   }));
 }
-import { ruleBlockOf, keyOf, rankIn } from "./g2-di-qua-do.mjs";
+import { ruleBlockOf, keyOf, rankIn, sha256Of as sha256OfText } from "./g2-di-qua-do.mjs";
 import { splitHalves } from "./may-chu-loc-do.mjs";
 import { mergeLocal, scoreTable, BASE_PARAMS } from "./khau-gop-do.mjs";
 import { planList, readCatalog, LEVEL_FILES } from "./lens-tai.mjs";
@@ -59,7 +59,7 @@ export async function runMain(argv, selfUrl) {
   const porcelain = git("git status --porcelain");
   const dirty = porcelain === null ? null : porcelain.trim() !== "";
   const now = ruleBlockOf(fs.readFileSync(new URL(selfUrl), "utf8"));
-  const oldText = RULE_SHA ? git(`git show ${RULE_SHA}:${RULE_FILE}`) : null;
+  const oldText = git(`git show ${RULE_SHA}:${RULE_FILE}`);
   const sc = selfCheck({ now, old: oldText === null ? null : ruleBlockOf(oldText), dirty });
   for (const l of sc.lines) (sc.exitCode ? console.error : console.log)(l);
   if (sc.exitCode) process.exit(sc.exitCode);
@@ -259,45 +259,58 @@ export async function runMain(argv, selfUrl) {
   const bopFile = path.join(lensDir, "bo-p.json");
   if (!fs.existsSync(bopFile)) { console.error("Chưa có bo-p.json (lens-tai.mjs --bo-p): không đo."); process.exit(3); }
   const bopText = fs.readFileSync(bopFile, "utf8");
-  const want = guardWant(acText, bopText);
-  /** Đọc bộ sim + kiểm chỉ mục đã áp chống ăn gian; lệch → <mode>.loi.json, thoát mã 3. */
-  const loadChecked = (dir) => {
+  /** Dừng trước mọi phán: ghi <mode>.loi.json kèm lỗi, thoát mã 3. */
+  const stop = (what, errs, extra = {}) => {
+    const bad = path.join(outDir, `${mode}.loi.json`);
+    fs.writeFileSync(bad, JSON.stringify({ ...out, ...extra, stopReason: what, errors: errs }, null, 1), "utf8");
+    console.error(`${what}: ${errs.slice(0, 5).join("; ")}. Ghi ${bad}.`);
+    process.exit(3);
+  };
+  const catImg = new Map();
+  /** Điều chỉ mục phải thỏa ở một mức (LỆCH LUẬT 2: ẩn theo hàng, override bộ P chỉ mức a; khóa danh mục của mã bị loại). */
+  const wantOf = (level) => {
+    if (!catImg.has(level)) catImg.set(level, new Map(readCatalog(LEVEL_FILES[level]).map((r) => [r.code, r.img])));
+    return guardWant(acText, bopText, { level, catalogImg: catImg.get(level) });
+  };
+  /** Đọc bộ sim + kiểm chỉ mục đã áp chống ăn gian + bộ sim hợp lệ (đạt kiểm luồng, đủ truy vấn / ảnh, đúng thư mục). */
+  const loadChecked = (dir, expect) => {
     const s = loadSims(dir);
-    const errs = checkIndexGuard(s.meta, s.codes, want);
-    if (errs.length) {
-      const bad = path.join(outDir, `${mode}.loi.json`);
-      fs.writeFileSync(bad, JSON.stringify({ ...out, indexDir: dir, guardErrors: errs }, null, 1), "utf8");
-      console.error(`CHỈ MỤC CHƯA ÁP ĐÚNG CHỐNG ĂN GIAN (${dir}): ${errs.slice(0, 5).join("; ")}. Ghi ${bad}.`);
-      process.exit(3);
-    }
+    const errs = checkIndexGuard(s.meta, s.codes, wantOf(expect.level), expect);
+    if (errs.length) stop(`CHỈ MỤC CHƯA ÁP ĐÚNG CHỐNG ĂN GIAN / BỘ SIM KHÔNG HỢP LỆ (${dir})`, errs, { indexDir: dir });
     return s;
   };
-  out.antiCheatSha256 = want.antiCheatSha256;
-  out.boPSha256 = want.boPSha256;
+  out.antiCheatSha256 = sha256OfText(acText);
+  out.boPSha256 = sha256OfText(bopText);
   const realLab = real.filter((c) => c.code);
-  const variantDirs = (level) => {
-    const out2 = [];
-    for (const vname of MODEL_VARIANTS) for (const pre of PRE_ORDER) {
-      const d = path.join(vecDir, `${vname}-${pre}`, level);
-      if (fs.existsSync(path.join(d, "meta.json"))) out2.push({ variant: vname, pre, dir: d });
-    }
-    return out2;
-  };
   const imgTop5 = (sims, code, qid) => { const r = sims.rowOf(qid); return r ? rankIn(r.ranked, code, 5) : null; };
-  // bộ P (LỆCH LUẬT 1): mỗi mã 1 lần; truy vấn P PHẢI có hàng sim (thiếu → dừng, không đếm thành "trượt")
   const bop = JSON.parse(bopText);
-  const pOf = (sims) => {
-    const miss = bop.items.filter((x) => !sims.rowOf(x.qid)).map((x) => x.qid);
-    if (miss.length) { console.error(`Thiếu hàng sim cho truy vấn bộ P: ${miss.join(" ")}`); process.exit(3); }
-    return bop.items.map((x) => ({ id: x.qid, code: x.code, pos: imgTop5(sims, x.code, x.qid) }));
+  /** NÊN SỬA 3: mọi qid của ca có ảnh + bộ P (khi dùng) phải có hàng; ô A / B (abCells) đủ 60 và có lens. */
+  const imgQids = [...new Set(live.filter((c) => c.qid).map((c) => c.qid))];
+  const abCells = live.filter((c) => c.set === "A" || c.set === "B");
+  const needRows = (sims, { withP, withAb }) => {
+    const rc = rowCheck(sims.rowOf, { qids: [...imgQids, ...(withP ? bop.items.map((x) => x.qid) : [])], abQids: withAb ? abCells.map((c) => c.qid) : null });
+    if (rc.exitCode) stop("THIẾU HÀNG SIM TRƯỚC KHI PHÁN", rc.errs);
+    return rc;
   };
+  // bộ P (LỆCH LUẬT 1): mỗi mã 1 lần; hàng đã kiểm ở needRows
+  const pOf = (sims) => bop.items.map((x) => ({ id: x.qid, code: x.code, pos: imgTop5(sims, x.code, x.qid) }));
   out.pN = bop.items.length;
+  /** R6 1.600 px (LỆCH LUẬT 2 (ii), NÊN SỬA 5): file đo P4; thiếu file / số → dừng mã 3. */
+  const gio1600File = arg("--gio-1600", path.join(lensDir, "gio-1600.json"));
+  const gio1600 = fs.existsSync(gio1600File) ? JSON.parse(fs.readFileSync(gio1600File, "utf8")) : null;
+  const r6Of = (variant, pre) => {
+    try { return r6From(gio1600, variant, pre); } catch (e) { return stop(`THIẾU SỐ R6 1.600 px (${gio1600File})`, [String(e.message)]); }
+  };
+  out.gio1600File = gio1600File;
 
   if (mode === "chon-model") {
     const nB = planList(readCatalog(LEVEL_FILES.b)).items.length;
+    const vp = variantPlan(vecDir, "a");
+    if (vp.exitCode) stop("THIẾU BIẾN THỂ (cần đủ 6)", [`thiếu bộ sim: ${vp.missing.join(" ")}`]);
     const vs = [];
-    for (const vd of variantDirs("a")) {
-      const sims = loadChecked(vd.dir);
+    for (const vd of vp.dirs) {
+      const sims = loadChecked(vd.dir, { model: vd.variant, pre: vd.pre, level: "a" });
+      needRows(sims, { withP: true, withAb: true });
       const inIdx = new Set(sims.codes);
       // (2) ảnh thật nửa CHỈNH có nhãn mã (thư mục 1 + 2), mã có trong chỉ mục (a)
       const realCh = realLab.filter((c) => c.group === "chinh" && (c.folder === FOLDERS[0] || c.folder === FOLDERS[1]) && inIdx.has(c.code));
@@ -306,10 +319,12 @@ export async function runMain(argv, selfUrl) {
       const P = pOf(sims);
       const pTop5 = P.filter((x) => x.pos != null).length;
       const m = sims.meta;
-      vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: m.timing?.p95, ramMiB: m.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), realTop5, realCh: realCh.length, realImgs: realCh.map((c) => c.img), pTop5, pN: P.length });
+      const r6 = r6Of(vd.variant, vd.pre);
+      vs.push({ variant: vd.variant, pre: vd.pre, license: m.license, onnxBytes: m.onnxBytes, p95: r6.p95, r6, ramMiB: r6.ramAddMiB, dims: m.dims, r7Bytes: indexBytesInt8(nB, m.dims), realTop5, realCh: realCh.length, realImgs: realCh.map((c) => c.img), pTop5, pN: P.length });
     }
-    const pick = pickModel(vs);
-    Object.assign(out, { variants: vs, pick, nB });
+    const pick0 = pickModel(vs);
+    const pick = { ...pick0, dropped: [...NO_VEC_VARIANTS.map((x) => ({ ...x })), ...pick0.dropped] };
+    Object.assign(out, { variants: vs, pick, nB, r6Source: "gio-1600 (1.600 px, JPEG 0,9, 1 luồng)" });
     for (const x of vs) console.log(`${(x.variant + "|" + x.pre).padEnd(20)} ảnh thật chỉnh top5 ${x.realTop5}/${x.realCh} bộ P top5 ${x.pTop5}/${x.pN} p95 ${x.p95} ms R7 ${x.r7Bytes} B (${x.license})`);
     console.log(`== Chọn biến thể: ${pick.name ?? "KHÔNG CÓ (mọi biến thể trượt R6 / R7)"}; loại ${JSON.stringify(pick.dropped)}`);
   }
@@ -318,7 +333,8 @@ export async function runMain(argv, selfUrl) {
     const cm = JSON.parse(fs.readFileSync(path.join(outDir, "chon-model.json"), "utf8"));
     if (cm.ruleSha256 !== RULE_SHA256 || !cm.pick?.name) { console.error("chon-model.json khác RULE_SHA256 hoặc chưa chọn biến thể."); process.exit(3); }
     const [vname, pre] = cm.pick.name.split("|");
-    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, "a"));
+    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, "a"), { model: vname, pre, level: "a" });
+    needRows(sims, { withP: true, withAb: true });
     const inIdx = new Set(sims.codes);
     const P = pOf(sims);
     const byImg = new Map(real.map((c) => [c.img, c]));
@@ -338,10 +354,10 @@ export async function runMain(argv, selfUrl) {
     const cg = JSON.parse(fs.readFileSync(path.join(outDir, "cong.json"), "utf8"));
     if (cm.ruleSha256 !== RULE_SHA256 || cg.ruleSha256 !== RULE_SHA256 || !cg.gate?.pass) { console.error("Chưa qua cổng dừng sớm / khác RULE_SHA256: không đo."); process.exit(3); }
     const [vname, pre] = cm.pick.name.split("|");
-    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`));
+    const sims = loadChecked(path.join(vecDir, `${vname}-${pre}`, `${level}-int8`), { model: vname, pre, level });
     const meta = sims.meta;
-    const abCells = live.filter((c) => c.set === "A" || c.set === "B");
-    const tops = abCells.map((c) => sims.rowOf(c.qid)?.lens).filter(Boolean);
+    // NÊN SỬA 3: mọi ca có ảnh có hàng, đủ 60 ô A / B có lens (sau khi ẩn); không .filter(Boolean) làm mất ô lặng lẽ
+    const { tops } = needRows(sims, { withP: false, withAb: true });
     const taus = percentiles(tops.map((l) => l.top1));
     const mus = percentiles(tops.map((l) => l.margin));
     const grid = methodGrid(taus, mus);
@@ -398,7 +414,8 @@ export async function runMain(argv, selfUrl) {
       const res = evalCells({ s, a: { id: "A0" }, u: { id: "U0" } });
       r5yBy.set(s, verdictOf(res, { r5x: true, r5y: { pass: true }, r6: { p95: 0, ramMiB: 0 }, r7: { bytes: 0 } }));
     }
-    const r6 = { p95: meta.timing?.p95, ramMiB: SERVER_RAM_BASE_MIB + (meta.ramAddMiB ?? Infinity) + (meta.indexBytes ?? Infinity) / 1048576 };
+    const r6s = r6Of(vname, pre); // LỆCH LUẬT 2 (ii): cổng R6 dùng số đo 1.600 px
+    const r6 = { p95: r6s.p95, ramMiB: SERVER_RAM_BASE_MIB + r6s.ramAddMiB + (meta.indexBytes ?? Infinity) / 1048576 };
     const r7 = { bytes: meta.indexBytes };
     const methods = [];
     for (const g of grid) {

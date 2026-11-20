@@ -567,13 +567,33 @@ export function parseNpy(buf) {
   return { shape, data };
 }
 
-/** Bộ sim của một biến thể / mức: dir chứa sims.npy, codes.json, queries.json, meta.json. Trả { meta, codes, rowOf(qid) }. */
-export function loadSims(dir) {
-  const meta = JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8"));
-  const codes = JSON.parse(fs.readFileSync(path.join(dir, "codes.json"), "utf8"));
-  const queries = JSON.parse(fs.readFileSync(path.join(dir, "queries.json"), "utf8"));
-  const { shape, data } = parseNpy(fs.readFileSync(path.join(dir, "sims.npy")));
+/**
+ * Một hàng độ giống SAU KHI ẨN (LỆCH LUẬT 2 (i)): codes / sims = hàng ĐẦY ĐỦ của sims.npy; hidden = mã bị ẩn trên hàng
+ * này (mã bị loại X trên hàng ab-X). Mã ẩn coi như không có ảnh: không có trong hạng ảnh, không có trong simOf (sim ứng
+ * viên = không có), không tính vào lens. Hạng: sim giảm dần, hòa → thứ tự codes (như imageRank). Trả { ranked, simOf, lens }.
+ */
+export function rowView(codes, sims, hidden) {
+  const hid = new Set(hidden || []);
+  const keep = [];
+  for (let j = 0; j < codes.length; j++) if (!hid.has(codes[j])) keep.push(j);
+  keep.sort((a, b) => sims[b] - sims[a] || a - b);
+  const ranked = keep.map((j) => codes[j]);
+  const simOf = new Map(keep.map((j) => [codes[j], sims[j]]));
+  return { ranked, simOf, lens: lensOf(ranked, simOf) };
+}
+
+/**
+ * Bộ sim từ nội dung đã đọc (thuần, để test không cần file): meta (meta.json), codes, queries, npy (Buffer sims.npy).
+ * ĐÂY LÀ CHỖ DUY NHẤT dùng hàng sims.npy: rowOf(qid) lấy hàng đầy đủ rồi áp meta.hideByRow[qid] (rowView) trước khi xếp
+ * hạng / tính lens / sim ứng viên. hideByRow sai dạng → ném lỗi. Trả { meta, codes, queries, rowOf(qid) } (qid không có
+ * hàng → null).
+ */
+export function simsFrom({ meta, codes, queries, npy }) {
+  const { shape, data } = parseNpy(npy);
   if (shape[0] !== queries.length || shape[1] !== codes.length) throw new Error(`sims.npy ${shape} ≠ ${queries.length} × ${codes.length}`);
+  const hide = meta?.hideByRow ?? {};
+  if (!hide || typeof hide !== "object" || Array.isArray(hide)) throw new Error("meta.hideByRow phải là object { qid: [mã] }");
+  for (const [q, v] of Object.entries(hide)) if (!Array.isArray(v)) throw new Error(`meta.hideByRow[${q}] phải là mảng mã`);
   const qi = new Map(queries.map((q, i) => [q, i]));
   const cache = new Map();
   const rowOf = (qid) => {
@@ -581,47 +601,76 @@ export function loadSims(dir) {
     if (!cache.has(qid)) {
       const i = qi.get(qid);
       const sims = data.subarray(i * codes.length, (i + 1) * codes.length);
-      const ranked = imageRank(codes, sims);
-      const simOf = new Map(codes.map((c, j) => [c, sims[j]]));
-      cache.set(qid, { ranked, simOf, lens: lensOf(ranked, simOf) });
+      cache.set(qid, rowView(codes, sims, Object.hasOwn(hide, qid) ? hide[qid] : []));
     }
     return cache.get(qid);
   };
-  return { meta, codes, rowOf };
+  return { meta, codes, queries, rowOf };
+}
+
+/** Bộ sim của một biến thể / mức: dir chứa sims.npy, codes.json, queries.json, meta.json (đọc file rồi simsFrom). */
+export function loadSims(dir) {
+  const rd = (f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+  return simsFrom({ meta: rd("meta.json"), codes: rd("codes.json"), queries: rd("queries.json"), npy: fs.readFileSync(path.join(dir, "sims.npy")) });
+}
+
+/** Mức chỉ mục hợp lệ. */
+export const LEVELS = Object.freeze(["a", "b"]);
+const IMG_KEY_RE = /^front_[a-z]{2,3}\.\d{1,6}$/;
+
+/** hideByRow chuẩn của chống ăn gian (LỆCH LUẬT 2 (i)): mỗi mã bị loại X → { "ab-X": [X] }. */
+export function hideByRowOf(excluded) {
+  return Object.fromEntries([...(excluded || [])].sort().map((c) => [`ab-${c}`, [c]]));
 }
 
 /**
- * Điều chỉ mục ảnh PHẢI thỏa theo chống ăn gian (NÊN SỬA 5 của code-reviewer vòng 1), dựng từ NỘI DUNG file
- * chong-an-gian.json (acText) và bo-p.json (bopText, null = chưa có). Trả { antiCheatSha256, boPSha256, excluded,
- * override: { mã: khóa ảnh chỉ mục bắt buộc } (ảnh thay A / B + ảnh chỉ mục bộ P), guard: [{ code, queryImgid, qid }]
- * (ảnh truy vấn có imgid OFF: A / B dùng được + bộ P), mustHave: [mã bộ P] }.
+ * Điều chỉ mục ảnh PHẢI thỏa theo chống ăn gian (NÊN SỬA 5 vòng 1 + LỆCH LUẬT 2), dựng từ NỘI DUNG file
+ * chong-an-gian.json (acText) và bo-p.json (bopText, null = chưa có), theo MỨC chỉ mục (level "a" | "b"). catalogImg =
+ * (mã) → khóa img danh mục của mức đó (Map / object / hàm; null = không kiểm khóa của mã bị loại). Trả { level,
+ * antiCheatSha256, boPSha256, excluded, hideByRow, excludedKey: { mã bị loại: khóa danh mục | null } (khi có
+ * catalogImg), override: { mã: khóa ảnh chỉ mục bắt buộc } (ảnh thay A / B mọi mức + ảnh chỉ mục bộ P CHỈ ở mức a),
+ * guard: [{ code, queryImgid, qid }] (ảnh truy vấn có imgid OFF: mọi mã A / B + bộ P ở mức a), mustHave: [mã bộ P ở mức a] }.
  */
-export function guardWant(acText, bopText) {
+export function guardWant(acText, bopText, { level = "a", catalogImg = null } = {}) {
+  if (!LEVELS.includes(level)) throw new Error(`lens: mức lạ ${level}`);
   const ac = JSON.parse(acText);
   const bop = bopText == null ? null : JSON.parse(bopText);
+  const P = level === "a" ? bop?.items || [] : []; // LỆCH LUẬT 2 (iii): bộ P chỉ ở mức (a)
   const override = { ...(ac.override || {}) };
   const guard = [];
   const seen = new Set();
   const add = (g) => { const k = `${g.code}|${g.queryImgid}`; if (!seen.has(k)) { seen.add(k); guard.push(g); } };
-  for (const x of ac.items || []) if (x.chosen) add({ code: x.code, queryImgid: x.testImgid ?? null, qid: `ab-${x.code}` });
-  for (const p of bop?.items || []) {
+  for (const x of ac.items || []) add({ code: x.code, queryImgid: x.testImgid ?? null, qid: `ab-${x.code}` });
+  for (const p of P) {
     if (Object.hasOwn(override, p.code) && override[p.code] !== p.index?.key) override[p.code] = `XUNG-DOT:${override[p.code]}|${p.index?.key}`;
     else override[p.code] = p.index?.key;
     add({ code: p.code, queryImgid: p.query?.imgid ?? null, qid: p.qid });
   }
+  const excluded = [...(ac.excluded || [])];
+  const keyOf = catalogImg == null ? null : typeof catalogImg === "function" ? catalogImg : catalogImg instanceof Map ? (c) => catalogImg.get(c) : (c) => catalogImg[c];
+  const excludedKey = keyOf ? Object.fromEntries(excluded.map((c) => { const k = keyOf(c); return [c, typeof k === "string" && IMG_KEY_RE.test(k) ? k : null]; })) : null;
   return {
-    antiCheatSha256: sha256Of(acText), boPSha256: bopText == null ? null : sha256Of(bopText), excluded: [...(ac.excluded || [])],
-    override, guard, mustHave: (bop?.items || []).map((p) => p.code),
+    level, antiCheatSha256: sha256Of(acText), boPSha256: bopText == null ? null : sha256Of(bopText), excluded,
+    hideByRow: hideByRowOf(excluded), excludedKey, override, guard, mustHave: P.map((p) => p.code),
   };
 }
 
+/** Mã code có bị ẩn trên hàng qid theo meta.hideByRow không. */
+function hiddenOn(hideByRow, qid, code) {
+  const v = hideByRow && Object.hasOwn(hideByRow, qid) ? hideByRow[qid] : null;
+  return Array.isArray(v) && v.includes(code);
+}
+
 /**
- * Kiểm chỉ mục ảnh (meta.json + codes.json do lens-vec.py ghi) đã áp đúng chống ăn gian: meta ghi đúng sha256 của
- * chong-an-gian.json / bo-p.json, đúng excluded / override; (i) excluded ∩ codes = ∅; (ii) mọi mã có override dùng đúng
- * khóa override (meta.indexKey); (iii) không ảnh truy vấn A / B / P nào nằm trong chỉ mục (cùng mã + cùng imgid; imgid
- * ảnh chỉ mục phải biết, meta.indexImgid); mã bộ P phải có trong chỉ mục. Trả mảng lỗi (rỗng = đạt).
+ * Kiểm chỉ mục ảnh (meta.json + codes.json do lens-vec.py ghi) đã áp đúng chống ăn gian (LỆCH LUẬT 2): meta ghi đúng
+ * sha256 chong-an-gian.json / bo-p.json, đúng excluded / override / hideByRow; (i) mọi mã bị loại CÓ trong chỉ mục (khi
+ * danh mục mức đó có khóa ảnh; dùng khóa danh mục) VÀ bị ẩn trên đúng hàng ab-<mã>, không hàng nào khác ẩn gì; (ii) mọi
+ * mã có override dùng đúng khóa override (meta.indexKey); (iii) ảnh truy vấn A / B / P nằm trong chỉ mục (cùng mã + cùng
+ * imgid) CHỈ được phép khi mã đó bị ẩn trên hàng của chính truy vấn đó (imgid ảnh chỉ mục phải biết, meta.indexImgid);
+ * mã bộ P (mức a) phải có trong chỉ mục. expect = { model, pre, level } (thư mục đang đọc; NÊN SỬA 2): meta.threadCheck.pass
+ * === true, meta.queriesMissing rỗng, meta.missingIndexFiles === 0, meta.model / pre / level khớp. Trả mảng lỗi (rỗng = đạt).
  */
-export function checkIndexGuard(meta, codes, want) {
+export function checkIndexGuard(meta, codes, want, expect = null) {
   const errs = [];
   const m = meta || {};
   const w = want || {};
@@ -629,24 +678,115 @@ export function checkIndexGuard(meta, codes, want) {
   const sortedJson = (o) => JSON.stringify(Object.entries(o || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   if (!w.antiCheatSha256 || m.antiCheatSha256 !== w.antiCheatSha256) errs.push(`meta.antiCheatSha256 ${m.antiCheatSha256} ≠ chong-an-gian.json ${w.antiCheatSha256}`);
   if (m.boPSha256 !== w.boPSha256) errs.push(`meta.boPSha256 ${m.boPSha256} ≠ bo-p.json ${w.boPSha256}`);
+  if (m.level !== w.level) errs.push(`meta.level ${m.level} ≠ mức đang kiểm ${w.level}`);
   if (JSON.stringify([...(m.excluded || [])].sort()) !== JSON.stringify([...(w.excluded || [])].sort())) errs.push("meta.excluded khác chong-an-gian.json");
-  if (sortedJson(m.override) !== sortedJson(w.override)) errs.push("meta.override khác chong-an-gian.json + bo-p.json");
+  if (sortedJson(m.override) !== sortedJson(w.override)) errs.push(`meta.override khác chong-an-gian.json + bo-p.json (mức ${w.level})`);
   for (const [c, k] of Object.entries(w.override || {})) if (String(k).startsWith("XUNG-DOT:")) errs.push(`override mâu thuẫn cho ${c}: ${k}`);
-  const leak = (w.excluded || []).filter((c) => inIdx.has(c));
-  if (leak.length) errs.push(`(i) mã bị loại vẫn có trong chỉ mục: ${leak.join(" ")}`);
+  // (i) ẩn theo hàng
+  const hide = m.hideByRow;
+  if (!hide || typeof hide !== "object" || Array.isArray(hide)) errs.push("meta.hideByRow thiếu / sai dạng");
+  else {
+    if (sortedJson(Object.fromEntries(Object.entries(hide).map(([q, v]) => [q, Array.isArray(v) ? [...v].sort() : v]))) !== sortedJson(w.hideByRow)) errs.push("meta.hideByRow khác chong-an-gian.json");
+    const exc = new Set(w.excluded || []);
+    for (const [q, v] of Object.entries(hide)) {
+      const mm = /^ab-(\d+)$/.exec(q);
+      if (!mm) { errs.push(`(i) ẩn trên hàng không phải A / B: ${q}`); continue; }
+      for (const c of Array.isArray(v) ? v : []) if (c !== mm[1] || !exc.has(c)) errs.push(`(i) ẩn sai: mã ${c} trên hàng ${q}`);
+    }
+  }
   const keyOfIdx = m.indexKey || {};
+  for (const c of w.excluded || []) {
+    if (!hiddenOn(hide, `ab-${c}`, c)) errs.push(`(i) mã bị loại ${c} không bị ẩn trên hàng ab-${c}`);
+    const ek = w.excludedKey ? w.excludedKey[c] : undefined;
+    if (ek === null) { if (inIdx.has(c)) errs.push(`(i) mã bị loại ${c} không có khóa ảnh ở danh mục mức ${w.level} mà vẫn có trong chỉ mục`); continue; }
+    if (!inIdx.has(c)) { errs.push(`(i) mã bị loại ${c} vắng khỏi chỉ mục (phải có, dùng khóa ảnh danh mục)`); continue; }
+    if (ek !== undefined && keyOfIdx[c] !== ek) errs.push(`(i) mã bị loại ${c} dùng ảnh ${keyOfIdx[c]} thay vì khóa danh mục ${ek}`);
+  }
+  // (ii) override
   for (const [c, k] of Object.entries(w.override || {})) if (inIdx.has(c) && keyOfIdx[c] !== k) errs.push(`(ii) ${c} dùng ảnh ${keyOfIdx[c]} thay vì ${k}`);
+  // (iii) ảnh truy vấn trong chỉ mục chỉ khi bị ẩn trên chính hàng đó
   const imgidOfIdx = m.indexImgid || {};
   for (const g of w.guard || []) {
+    if (!inIdx.has(g.code) || hiddenOn(hide, g.qid, g.code)) continue;
     if (!knownImgid(g.queryImgid)) { errs.push(`(iii) không biết imgid ảnh truy vấn ${g.qid}`); continue; }
-    if (!inIdx.has(g.code)) continue;
     const ii = imgidOfIdx[g.code];
     if (!knownImgid(ii)) errs.push(`(iii) không biết imgid ảnh chỉ mục của ${g.code}`);
-    else if (String(ii) === String(g.queryImgid)) errs.push(`(iii) ảnh truy vấn ${g.qid} nằm trong chỉ mục (cùng mã + imgid ${ii})`);
+    else if (String(ii) === String(g.queryImgid)) errs.push(`(iii) ảnh truy vấn ${g.qid} nằm trong chỉ mục (cùng mã + imgid ${ii}) mà không bị ẩn trên hàng đó`);
   }
   const miss = (w.mustHave || []).filter((c) => !inIdx.has(c));
   if (miss.length) errs.push(`mã bộ P không có trong chỉ mục: ${miss.join(" ")}`);
+  // NÊN SỬA 2: bộ sim phải là bản đạt kiểm luồng, đủ truy vấn, đủ ảnh chỉ mục, đúng thư mục
+  if (expect) {
+    if (m.threadCheck?.pass !== true) errs.push("meta.threadCheck.pass không phải true (bộ sim trượt kiểm nhiều luồng)");
+    if (!Array.isArray(m.queriesMissing) || m.queriesMissing.length) errs.push(`meta.queriesMissing không rỗng: ${JSON.stringify(m.queriesMissing)}`);
+    if (m.missingIndexFiles !== 0) errs.push(`meta.missingIndexFiles = ${m.missingIndexFiles} (phải 0)`);
+    for (const k of ["model", "pre", "level"]) if (m[k] !== expect[k]) errs.push(`meta.${k} ${m[k]} ≠ thư mục ${expect[k]}`);
+  }
   return errs;
+}
+
+// ---------------- kiểm đầu vào trước mọi phán (NÊN SỬA 3–5 của code-reviewer trước đo) ----------------
+/**
+ * 6 biến thể PHẢI có bộ sim (model × tiền xử lý; tên model như MODEL_VARIANTS / lens-vec.py MODELS). SigLIP không tính
+ * vector: R7 ước ở mức (b) (42.208 sp có ảnh × (768 + 2 + 14) byte) = 33,1 MB > 25 MB, ghi vào dropped của --chon-model.
+ */
+export const VEC_VARIANTS = Object.freeze([
+  "clip-fp32|cat", "clip-fp32|vien", "clip-int8|cat", "clip-int8|vien", "dinov2-small|cat", "dinov2-small|vien",
+]);
+export const NO_VEC_VARIANTS = Object.freeze(PRE_ORDER.map((pre) => Object.freeze({ name: `siglip|${pre}`, why: "R7 ước 33,1 MB > 25 MB" })));
+
+/**
+ * Thư mục bộ sim của 6 biến thể ở một mức: <vecDir>/<model>-<pre>/<level>. hasMeta(dir) → có meta.json (mặc định
+ * fs.existsSync). Thiếu bất kỳ biến thể nào → exitCode 3 (không lặng lẽ bỏ khỏi bảng). Trả { exitCode, dirs: [{ variant,
+ * pre, name, dir }], missing: [tên] }.
+ */
+export function variantPlan(vecDir, level, hasMeta = (d) => fs.existsSync(path.join(d, "meta.json"))) {
+  const dirs = [];
+  const missing = [];
+  for (const name of VEC_VARIANTS) {
+    const [variant, pre] = name.split("|");
+    const dir = path.join(vecDir, `${variant}-${pre}`, level);
+    if (hasMeta(dir)) dirs.push({ variant, pre, name, dir }); else missing.push(name);
+  }
+  return { exitCode: missing.length ? 3 : 0, dirs, missing };
+}
+
+/** Cạnh dài / chất lượng JPEG của ảnh truy vấn khi đo R6 (LỆCH LUẬT 2 (ii), như prepareImage của app). */
+export const R6_LONG_EDGE = 1600;
+export const R6_JPEG_QUALITY = 0.9;
+
+/**
+ * Số R6 của một biến thể từ file đo 1.600 px (gio-1600.json của lens-vec.py gio1600; NÊN SỬA 5): kiểm file đúng loại
+ * (cạnh dài 1.600, JPEG 0,9, 1 luồng, ≥ 20 ảnh) và có số hữu hạn; thiếu / sai → ném lỗi (người gọi thoát mã 3). Trả
+ * { p95, median, max, n, ramAddMiB, peakMiB }.
+ */
+export function r6From(gio, variant, pre) {
+  const g = gio || {};
+  if (g.longEdge !== R6_LONG_EDGE || g.jpegQuality !== R6_JPEG_QUALITY || g.threads !== 1) throw new Error(`lens: file giờ không phải số đo ${R6_LONG_EDGE} px JPEG ${R6_JPEG_QUALITY} 1 luồng`);
+  const m = g.models?.[variant];
+  const t = m?.time?.[pre];
+  if (!t || !Number.isFinite(t.p95) || !Number.isFinite(t.median) || !Number.isFinite(t.max) || !(t.n >= TIME_N)) throw new Error(`lens: thiếu số R6 1.600 px của ${variant}|${pre}`);
+  if (!Number.isFinite(m.ramAddAfter20MiB)) throw new Error(`lens: thiếu RAM thêm (1.600 px) của ${variant}`);
+  return { p95: t.p95, median: t.median, max: t.max, n: t.n, ramAddMiB: m.ramAddAfter20MiB, peakMiB: m.peakWsMiB ?? null };
+}
+
+/**
+ * Trước mọi phán (NÊN SỬA 3): mọi qid của ca có ảnh (A / B, ảnh thật, buldak, ruaypuan) và của bộ P phải có hàng sim;
+ * abQids (một phần tử mỗi Ô A / B, 60 = 30 mã × 2 bộ) phải đủ abN và mỗi hàng có lens (sau khi ẩn). Trả { exitCode,
+ * errs, tops (lens của từng ô A / B, theo thứ tự abQids) }.
+ */
+export function rowCheck(rowOf, { qids = [], abQids = null, abN = 60 } = {}) {
+  const errs = [];
+  const miss = [...new Set(qids)].filter((q) => !rowOf(q));
+  if (miss.length) errs.push(`thiếu hàng sim cho truy vấn: ${miss.join(" ")}`);
+  let tops = null;
+  if (abQids) {
+    tops = abQids.map((q) => rowOf(q)?.lens ?? null);
+    if (abQids.length !== abN) errs.push(`ô A / B có ${abQids.length} (phải ${abN})`);
+    const noLens = abQids.filter((q, i) => !tops[i]);
+    if (noLens.length) errs.push(`ô A / B không có lens: ${[...new Set(noLens)].join(" ")}`);
+  }
+  return { exitCode: errs.length ? 3 : 0, errs, tops };
 }
 
 /** Mã truy vấn ảnh của một ca (null = ca không có ảnh). */

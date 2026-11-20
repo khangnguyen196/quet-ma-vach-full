@@ -7,6 +7,7 @@ import {
   imageUrl, fileNameOf, planList, existingOf, isRetryable, backoffMs, createBreaker, createGap, estimateRemaining, budgetOk,
   fetchOne, USER_AGENT, BUDGET_BYTES, DEFAULT_AVG_BYTES, MAX_CONN, GAP_MS, BREAKER_LIMIT, productUrl, candidatesFrom, imgidFromUrl, APP_NAME,
   makeGetProduct, antiCheatVerdict, summarizeAntiCheat, needsImage, onDriveD, catalogImgidOf, decidePIndex, buildVecInput, IMGID_KEY_RE,
+  imgidFilePlan,
 } from "../lens-tai.mjs";
 import { chooseSubstitute } from "../lens-do.mjs";
 
@@ -235,20 +236,52 @@ test("bộ P: imgid khóa danh mục theo bản xuất; giữ khóa danh mục /
   assert.equal(decidePIndex({ ...base, catalogImgid: "24", indexImgid: "24" }, opt).index, null, "indexImgid cùng ảnh truy vấn → bỏ");
 });
 
-test("đầu vào lens-vec: danh sách tường minh, bỏ mã bị loại, dùng override, ghi imgid ảnh chỉ mục + truy vấn bộ P", () => {
+test("đầu vào lens-vec (LỆCH LUẬT 2): mã bị loại VÀO chỉ mục với khóa danh mục + ẩn trên hàng ab-<mã>; override A / B mọi mức, bộ P chỉ mức a", () => {
   const rows = [
     { code: "1111111111111", img: "front_vi.3" }, { code: "2222222222222", img: "front_vi.4" }, { code: "3333333333333", img: "front_en.5" },
     { code: "4444444444444", img: "front_th.6" }, { code: "5555555555555", img: "" }, { code: "1111111111111", img: "front_vi.9" },
   ];
-  const ac = { items: [{ code: "1111111111111", chosen: "front_fr.7", candidates: [{ key: "front_fr.7", imgid: "12" }] }], excluded: ["2222222222222"], override: { "1111111111111": "front_fr.7" } };
+  const ac = {
+    items: [
+      { code: "1111111111111", chosen: "front_fr.7", candidates: [{ key: "front_fr.7", imgid: "12" }] },
+      { code: "2222222222222", chosen: null, catalogImg: "front_vi.4", candidates: [{ key: "front_vi.4", imgid: "9", fromCatalog: true }] },
+    ],
+    excluded: ["2222222222222"], override: { "1111111111111": "front_fr.7" },
+  };
   const bop = { items: [{ qid: "p-3333333333333", code: "3333333333333", query: { file: "D:\\q3.jpg", imgid: "1" }, index: { key: "imgid:4", imgid: "4", file: "D:\\i3.jpg" } }] };
-  const files = { "1111111111111|front_fr.7": "D:\\a1.jpg", "3333333333333|imgid:4": "D:\\i3.jpg", "2222222222222|front_vi.4": "D:\\a2.jpg" };
-  const v = buildVecInput({ rows, fileOf: (c, k) => files[`${c}|${k}`] ?? null, ac, bop, queries: [{ qid: "ab-1111111111111", file: "D:\\f1.jpg" }] });
-  assert.deepEqual(v.index, [{ code: "1111111111111", key: "front_fr.7", file: "D:\\a1.jpg" }, { code: "3333333333333", key: "imgid:4", file: "D:\\i3.jpg" }]);
-  assert.deepEqual(v.indexImgid, { "1111111111111": "12", "3333333333333": "4" });
+  const files = { "1111111111111|front_fr.7": "D:\\a1.jpg", "3333333333333|imgid:4": "D:\\i3.jpg", "3333333333333|front_en.5": "D:\\c3.jpg", "2222222222222|front_vi.4": "D:\\a2.jpg" };
+  const fileOf = (c, k) => files[`${c}|${k}`] ?? null;
+  const qs = [{ qid: "ab-1111111111111", file: "D:\\f1.jpg" }, { qid: "ab-2222222222222", file: "D:\\f2.jpg" }];
+  const v = buildVecInput({ level: "a", rows, fileOf, ac, bop, queries: qs });
+  assert.deepEqual(v.index, [
+    { code: "1111111111111", key: "front_fr.7", file: "D:\\a1.jpg" }, { code: "2222222222222", key: "front_vi.4", file: "D:\\a2.jpg" },
+    { code: "3333333333333", key: "imgid:4", file: "D:\\i3.jpg" },
+  ]);
+  assert.deepEqual(v.hideByRow, { "ab-2222222222222": ["2222222222222"] }, "mã bị loại bị ẩn trên đúng hàng của nó");
+  assert.deepEqual(v.indexImgid, { "1111111111111": "12", "2222222222222": "9", "3333333333333": "4" });
+  assert.deepEqual(v.override, { "1111111111111": "front_fr.7", "3333333333333": "imgid:4" });
   assert.deepEqual(v.missing, [{ code: "4444444444444", key: "front_th.6" }]);
-  assert.deepEqual(v.queries.map((q) => q.qid), ["ab-1111111111111", "p-3333333333333"]);
-  assert.ok(!v.index.some((x) => x.code === "2222222222222"), "mã bị loại không vào chỉ mục dù có file");
+  assert.deepEqual(v.queries.map((q) => q.qid), ["ab-1111111111111", "ab-2222222222222", "p-3333333333333"]);
+  // mức (b): override bộ P không áp (khóa danh mục), không có truy vấn P; override A / B vẫn áp; mã bị loại vẫn ẩn theo hàng
+  const b = buildVecInput({ level: "b", rows, fileOf, ac, bop, queries: qs });
+  assert.deepEqual(b.index.map((x) => `${x.code}|${x.key}`), ["1111111111111|front_fr.7", "2222222222222|front_vi.4", "3333333333333|front_en.5"]);
+  assert.deepEqual(b.override, { "1111111111111": "front_fr.7" });
+  assert.deepEqual(b.queries.map((q) => q.qid), ["ab-1111111111111", "ab-2222222222222"]);
+  assert.equal(Object.hasOwn(b.indexImgid, "3333333333333"), false, "khóa danh mục khác khóa bộ P → không ghi imgid của ảnh bộ P");
+  assert.deepEqual(b.hideByRow, v.hideByRow);
   assert.equal(IMGID_KEY_RE.exec("imgid:4")[1], "4");
-  assert.throws(() => buildVecInput({ rows, fileOf: () => "x", ac, bop: { items: [{ ...bop.items[0], code: "1111111111111", index: { key: "front_xx.1", imgid: "1" } }] }, queries: [] }), /mâu thuẫn/);
+  assert.throws(() => buildVecInput({ level: "a", rows, fileOf: () => "x", ac, bop: { items: [{ ...bop.items[0], code: "1111111111111", index: { key: "front_xx.1", imgid: "1" } }] }, queries: [] }), /mâu thuẫn/);
+  assert.throws(() => buildVecInput({ rows, fileOf, ac, bop, queries: [] }), /mức lạ/, "phải nói rõ mức");
+});
+
+test("bộ P tải ảnh theo imgid CHỈ ghi vào D:\\tmp\\lens (gợi ý 4); đọc lại ảnh có sẵn ở thư mục đợt cũ", async () => {
+  const p = imgidFilePlan("8935049501558", "1", { readDirs: ["D:\\tmp\\chup-mat-do\\chi-muc\\anh"], writeDir: "D:\\tmp\\lens\\anh-p" });
+  assert.equal(p.write, "D:\\tmp\\lens\\anh-p\\8935049501558_1.400.jpg");
+  assert.deepEqual(p.read, ["D:\\tmp\\chup-mat-do\\chi-muc\\anh\\8935049501558_1.400.jpg", "D:\\tmp\\lens\\anh-p\\8935049501558_1.400.jpg"]);
+  assert.ok(!p.write.includes("chup-mat-do"));
+  const src = (await import("node:fs")).readFileSync(new URL("../lens-tai.mjs", import.meta.url), "utf8");
+  const bo = src.slice(src.indexOf("async function runBoP("), src.indexOf("function runVecInput("));
+  assert.match(bo, /imgidFilePlan\(code, imgid, \{ readDirs: \[looAnh\], writeDir: pDir \}\)/);
+  assert.match(bo, /const pDir = path\.join\(lensDir, "anh-p"\)/);
+  assert.doesNotMatch(bo, /writeFileSync\(path\.join\(looAnh/, "không ghi vào thư mục chup-mat-do");
 });

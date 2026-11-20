@@ -16,7 +16,24 @@ import {
   earlyGate, gateG2, chooseSubstitute, parseNpy, percentiles, methodGrid, selfCheck, modeOf, qidOf, indexBytesInt8,
   guardWant, checkIndexGuard, RULE_SHA256, RULE_SHA, RULE_FILE, METHOD_COUNT, GOOD_IMGS, BULDAK_CODE, R7_MAX_BYTES,
   HASH_OK_MIN, S_GRID, OLD_RULE_SHA, OLD_RULE_SHA256, G3_P_MIN, G3_SMALL, PREV_RULE_SHA, PREV_RULE_SHA256,
+  rowView, simsFrom, VEC_VARIANTS, NO_VEC_VARIANTS, variantPlan, r6From, rowCheck,
 } from "../lens-do.mjs";
+
+/** Buffer .npy float32 (C order) trong bộ nhớ, cho test simsFrom không cần file. */
+function npyOf(shape, values) {
+  const header = `{'descr': '<f4', 'fortran_order': False, 'shape': (${shape.join(", ")}), }`;
+  const pad = 64 - ((10 + header.length + 1) % 64);
+  const h = header + " ".repeat(pad) + "\n";
+  const b = Buffer.alloc(10 + h.length + 4 * values.length);
+  b.writeUInt8(0x93, 0);
+  b.write("NUMPY", 1, "latin1");
+  b.writeUInt8(1, 6);
+  b.writeUInt8(0, 7);
+  b.writeUInt16LE(h.length, 8);
+  b.write(h, 10, "latin1");
+  values.forEach((x, i) => b.writeFloatLE(x, 10 + h.length + 4 * i));
+  return b;
+}
 import { execSync } from "node:child_process";
 
 const SRC = fs.readFileSync(new URL("../lens-do.mjs", import.meta.url), "utf8");
@@ -58,7 +75,8 @@ function blockAt(sha) {
 }
 
 test("khối luật hiện tại trùng từng byte commit luật RULE_SHA (git show)", (t) => {
-  if (RULE_SHA === null) { t.skip("RULE_SHA chưa đặt (chính commit LỆCH LUẬT 1; đặt ở commit sau)"); return; }
+  // gợi ý 7 của code-reviewer trước đo: bỏ nhánh RULE_SHA === null (code chết từ khi RULE_SHA đã đặt)
+  assert.match(RULE_SHA, /^[0-9a-f]{7}$/);
   const old = blockAt(RULE_SHA);
   // gợi ý 2 của code-reviewer vòng 1: không âm thầm bỏ qua; thiếu git / commit thì skip CÓ lý do (hiện trong kết quả test)
   if (old === null) { t.skip(`không chạy được git show ${RULE_SHA} (không có git hoặc thiếu commit)`); return; }
@@ -398,41 +416,162 @@ test("lưới: tên cách mang chỉ số phân vị, 2 phân vị cùng giá tr
   assert.throws(() => methodGrid([1, 2, 3], [1, 2, 3, 4, 5]));
 });
 
-test("chỉ mục đã áp chống ăn gian (NÊN SỬA 5): sha256, excluded, override, ảnh truy vấn không nằm trong chỉ mục", () => {
+test("chỉ mục đã áp chống ăn gian (NÊN SỬA 5 + LỆCH LUẬT 2): mã bị loại CÓ trong chỉ mục + ẩn đúng hàng ab-<mã>; ảnh truy vấn trong chỉ mục chỉ khi bị ẩn; mỗi mẫu sai một lỗi", () => {
   const ac = {
     items: [
       { code: "1111111111111", testImgid: "3", chosen: "front_en.9", candidates: [{ key: "front_en.9", imgid: "5" }] },
-      { code: "2222222222222", testImgid: "1", chosen: null },
+      { code: "2222222222222", testImgid: "1", chosen: null, catalogImg: "front_vi.4", candidates: [{ key: "front_vi.4", imgid: "1", fromCatalog: true }] },
     ],
     excluded: ["2222222222222"], override: { "1111111111111": "front_en.9" },
   };
   const bop = { items: [{ qid: "p-3333333333333", code: "3333333333333", query: { imgid: "4" }, index: { key: "imgid:7", imgid: "7" } }] };
   const acText = JSON.stringify(ac);
   const bopText = JSON.stringify(bop);
-  const want = guardWant(acText, bopText);
+  const cat = { "1111111111111": "front_vi.1", "2222222222222": "front_vi.4", "3333333333333": "front_en.2", "4444444444444": "front_vi.2" };
+  const want = guardWant(acText, bopText, { level: "a", catalogImg: cat });
   assert.deepEqual(want.override, { "1111111111111": "front_en.9", "3333333333333": "imgid:7" });
-  assert.deepEqual(want.guard, [{ code: "1111111111111", queryImgid: "3", qid: "ab-1111111111111" }, { code: "3333333333333", queryImgid: "4", qid: "p-3333333333333" }]);
-  const codesOk = ["1111111111111", "3333333333333", "4444444444444"];
+  assert.deepEqual(want.hideByRow, { "ab-2222222222222": ["2222222222222"] });
+  assert.deepEqual(want.guard, [
+    { code: "1111111111111", queryImgid: "3", qid: "ab-1111111111111" }, { code: "2222222222222", queryImgid: "1", qid: "ab-2222222222222" },
+    { code: "3333333333333", queryImgid: "4", qid: "p-3333333333333" },
+  ]);
+  const codesOk = ["1111111111111", "2222222222222", "3333333333333", "4444444444444"];
   const metaOk = {
-    antiCheatSha256: want.antiCheatSha256, boPSha256: want.boPSha256, excluded: ["2222222222222"], override: { ...want.override },
-    indexKey: { "1111111111111": "front_en.9", "3333333333333": "imgid:7", "4444444444444": "front_vi.2" },
-    indexImgid: { "1111111111111": "5", "3333333333333": "7" },
+    level: "a", antiCheatSha256: want.antiCheatSha256, boPSha256: want.boPSha256, excluded: ["2222222222222"], override: { ...want.override },
+    hideByRow: { "ab-2222222222222": ["2222222222222"] },
+    indexKey: { "1111111111111": "front_en.9", "2222222222222": "front_vi.4", "3333333333333": "imgid:7", "4444444444444": "front_vi.2" },
+    // mã bị loại: ảnh chỉ mục (khóa danh mục) CHÍNH LÀ ảnh truy vấn ab-2222… (cùng imgid 1) → chỉ hợp lệ vì bị ẩn trên hàng đó
+    indexImgid: { "1111111111111": "5", "2222222222222": "1", "3333333333333": "7" },
+    threadCheck: { pass: true }, queriesMissing: [], missingIndexFiles: 0, model: "clip-fp32", pre: "cat",
   };
-  assert.deepEqual(checkIndexGuard(metaOk, codesOk, want), []);
+  const expect = { model: "clip-fp32", pre: "cat", level: "a" };
+  assert.deepEqual(checkIndexGuard(metaOk, codesOk, want, expect), []);
   // mẫu sai, mỗi mẫu một lỗi
-  const bad = (patch, codes = codesOk) => checkIndexGuard({ ...metaOk, ...patch }, codes, want);
-  assert.match(bad({}, [...codesOk, "2222222222222"]).join(), /\(i\) mã bị loại vẫn có trong chỉ mục: 2222222222222/);
-  assert.match(bad({ indexKey: { ...metaOk.indexKey, "1111111111111": "front_vi.1" } }).join(), /\(ii\) 1111111111111 dùng ảnh front_vi.1/);
-  assert.match(bad({ indexImgid: { ...metaOk.indexImgid, "1111111111111": "3" } }).join(), /\(iii\) ảnh truy vấn ab-1111111111111 nằm trong chỉ mục/);
-  assert.match(bad({ indexImgid: { "1111111111111": "5" } }).join(), /\(iii\) không biết imgid ảnh chỉ mục của 3333333333333/);
-  assert.match(bad({ antiCheatSha256: "khac" }).join(), /meta.antiCheatSha256/);
-  assert.match(bad({ boPSha256: null }).join(), /meta.boPSha256/);
-  assert.match(bad({ excluded: [] }).join(), /meta.excluded/);
-  assert.match(bad({}, ["1111111111111"]).join(), /mã bộ P không có trong chỉ mục: 3333333333333/);
-  assert.match(checkIndexGuard(metaOk, codesOk, guardWant(JSON.stringify({ ...ac, override: {} }), bopText)).join(), /meta.override/);
+  const bad = (patch, codes = codesOk, w = want) => checkIndexGuard({ ...metaOk, ...patch }, codes, w, expect);
+  const one = (errs, re) => { assert.equal(errs.length >= 1, true); assert.ok(errs.some((e) => re.test(e)), `thiếu lỗi ${re}: ${errs.join(" | ")}`); };
+  one(bad({ hideByRow: {} }), /\(i\) mã bị loại 2222222222222 không bị ẩn trên hàng ab-2222222222222/); // thiếu ẩn
+  one(bad({ hideByRow: {} }), /\(iii\) ảnh truy vấn ab-2222222222222 nằm trong chỉ mục .* không bị ẩn/); // … nên ảnh truy vấn lộ
+  one(bad({ hideByRow: { "ab-1111111111111": ["2222222222222"] } }), /\(i\) ẩn sai: mã 2222222222222 trên hàng ab-1111111111111/); // ẩn sai hàng
+  one(bad({ hideByRow: { ...metaOk.hideByRow, "that-1": ["2222222222222"] } }), /\(i\) ẩn trên hàng không phải A \/ B: that-1/); // ẩn trên hàng ảnh thật
+  one(bad({}, codesOk.filter((c) => c !== "2222222222222")), /\(i\) mã bị loại 2222222222222 vắng khỏi chỉ mục/); // mã loại vắng khỏi codes
+  one(bad({ indexKey: { ...metaOk.indexKey, "2222222222222": "front_en.8" } }), /\(i\) mã bị loại 2222222222222 dùng ảnh front_en.8 thay vì khóa danh mục front_vi.4/);
+  one(bad({ indexKey: { ...metaOk.indexKey, "1111111111111": "front_vi.1" } }), /\(ii\) 1111111111111 dùng ảnh front_vi.1/);
+  one(bad({ indexImgid: { ...metaOk.indexImgid, "1111111111111": "3" } }), /\(iii\) ảnh truy vấn ab-1111111111111 nằm trong chỉ mục/);
+  one(bad({ indexImgid: { "1111111111111": "5", "2222222222222": "1" } }), /\(iii\) không biết imgid ảnh chỉ mục của 3333333333333/);
+  one(bad({ antiCheatSha256: "khac" }), /meta.antiCheatSha256/);
+  one(bad({ boPSha256: null }), /meta.boPSha256/);
+  one(bad({ excluded: [] }), /meta.excluded/);
+  one(bad({}, codesOk.filter((c) => c !== "3333333333333")), /mã bộ P không có trong chỉ mục: 3333333333333/);
+  one(checkIndexGuard(metaOk, codesOk, guardWant(JSON.stringify({ ...ac, override: {} }), bopText, { level: "a", catalogImg: cat }), expect), /meta.override/);
+  // NÊN SỬA 2: bộ sim phải đạt kiểm luồng, đủ truy vấn, đủ ảnh, đúng thư mục
+  one(bad({ threadCheck: { pass: false } }), /threadCheck.pass/);
+  one(bad({ threadCheck: undefined }), /threadCheck.pass/);
+  one(bad({ queriesMissing: ["that-3"] }), /queriesMissing/);
+  one(bad({ queriesMissing: undefined }), /queriesMissing/);
+  one(bad({ missingIndexFiles: 1 }), /missingIndexFiles = 1/);
+  one(bad({ model: "clip-int8" }), /meta.model clip-int8 ≠ thư mục clip-fp32/);
+  one(bad({ pre: "vien" }), /meta.pre vien ≠ thư mục cat/);
+  one(bad({ level: "b" }), /meta.level b/);
+  // NÊN SỬA 6: ở mức (b) override của bộ P KHÔNG áp (mã đó dùng khóa danh mục); A / B override vẫn áp
+  const wantB = guardWant(acText, bopText, { level: "b", catalogImg: cat });
+  assert.deepEqual(wantB.override, { "1111111111111": "front_en.9" });
+  assert.deepEqual(wantB.mustHave, []);
+  assert.ok(!wantB.guard.some((g) => g.qid.startsWith("p-")), "mức (b) không có truy vấn bộ P");
+  const metaB = { ...metaOk, level: "b", override: { ...wantB.override }, indexKey: { ...metaOk.indexKey, "3333333333333": "front_en.2" }, indexImgid: { "1111111111111": "5", "2222222222222": "1" } };
+  const expB = { ...expect, level: "b" };
+  assert.deepEqual(checkIndexGuard(metaB, codesOk, wantB, expB), []);
+  const pAtB = checkIndexGuard({ ...metaB, override: { ...want.override } }, codesOk, wantB, expB);
+  one(pAtB, /meta.override khác .*mức b/); // (b) có override P → lỗi
+  assert.throws(() => guardWant(acText, bopText, { level: "c" }), /mức lạ/);
   // bộ P mâu thuẫn override A / B → lỗi
-  const clash = guardWant(acText, JSON.stringify({ items: [{ qid: "ab-1111111111111", code: "1111111111111", query: { imgid: "3" }, index: { key: "front_fr.2", imgid: "8" } }] }));
-  assert.match(checkIndexGuard(metaOk, codesOk, clash).join(), /override mâu thuẫn/);
+  const clash = guardWant(acText, JSON.stringify({ items: [{ qid: "ab-1111111111111", code: "1111111111111", query: { imgid: "3" }, index: { key: "front_fr.2", imgid: "8" } }] }), { level: "a", catalogImg: cat });
+  one(checkIndexGuard(metaOk, codesOk, clash, expect), /override mâu thuẫn/);
+});
+
+test("ẩn theo hàng (LỆCH LUẬT 2 (i)): hàng ab-X không thấy X, hàng ảnh thật thấy X hạng 1; bỏ bước ẩn → khác (thử đỏ / xanh)", () => {
+  const codes3 = ["8930000000001", "8930000000002", "8930000000003"];
+  const X = codes3[0];
+  const queries = [`ab-${X}`, "that-1", "p-8930000000003"];
+  // hàng ab-X: X giống nhất (chính ảnh đo); hàng that-1: X cũng giống nhất
+  const npy = npyOf([3, 3], [0.99, 0.6, 0.4, 0.95, 0.5, 0.7, 0.1, 0.2, 0.9]);
+  const meta = { hideByRow: { [`ab-${X}`]: [X] } };
+  const s = simsFrom({ meta, codes: codes3, queries, npy });
+  const ab = s.rowOf(`ab-${X}`);
+  assert.deepEqual(ab.ranked, ["8930000000002", "8930000000003"], "hàng ab-X không có X");
+  assert.equal(ab.simOf.has(X), false, "sim ứng viên của X trên hàng ab-X = không có");
+  assert.equal(ab.lens.top1Code, "8930000000002");
+  assert.ok(Math.abs(ab.lens.top1 - 0.6) < 1e-6 && Math.abs(ab.lens.margin - 0.2) < 1e-6, "lens tính sau khi ẩn");
+  const real = s.rowOf("that-1");
+  assert.equal(real.ranked[0], X, "ảnh thật thấy X ở hạng 1");
+  assert.equal(real.ranked.length, 3);
+  assert.equal(s.rowOf("p-8930000000003").ranked[0], "8930000000003");
+  assert.equal(s.rowOf("khong-co"), null);
+  // A2 / S1 dùng simOf + ranked của rowOf nên cũng thấy bản đã ẩn: sim ứng viên X trên hàng ab-X không hữu hạn
+  assert.equal(Number.isFinite(ab.simOf.get(X)), false);
+  // mẫu sai: không áp hideByRow → hàng ab-X thấy chính X ở hạng 1 (ăn gian)
+  const noHide = simsFrom({ meta: {}, codes: codes3, queries, npy }).rowOf(`ab-${X}`);
+  assert.equal(noHide.ranked[0], X);
+  assert.notDeepEqual(noHide.ranked, ab.ranked);
+  assert.deepEqual(rowView(codes3, [0.99, 0.6, 0.4], []).ranked, imageRank(codes3, [0.99, 0.6, 0.4]), "không ẩn → như imageRank");
+  assert.throws(() => simsFrom({ meta: { hideByRow: { [`ab-${X}`]: X } }, codes: codes3, queries, npy }), /phải là mảng/);
+  assert.throws(() => simsFrom({ meta: { hideByRow: [] }, codes: codes3, queries, npy }), /phải là object/);
+});
+
+test("chỉ MỘT chỗ dùng hàng sims.npy (simsFrom / loadSims của lens-do.mjs); lens-chay.mjs không đọc sims.npy trực tiếp", () => {
+  const code = (s) => s.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const CHAY = fs.readFileSync(new URL("../lens-chay.mjs", import.meta.url), "utf8");
+  for (const re of [/sims\.npy/, /parseNpy/, /\.subarray\(/, /imageRank\(/, /lensOf\(/]) assert.doesNotMatch(code(CHAY), re, `lens-chay.mjs có ${re}`);
+  const D = code(SRC);
+  assert.equal((D.match(/"sims\.npy"/g) || []).length, 1, "lens-do.mjs chỉ đọc sims.npy ở loadSims");
+  assert.equal((D.match(/parseNpy\(/g) || []).length, 2, "parseNpy: khai báo + 1 lời gọi trong simsFrom");
+  assert.equal((D.match(/\.subarray\(/g) || []).length, 1, "chỉ simsFrom cắt hàng");
+  const fnOf = (name) => { const i = D.indexOf(`export function ${name}(`); return D.slice(i, D.indexOf("\n}\n", i)); };
+  assert.match(fnOf("loadSims"), /"sims\.npy"/);
+  assert.match(fnOf("simsFrom"), /parseNpy\(npy\)/);
+  assert.match(fnOf("simsFrom"), /rowView\(codes, sims, /, "simsFrom áp ẩn qua rowView");
+});
+
+test("6 biến thể cố định (NÊN SỬA 4): thiếu 1 → mã 3; SigLIP vào dropped với lý do R7 33,1 MB", () => {
+  assert.deepEqual([...VEC_VARIANTS], ["clip-fp32|cat", "clip-fp32|vien", "clip-int8|cat", "clip-int8|vien", "dinov2-small|cat", "dinov2-small|vien"]);
+  const all = variantPlan("D:\\v", "a", () => true);
+  assert.equal(all.exitCode, 0);
+  assert.equal(all.dirs.length, 6);
+  assert.deepEqual(all.dirs[3], { variant: "clip-int8", pre: "vien", name: "clip-int8|vien", dir: "D:\\v\\clip-int8-vien\\a" });
+  const miss = variantPlan("D:\\v", "a", (d) => !d.includes("dinov2-small-vien"));
+  assert.deepEqual([miss.exitCode, miss.missing], [3, ["dinov2-small|vien"]]);
+  assert.equal(miss.dirs.length, 5);
+  assert.deepEqual(NO_VEC_VARIANTS.map((x) => x.name), ["siglip|cat", "siglip|vien"]);
+  for (const x of NO_VEC_VARIANTS) assert.equal(x.why, "R7 ước 33,1 MB > 25 MB");
+  assert.equal((indexBytesInt8(42208, 768) / 1e6).toFixed(1), "33.1", "lý do khớp ước R7 mức (b) 768 chiều");
+});
+
+test("R6 từ file đo 1.600 px (NÊN SỬA 5): đúng loại file, thiếu số biến thể → ném (người gọi thoát mã 3)", () => {
+  const t = (p95) => ({ median: p95 - 50, p95, max: p95 + 20, n: 20 });
+  const gio = { longEdge: 1600, jpegQuality: 0.9, threads: 1, models: { "clip-fp32": { ramAddAfter20MiB: 120, peakWsMiB: 900, time: { cat: t(700), vien: t(710) } } } };
+  assert.deepEqual(r6From(gio, "clip-fp32", "vien"), { p95: 710, median: 660, max: 730, n: 20, ramAddMiB: 120, peakMiB: 900 });
+  assert.throws(() => r6From(gio, "clip-int8", "cat"), /thiếu số R6 1.600 px của clip-int8\|cat/);
+  assert.throws(() => r6From(null, "clip-fp32", "cat"), /không phải số đo 1600 px/);
+  // mẫu sai: file giờ 400 px của vòng 1 (không có longEdge) → không dùng được
+  assert.throws(() => r6From({ ...gio, longEdge: undefined }, "clip-fp32", "cat"), /không phải số đo/);
+  assert.throws(() => r6From({ ...gio, threads: 4 }, "clip-fp32", "cat"), /không phải số đo/);
+  assert.throws(() => r6From({ ...gio, models: { "clip-fp32": { ...gio.models["clip-fp32"], time: { cat: { ...t(700), n: 19 } } } } }, "clip-fp32", "cat"), /thiếu số/);
+  assert.throws(() => r6From({ ...gio, models: { "clip-fp32": { ...gio.models["clip-fp32"], ramAddAfter20MiB: null } } }, "clip-fp32", "cat"), /RAM/);
+});
+
+test("trước mọi phán (NÊN SỬA 3): thiếu 1 hàng / ô A / B thiếu lens / không đủ 60 → mã 3", () => {
+  const rows = new Map(["ab-1", "that-1", "buldak", "p-1"].map((q) => [q, { lens: { top1: 0.5, margin: 0.1 } }]));
+  const rowOf = (q) => rows.get(q) ?? null;
+  const ab60 = Array.from({ length: 60 }, () => "ab-1");
+  const ok = rowCheck(rowOf, { qids: ["ab-1", "that-1", "buldak", "p-1"], abQids: ab60 });
+  assert.deepEqual([ok.exitCode, ok.errs], [0, []]);
+  assert.equal(ok.tops.length, 60);
+  const m1 = rowCheck(rowOf, { qids: ["ab-1", "that-1", "ruaypuan", "p-1"] });
+  assert.deepEqual([m1.exitCode, m1.errs], [3, ["thiếu hàng sim cho truy vấn: ruaypuan"]]);
+  assert.equal(rowCheck(rowOf, { qids: [], abQids: ab60.slice(1) }).exitCode, 3, "59 ô A / B");
+  rows.set("ab-2", { lens: null });
+  assert.equal(rowCheck(rowOf, { qids: [], abQids: [...ab60.slice(1), "ab-2"] }).exitCode, 3, "ô A / B không có lens");
+  // mẫu sai (code cũ: .filter(Boolean)) lặng lẽ ra 59 ô
+  assert.equal([...ab60.slice(1), "ab-2"].map((q) => rowOf(q)?.lens).filter(Boolean).length, 59);
 });
 
 test("kết quả đo ghi sha256 của lens-do.mjs, lens-chay.mjs, lens-vec.py (gợi ý 1)", async () => {

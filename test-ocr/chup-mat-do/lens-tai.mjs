@@ -333,24 +333,28 @@ export function decidePIndex({ queryImgid, catalogKey, catalogImgid, catalogDist
 }
 
 /**
- * Danh sách đầu vào cho lens-vec.py (lệnh vec) — ẢNH CHỈ MỤC CHỌN TƯỜNG MINH, không quét thư mục. rows = dòng danh mục
- * (mức a / b); fileOf(code, key) → đường dẫn ảnh hoặc null; ac / bop = chong-an-gian.json / bo-p.json đã đọc (+ sha256);
- * queries = [{ qid, file }]. Mã bị loại không vào chỉ mục; mã có override dùng khóa override; mã có ảnh truy vấn (A / B
- * dùng được, bộ P) ghi imgid ảnh chỉ mục (meta.indexImgid). Trả { index: [{ code, key, file }], indexKey, indexImgid,
- * missing: [{ code, key }], queries }.
+ * Danh sách đầu vào cho lens-vec.py (lệnh vec) — ẢNH CHỈ MỤC CHỌN TƯỜNG MINH, không quét thư mục. level = "a" | "b";
+ * rows = dòng danh mục của mức đó; fileOf(code, key) → đường dẫn ảnh hoặc null; ac / bop = chong-an-gian.json /
+ * bo-p.json đã đọc; queries = [{ qid, file }]. LỆCH LUẬT 2: mã bị loại VẪN vào chỉ mục với khóa ảnh danh mục và bị ẩn
+ * trên hàng ab-<mã> (hideByRow); override A / B mọi mức, override + truy vấn bộ P CHỈ ở mức (a). Mã có ảnh truy vấn
+ * (mọi mã A / B, bộ P ở mức a) ghi imgid ảnh chỉ mục khi biết (meta.indexImgid). Trả { index: [{ code, key, file }],
+ * indexKey, indexImgid, override, hideByRow, missing: [{ code, key }], queries }.
  */
-export function buildVecInput({ rows, fileOf, ac, bop, queries }) {
-  const excluded = new Set(ac.excluded || []);
+export function buildVecInput({ level, rows, fileOf, ac, bop, queries }) {
+  if (level !== "a" && level !== "b") throw new Error(`buildVecInput: mức lạ ${level}`);
+  const P = level === "a" ? bop?.items || [] : [];
   const override = { ...(ac.override || {}) };
+  const hideByRow = Object.fromEntries([...(ac.excluded || [])].sort().map((c) => [`ab-${c}`, [c]]));
   const imgidOf = {};
-  for (const x of ac.items || []) if (x.chosen) {
-    const c = (x.candidates || []).find((k) => k.key === x.chosen);
-    imgidOf[x.code] = c?.imgid != null ? String(c.imgid) : null;
+  for (const x of ac.items || []) {
+    // A / B dùng được: imgid ảnh thay; mã bị loại: imgid khóa danh mục (nếu ứng viên khóa danh mục biết imgid)
+    const c = x.chosen ? (x.candidates || []).find((k) => k.key === x.chosen) : (x.candidates || []).find((k) => k.fromCatalog && k.key === x.catalogImg);
+    imgidOf[x.code] = { key: x.chosen ?? x.catalogImg ?? null, imgid: c?.imgid != null ? String(c.imgid) : null };
   }
-  for (const p of bop?.items || []) {
+  for (const p of P) {
     if (Object.hasOwn(override, p.code) && override[p.code] !== p.index.key) throw new Error(`override mâu thuẫn ${p.code}`);
     override[p.code] = p.index.key;
-    imgidOf[p.code] = String(p.index.imgid);
+    imgidOf[p.code] = { key: p.index.key, imgid: String(p.index.imgid) };
   }
   const index = [];
   const indexKey = {};
@@ -360,18 +364,24 @@ export function buildVecInput({ rows, fileOf, ac, bop, queries }) {
   for (const r of rows || []) {
     if (!r || typeof r.code !== "string" || !CODE_RE.test(r.code) || seen.has(r.code)) continue;
     seen.add(r.code);
-    if (excluded.has(r.code)) continue;
     const key = override[r.code] ?? (typeof r.img === "string" && IMG_RE.test(r.img) ? r.img : null);
     if (!key) continue;
     const file = fileOf(r.code, key);
     if (!file) { missing.push({ code: r.code, key }); continue; }
     index.push({ code: r.code, key, file });
     indexKey[r.code] = key;
-    if (Object.hasOwn(imgidOf, r.code)) indexImgid[r.code] = imgidOf[r.code];
+    // imgid chỉ ghi khi đúng là imgid của khóa đang dùng (khóa khác → không biết)
+    if (Object.hasOwn(imgidOf, r.code) && imgidOf[r.code].key === key) indexImgid[r.code] = imgidOf[r.code].imgid;
   }
   const qs = [...(queries || [])];
-  for (const p of bop?.items || []) if (!qs.some((q) => q.qid === p.qid)) qs.push({ qid: p.qid, file: p.query.file });
-  return { index, indexKey, indexImgid, missing, queries: qs };
+  for (const p of P) if (!qs.some((q) => q.qid === p.qid)) qs.push({ qid: p.qid, file: p.query.file });
+  return { index, indexKey, indexImgid, override, hideByRow, missing, queries: qs };
+}
+
+/** Đường dẫn ảnh theo imgid của bộ P (gợi ý 4): ĐỌC ở readDirs theo thứ tự (ảnh có sẵn), GHI (tải mới) CHỈ vào writeDir. */
+export function imgidFilePlan(code, imgid, { readDirs, writeDir }) {
+  const name = `${code}_${imgid}.400.jpg`;
+  return { read: [...(readDirs || []), writeDir].map((d) => path.join(d, name)), write: path.join(writeDir, name) };
 }
 
 // ---------------- chạy ----------------
@@ -631,11 +641,15 @@ async function runBoP(arg) {
   const breaker = createBreaker();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const dl = { downloads: 0, cached: 0, fail: 0 };
-  const byImgid = (code, imgid) => path.join(looAnh, `${code}_${imgid}.400.jpg`);
-  /** Ảnh theo imgid (chi-muc\anh): có sẵn → file; thiếu → tải .400 từ images.openfoodfacts.org (≤ 40 ảnh). */
+  const pDir = path.join(lensDir, "anh-p");
+  /** Ảnh theo imgid: có sẵn (chi-muc\anh của chup-mat-do hoặc D:\tmp\lens\anh-p) → file; thiếu → tải .400 từ
+   *  images.openfoodfacts.org (≤ 40 ảnh) và CHỈ ghi vào D:\tmp\lens\anh-p (gợi ý 4: không ghi thư mục đợt khác). */
   const ensureImgid = async (code, imgid) => {
-    const f = byImgid(code, imgid);
-    if (fs.existsSync(f) && fs.statSync(f).size > 0) { dl.cached++; return f; }
+    const plan = imgidFilePlan(code, imgid, { readDirs: [looAnh], writeDir: pDir });
+    const have = plan.read.find((x) => fs.existsSync(x) && fs.statSync(x).size > 0);
+    if (have) { dl.cached++; return have; }
+    const f = plan.write;
+    fs.mkdirSync(pDir, { recursive: true });
     if (dl.downloads >= MAX_DL || breaker.open) { dl.fail++; return null; }
     const p = code.padStart(13, "0");
     const url = `https://images.openfoodfacts.org/images/products/${p.slice(0, 3)}/${p.slice(3, 6)}/${p.slice(6, 9)}/${p.slice(9)}/${imgid}.400.jpg`;
@@ -736,14 +750,15 @@ function runVecInput(arg) {
     for (const s of SIZES) { const f = path.join(anhDir, fileNameOf(code, key, s)); if (fs.existsSync(f) && fs.statSync(f).size > 0) return f; }
     return null;
   };
-  const v = buildVecInput({ rows: readCatalog(LEVEL_FILES[level]), fileOf, ac, bop, queries: ca.queries.map((q) => ({ qid: q.qid, file: q.file })) });
+  const v = buildVecInput({ level, rows: readCatalog(LEVEL_FILES[level]), fileOf, ac, bop, queries: ca.queries.map((q) => ({ qid: q.qid, file: q.file })) });
   const sha = (t) => crypto.createHash("sha256").update(t, "utf8").digest("hex");
   const out = {
     at: new Date().toISOString(), level, antiCheatSha256: sha(acText), boPSha256: sha(bopText), excluded: ac.excluded,
-    override: { ...ac.override, ...Object.fromEntries(bop.items.map((p) => [p.code, p.index.key])) },
+    override: v.override, hideByRow: v.hideByRow,
     indexKey: v.indexKey, indexImgid: v.indexImgid, missing: v.missing, index: v.index, queries: v.queries,
   };
   const f = path.join(lensDir, `vec-vao-${level}.json`);
   fs.writeFileSync(f, JSON.stringify(out), "utf8");
-  console.log(`Đầu vào lens-vec mức (${level}): ${v.index.length} ảnh chỉ mục (thiếu file ${v.missing.length}), ${v.queries.length} truy vấn, loại ${ac.excluded.length} mã, override ${Object.keys(out.override).length}. Ghi ${f}.`);
+  const hiddenIn = Object.values(v.hideByRow).flat().filter((c) => Object.hasOwn(v.indexKey, c)).length;
+  console.log(`Đầu vào lens-vec mức (${level}): ${v.index.length} ảnh chỉ mục (thiếu file ${v.missing.length}), ${v.queries.length} truy vấn, loại ${ac.excluded.length} mã (ẩn theo hàng: ${Object.keys(v.hideByRow).length} hàng, ${hiddenIn} mã có trong chỉ mục), override ${Object.keys(out.override).length}. Ghi ${f}.`);
 }
