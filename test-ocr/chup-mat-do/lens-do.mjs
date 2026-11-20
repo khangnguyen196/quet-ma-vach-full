@@ -193,10 +193,10 @@ import { sha256Of, rankIn } from "./g2-di-qua-do.mjs";
 import { mergeLocal, scoreTable, quantileNR, BASE_PARAMS } from "./khau-gop-do.mjs";
 
 /**
- * Commit của khối luật đang dùng (LỆCH LUẬT 1, "test(lens): LỆCH LUẬT 1 — G3 và chọn model dùng bộ P"); tự kiểm so từng
- * byte khối luật bằng git show. null ở chính commit LỆCH LUẬT 1 (chưa biết sha của nó), đặt ở commit ngay sau.
+ * Commit của khối luật đang dùng (LỆCH LUẬT 1, "test(lens): LỆCH LUẬT 1 — G3 và chọn model dùng bộ P",
+ * 2026-11-20 23:42:03 +0700); tự kiểm so từng byte khối luật bằng git show.
  */
-export const RULE_SHA = null;
+export const RULE_SHA = "4424292";
 export const RULE_FILE = "test-ocr/chup-mat-do/lens-do.mjs";
 /** sha256 (hex) của khối luật (ruleBlockOf) — bản LỆCH LUẬT 1. */
 export const RULE_SHA256 = "e4a6753fd856a9585ac040263a4c62de58e280d5e68773e91391b9d06a02211a";
