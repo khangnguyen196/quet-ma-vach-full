@@ -5,8 +5,9 @@
 //   node --max-old-space-size=6144 test-ocr/chup-mat-do/may-chu-loc-do.mjs (--chi-nen | --do-cach) [--out <thư mục>]
 //        [--goc <ket-qua-goc.json>] [--nhan <nhan.json>] [--cache <thư mục>] [--ocr <thư mục>] [--danh-muc <c.jsonl.gz>]
 //        [--g2 <thư mục ket-qua-v4 của g2-di-qua>] [--mo-rong <json>] [--ghi-de]
-//   --chi-nen  chỉ NỀN + kiểm chéo (1)–(4) → <out>/nen.json (lệch → thoát mã 3).
-//   --do-cach  nền + kiểm chéo, rồi đo 89 cách theo luật → <out>/do.json (vòng 2 KHÔNG chạy).
+//   --chi-nen  chỉ NỀN + kiểm chéo (0)–(4) → <out>/nen.json.
+//   --do-cach  nền + kiểm chéo (0)–(4), rồi đo 89 cách theo luật → <out>/do.json.
+//   Kiểm chéo (0)–(4) lệch → ghi <out>/nen.loi.json hoặc do.loi.json (KHÔNG ghi nen.json / do.json), thoát mã 3.
 //   Cả hai: tự kiểm trước (khối luật trùng sha256 RULE_SHA256 và trùng từng byte commit RULE_SHA; worktree sạch),
 //   lệch → thoát mã 3. Phải có đúng một cờ (không cờ / hai cờ → thoát mã 2). File ra đã có → dừng (trừ --ghi-de).
 //   Dữ liệu ảnh thật / nhãn / kết quả đều NGOÀI git (D:\tmp\may-chu-loc); file này không chứa mã nhãn / tên ảnh thật.
@@ -125,7 +126,7 @@ import {
 import { keyOf, rankIn, ruleBlockOf, sha256Of } from "./g2-di-qua-do.mjs";
 
 /** Commit luật và file (tự kiểm từng byte bằng git show). */
-export const RULE_SHA = "2206809";
+export const RULE_SHA = "78fc07e";
 export const RULE_FILE = "test-ocr/chup-mat-do/may-chu-loc-do.mjs";
 /** sha256 (hex) của khối luật ở commit RULE_SHA. */
 export const RULE_SHA256 = "a4df1c16536a175ccef3083c5c52160b8981a9d45c05dfce25275c83bbb7aee5";
@@ -318,6 +319,38 @@ export function pickMethod(list, base, order = METHOD_ORDER) {
   return { name: best?.name ?? null, improves: !!best && best.t.M1 > (base?.M1 ?? 0) };
 }
 
+/**
+ * C4 (luật sửa ở 78fc07e): cách tham chiếu ở ca (a) quay về mọi dòng. Cách không có (b) / (c) (chỉ (a)) → null (so với
+ * nền); cách (a)+(b) / (a)+(c) → tên DUY NHẤT trong grid không có (a) mà tham số (b) / (c) trùng hệt (so theo tham số,
+ * không đoán theo tên); không có / nhiều hơn một → ném lỗi.
+ */
+export function fallbackRefOf(m, grid = methodGrid()) {
+  if (!m?.a || (!m.b && !m.c)) return null;  const same = (x, y) => JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
+  const hit = Object.entries(grid).filter(([, g]) => !g.a && same(g.b, m.b) && same(g.c, m.c)).map(([n]) => n);
+  if (hit.length !== 1) throw new Error(`C4: cách (b)/(c) tương ứng của ${JSON.stringify(m)} có ${hit.length} cách`);
+  return hit[0];
+}
+
+/**
+ * C4 phần quay về: res / ref = { khóa ca: { S, fellBack } } (ref = kết quả nền khi cách chỉ có (a), = kết quả cách (b) /
+ * (c) tương ứng khi cách ghép). Mọi ca fellBack phải có S trùng ref cùng ca. found không đổi theo cách (khung đo tính
+ * found một lần mỗi ca), nên luôn trùng nền theo cách dựng. Trả { ok, diff: [khóa ca] }.
+ */
+export function fallbackCheck(res, ref) {
+  const diff = [];
+  for (const [key, r] of Object.entries(res || {})) {
+    if (!r?.fellBack) continue;
+    if (JSON.stringify(r.S) !== JSON.stringify(ref?.[key]?.S)) diff.push(key);
+  }
+  return { ok: diff.length === 0, diff };
+}
+
+/** File ra: kiểm chéo (0)–(4) đạt → nen.json / do.json, thoát 0; lệch → nen.loi.json / do.loi.json, thoát 3. */
+export function resultFile(outDir, runMethods, allOk) {
+  const stem = runMethods ? "do" : "nen";
+  return allOk ? { file: path.join(outDir, `${stem}.json`), exitCode: 0 } : { file: path.join(outDir, `${stem}.loi.json`), exitCode: 3 };
+}
+
 /** Số ảnh cần thêm loại thư mục 2 theo p: (1) ⌈5 / p⌉ (dấu một phía, 0 ảnh hỏng); (2) ⌈1,96² p(1−p) / 0,15²⌉. */
 export function sampleSizes(p) {
   if (!(p > 0 && p <= 1)) return { p, sign: null, margin: null };
@@ -358,7 +391,7 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const sc = selfCheck({ now, old: oldText === null ? null : ruleBlockOf(oldText), dirty });
   for (const l of sc.lines) (sc.exitCode ? console.error : console.log)(l);
   if (sc.exitCode) process.exit(sc.exitCode);
-  const outFile = path.join(outDir, runMethods ? "do.json" : "nen.json");
+  const outFile = resultFile(outDir, runMethods, true).file;
   if (fs.existsSync(outFile) && !argv.includes("--ghi-de")) {
     console.error(`Đã có ${outFile}. Thêm --ghi-de nếu thật sự muốn ghi đè.`);
     process.exit(2);
@@ -385,7 +418,8 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     strangeNull: osx.STRANGE_MODE === null,
     serverK: fsv.SERVER_MAX === SERVER_K,
     mergeOpts: JSON.stringify(fsv.SERVER_MERGE_OPTS) === JSON.stringify({ offPromote: { gap: 3, minWords: 3 }, serverIdf: true }),
-    guard: fm.DEFAULT_GUARD.lockTop === 3 && fm.DEFAULT_GUARD.offMax === 1 && fm.DEFAULT_GUARD.offGap === 1,
+    guard: fm.DEFAULT_GUARD.lockTop === 3 && fm.DEFAULT_GUARD.offMax === 1 && fm.DEFAULT_GUARD.offGap === 1
+      && fm.DEFAULT_GUARD.offTopRule === null && fm.DEFAULT_GUARD.offPromote === null,
   };
 
   // ---- danh mục (c) ----
@@ -632,9 +666,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   console.log(`  muối kind ${JSON.stringify(out.salt)}; ảnh none kind ${JSON.stringify(out.noneKinds)}`);
   console.log(`  ruaypuan S hạng ${f(rankIn(base[keyOf(ru)].S, RUAYPUAN_CODE, SERVER_K))}; mục tiêu nền ${JSON.stringify(baseTarget)} (T ${tSet.length} ca, nhóm chỉnh ${cSet.length} ca); H3 Node nền p95 ${h3Base?.toFixed(2)} ms`);
   if (!allOk) {
-    fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
-    console.error("KIỂM CHÉO LỆCH: dừng báo, không đo cách.");
-    process.exit(3);
+    const bad = resultFile(outDir, runMethods, false);
+    fs.writeFileSync(bad.file, JSON.stringify(out, null, 1), "utf8");
+    console.error(`KIỂM CHÉO LỆCH: dừng báo, không đo cách. Ghi ${bad.file} (không ghi ${outFile}).`);
+    process.exit(bad.exitCode);
   }
 
   if (runMethods) {
@@ -651,8 +686,14 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     };
     Object.assign(baseForeign, foreignOf(base));
     const methods = {};
-    for (const [name, m] of Object.entries(methodGrid())) {
+    const grid = methodGrid();
+    const plain = {}; // kết quả các cách không có (a) (c-*, b-*), chạy trước cách ghép theo thứ tự grid: tham chiếu C4
+    for (const [name, m] of Object.entries(grid)) {
       const res = runMethod(m);
+      if (!m.a) plain[name] = res;
+      const refName = fallbackRefOf(m, grid);
+      if (refName && !plain[refName]) throw new Error(`C4: chưa có kết quả cách ${refName} cho ${name}`);
+      const fb = fallbackCheck(res, refName ? plain[refName] : base);
       const ab = [];
       const realRows = [];
       for (const c of cases) for (const cond of CONDS) {
@@ -663,7 +704,9 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       for (const c of cases.filter((x) => x.set === "7up")) for (const cond of CONDS) s7[`${c.kind}|${cond}`] = posOf(res, c, "may", cond);
       const buldak = Object.fromEntries(CONDS.map((cond) => [cond, res[keyOf(bu)].may[cond][0] ?? null]));
       let sMax = 0;
-      let fallbackOk = true;
+      const fallbackOk = fb.ok;
+      // offSame / luiSame: kiểm chắc chắn qua theo cách dựng (found, câu OFF và LÙI không phụ thuộc cách); giữ để bắt
+      // lỗi code khung đo.
       let offSame = true;
       let luiSame = true;
       for (const c of cases) {
@@ -671,14 +714,14 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         const b = base[keyOf(c)];
         if (r.none) continue;
         sMax = Math.max(sMax, r.S.length, r.sRaw);
-        if (r.fellBack && !sameArr(r.S, b.S)) fallbackOk = false;
         if (!sameArr(osx.cleanQuery(c.found.lines, { idf }), c.queries)) offSame = false;
         for (const cond of CONDS) if (!sameArr(r.lui[cond], b.lui[cond])) luiSame = false;
       }
       const h3n = h3Node(m);
       const h3Est = +(H3_PY_BASE_MS * (h3n / h3Base)).toFixed(1);
       const verdict = judge({ ab, real: realRows, s7, buldak, salt: res[keyOf(salt)].kind, foreign: { base: baseForeign, got: foreignOf(res) }, sMax, fallbackOk, srcSame: l, consts, offSame, luiSame, h3Est, h2Est: H2_EST_MIB });
-      methods[name] = { table: tableOf(res), t: targetFor(res), verdict, h3Est, noneKinds: none3(res) };
+      const nFell = Object.values(res).filter((x) => x.fellBack).length;
+      methods[name] = { table: tableOf(res), t: targetFor(res), verdict, h3Est, noneKinds: none3(res), c4: { ref: refName ?? "nền", fellBack: nFell, diff: fb.diff } };
       process.stdout.write(".");
     }
     console.log("");
@@ -688,6 +731,11 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
         : `KHÔNG CÁCH NÀO ĐẠT: cách qua cổng tốt nhất ${pick.name} có M1 ${methods[pick.name].t.M1} không hơn nền ${baseTarget.M1}; không giữ gì`;
     Object.assign(out, { methods, pick, conclusion, sampleSizes: P_TABLE.map(sampleSizes), offStats: disk.stats, offNetCalls: disk.stats.calls });
     for (const [name, v] of Object.entries(methods)) console.log(`${name.padEnd(22)} ${JSON.stringify(v.t)} H3 ${v.h3Est} | ${v.verdict.pass ? "QUA" : "TRƯỢT " + Object.entries(v.verdict.gates).filter(([, ok]) => !ok).map(([g]) => g).join(",")}`);
+    const all = Object.entries(methods);
+    const gateFails = Object.fromEntries(["C1", "C2", "C3", "C4", "C5", "C6"].map((g) => [g, all.filter(([, v]) => !v.verdict.gates[g]).length]));
+    const c4Combo = all.filter(([n, v]) => !v.verdict.gates.C4 && grid[n].a && (grid[n].b || grid[n].c)).length;
+    out.summary = { pass: all.filter(([, v]) => v.verdict.pass).length, total: all.length, gateFails, c4ComboFails: c4Combo };
+    console.log(`Qua mọi cổng: ${out.summary.pass}/${out.summary.total}; trượt theo cổng ${JSON.stringify(gateFails)}; C4 trượt ở cách ghép: ${c4Combo}`);
     console.log(`== Kết luận: ${conclusion}`);
   }
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");

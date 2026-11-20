@@ -10,11 +10,13 @@ import { ruleBlockOf, sha256Of } from "../g2-di-qua-do.mjs";
 import { prominentRows, rowWeights, A_VARIANTS, methodGrid } from "../dong-noi-bat-do.mjs";
 import {
   splitHalves, shortEdge, rowsWithBoxes, boxLines, serverRank, judge, targetOf, pickMethod, sampleSizes, selfCheck,
-  RULE_SHA256, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, SERVER_K,
+  fallbackRefOf, fallbackCheck, resultFile, RULE_SHA256, CODE_7UP_DIET, BULDAK_CODE, RUAYPUAN_CODE, SERVER_K,
 } from "../may-chu-loc-do.mjs";
+import { ALL_CODES } from "../nang-t1-do.mjs";
 
 const SRC_FILE = new URL("../may-chu-loc-do.mjs", import.meta.url);
 const SELF_FILE = new URL(import.meta.url);
+const DOC_FILES = ["../../../PLAN.md", "../../README.md", "../../../CLAUDE.md"].map((p) => new URL(p, import.meta.url));
 
 test("splitHalves: xếp theo tên (so chuỗi) trong từng thư mục, lẻ = giữ riêng, chẵn = chỉnh, bỏ null SAU khi chia", () => {
   const items = [
@@ -101,6 +103,78 @@ test("(b)(c) theo chiều cao KHUNG CHỮ, không theo h hàng", () => {
   const typed = [{ text: "Omachi suon ham", conf: null }];
   const nen = serverRank(t1, rI, typed, {}, SERVER_K);
   for (const m of [{ b: { sel: "h", k: 2 } }, { c: { beta: 2 } }]) assert.deepEqual(serverRank(t1, rI, typed, m, SERVER_K).hits, nen.hits);
+});
+
+test("fallbackRefOf: cách ghép → cách (b)/(c) đúng tham số (không nhầm b-h với b-hoa, k, β); cách chỉ (a) → nền", () => {
+  const grid = methodGrid();
+  const names = Object.keys(grid);
+  let combos = 0;
+  for (const n of names) {
+    const ref = fallbackRefOf(grid[n], grid);
+    const m = grid[n];
+    if (!m.a || (!m.b && !m.c)) { assert.equal(ref, null, n); continue; }
+    combos++;
+    assert.equal(grid[ref].a, undefined, n);
+    assert.deepEqual(grid[ref].b ?? null, m.b ?? null, n);
+    assert.deepEqual(grid[ref].c ?? null, m.c ?? null, n);
+    // tên cách ghép = <a>+<ref> (chỉ để đối chiếu; hàm không dựa vào tên)
+    assert.ok(n.endsWith(`+${ref}`), `${n} → ${ref}`);
+  }
+  assert.equal(combos, 72);
+  assert.equal(fallbackRefOf(grid["a-c70+b-hoa2"], grid), "b-hoa2");
+  assert.equal(fallbackRefOf(grid["a-url+b-h2"], grid), "b-h2");
+  assert.equal(fallbackRefOf(grid["a-so+c-0.5"], grid), "c-0.5");
+  assert.equal(fallbackRefOf(grid["c-2"], grid), null);
+  assert.equal(fallbackRefOf({}, grid), null);
+  assert.throws(() => fallbackRefOf({ a: A_VARIANTS["a-url"], c: { beta: 7 } }, grid), /có 0 cách/);
+});
+
+test("C4 mới (thử đỏ / xanh): ca quay về so S với cách (b)/(c) riêng (cách ghép) hoặc nền (cách chỉ (a))", () => {
+  const grid = methodGrid();
+  const base = { x: { S: ["1", "2"], fellBack: false }, y: { S: ["3"], fellBack: false } };
+  const bOnly = { x: { S: ["2", "1"], fellBack: false }, y: { S: ["3"], fellBack: false } };
+  const refFor = (name) => { const r = fallbackRefOf(grid[name], grid); return r ? { "b-h1": bOnly }[r] : base; };
+  // 1) cách ghép quay về, S = S của (b) riêng (khác nền) → QUA C4
+  const combo1 = { x: { S: ["2", "1"], fellBack: true }, y: { S: ["3"], fellBack: false } };
+  assert.deepEqual(fallbackCheck(combo1, refFor("a-c70+b-h1")), { ok: true, diff: [] });
+  // 2) cách ghép quay về, S khác (b) riêng (dù trùng nền) → TRƯỢT
+  const combo2 = { x: { S: ["1", "2"], fellBack: true }, y: { S: ["3"], fellBack: false } };
+  assert.deepEqual(fallbackCheck(combo2, refFor("a-c70+b-h1")), { ok: false, diff: ["x"] });
+  // 3) cách chỉ (a) quay về, S khác nền → TRƯỢT
+  const aOnly = { x: { S: ["2", "1"], fellBack: true }, y: { S: ["3"], fellBack: true } };
+  assert.deepEqual(fallbackCheck(aOnly, refFor("a-c70")), { ok: false, diff: ["x"] });
+  // ca không quay về không xét
+  assert.equal(fallbackCheck({ x: { S: ["9"], fellBack: false } }, base).ok, true);
+  // judge: fallbackOk từ fallbackCheck
+  const r = green();
+  r.fallbackOk = fallbackCheck(combo2, refFor("a-c70+b-h1")).ok;
+  assert.equal(judge(r).gates.C4, false);
+  r.fallbackOk = fallbackCheck(combo1, refFor("a-c70+b-h1")).ok;
+  assert.equal(judge(r).gates.C4, true);
+});
+
+test("C4 trên serverRank thật: cách ghép quay về cho S trùng cách (b)/(c) riêng", () => {
+  const items = [box("Omachi suon ham", 0, 0, 300, 90, 0.6), box("tom chua cay", 0, 100, 200, 30, 0.6)];
+  const rows = rowsWithBoxes(items);
+  for (const [combo, only] of [["a-c70+b-h1", "b-h1"], ["a-c70+c-2", "c-2"]]) {
+    const g = methodGrid();
+    const a = serverRank(t1, rI, rows, g[combo], SERVER_K);
+    const b = serverRank(t1, rI, rows, g[only], SERVER_K);
+    assert.equal(a.fellBack, true);
+    assert.deepEqual(a.hits.map((h) => h.code), b.hits.map((h) => h.code));
+  }
+});
+
+test("resultFile: kiểm chéo lệch → .loi.json + thoát 3, không phải file chính", () => {
+  const ok = resultFile("D:\\x", true, true);
+  assert.match(ok.file, /do\.json$/);
+  assert.equal(ok.exitCode, 0);
+  const bad = resultFile("D:\\x", true, false);
+  assert.match(bad.file, /do\.loi\.json$/);
+  assert.equal(bad.exitCode, 3);
+  assert.match(resultFile("D:\\x", false, false).file, /nen\.loi\.json$/);
+  assert.match(resultFile("D:\\x", false, true).file, /nen\.json$/);
+  assert.notEqual(bad.file, ok.file);
 });
 
 const green = () => ({
@@ -204,15 +278,19 @@ test("không có mã nhãn / tên ảnh thật trong khung đo và file test", (
     for (const r of runs) assert.ok(allowed.has(r), `dãy số lạ ${r} trong ${f.pathname}`);
     assert.doesNotMatch(text, /\d{13}_\d{10,}_g\d{10,}/); // dạng tên ảnh điện thoại
   }
-  // có nhãn thật trên máy (ngoài git) thì kiểm thêm: không mã / tên file nào xuất hiện
+  // tài liệu (PLAN.md, test-ocr/README.md, CLAUDE.md): không dạng tên ảnh điện thoại
+  for (const f of DOC_FILES) assert.doesNotMatch(fs.readFileSync(f, "utf8"), /\d{13}_\d{10,}_g\d{10,}/, f.pathname);
+  // có nhãn thật trên máy (ngoài git) thì kiểm thêm: không mã / tên file nào xuất hiện. Ở tài liệu, mã công khai đã có
+  // trong repo từ trước (bộ A / B: ALL_CODES, cũng ở truth.csv) được phép.
   const nhanFile = "D:\\tmp\\may-chu-loc\\nhan.json";
   if (fs.existsSync(nhanFile)) {
     const nhan = JSON.parse(fs.readFileSync(nhanFile, "utf8"));
-    for (const f of [SRC_FILE, SELF_FILE]) {
+    const docAllowed = new Set([...allowed, ...ALL_CODES]);
+    for (const [files, ok] of [[[SRC_FILE, SELF_FILE], allowed], [DOC_FILES, docAllowed]]) for (const f of files) {
       const text = fs.readFileSync(f, "utf8");
       for (const x of nhan.items) {
-        if (x.code && x.code !== "none" && !allowed.has(x.code)) assert.equal(text.includes(x.code), false);
-        assert.equal(text.includes(String(x.file).slice(0, 13)), false);
+        if (x.code && x.code !== "none" && !ok.has(x.code)) assert.equal(text.includes(x.code), false, `mã nhãn trong ${f.pathname}`);
+        assert.equal(text.includes(String(x.file).slice(0, 13)), false, `tên ảnh trong ${f.pathname}`);
       }
     }
   }
