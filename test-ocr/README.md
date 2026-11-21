@@ -585,9 +585,12 @@ Kết quả `may-chu-loc` (vòng 3, `--do-cach` ở 5c8cb4a, kiểm chéo (0)–
 - `node test-ocr/chup-mat-do/lens-tai.mjs --muc a|b [--phut 7.5]`: tải ảnh mặt trước OFF (≤ 3 kết nối, ≥ 1 giây / kết nối, cầu dao, tải nối, dự kiến > 5 GB thì thoát mã 4); `--chong-an-gian`, `--bo-p`, `--vao-vec --muc a|b`: dựng chống ăn gian, bộ P, danh sách đầu vào cho vector.
 - `D:\tmp\lens\venv\Scripts\python -I test-ocr/chup-mat-do/lens-vec.py kiem | gio | gio1600 | vec --model clip-fp32 --pre cat | int8 --model clip-fp32 --pre cat --muc b`: kiểm tiền xử lý so transformers.js, đo giờ / RAM, dựng chỉ mục + sims, chỉ mục int8 (CLIP / DINOv2 / SigLIP ONNX).
 - `node --max-old-space-size=6144 test-ocr/chup-mat-do/lens-do.mjs --chi-nen | --chon-model | --cong | --cong-chi-bao | --do [--muc b] [--ghi-de]`: khung đo (phần chạy ở `lens-chay.mjs`). LỆCH LỆNH: prompt vòng 3 ghi `lens-chay.mjs --do`, nhưng lens-chay.mjs không có điểm chạy (chạy thẳng thoát 0, không ghi gì) → dùng `lens-do.mjs --do`.
-- Test: `cd test-ocr/chup-mat-do && node --test` (gồm `test/lens*.test.mjs`).
+- `node test-ocr/chup-mat-do/lens-js-ref.mjs [--model-dir D:\tmp\lens\model] [--anh D:\tmp\lens\anh] [--out D:\tmp\lens\ref]`: file THAM CHIẾU cho `lens-vec.py kiem`: 10 ảnh danh mục ngẫu nhiên (seed cố định, không phải ca có nhãn) qua bộ xử lý ảnh của transformers.js 4.3.1 (Node) + cùng file ONNX bằng onnxruntime-node → `D:\tmp\lens\ref` (pixel_values, vector, ref.json); không gọi mạng. Test phần thuần ở `test/lens-js-ref.test.mjs`.
+- Test (gồm `test/lens*.test.mjs`), chạy 2 lệnh riêng (PowerShell 5 không có `&&`):
+  - `cd test-ocr/chup-mat-do`
+  - `node --test`
 
-Kết quả `lens` (mức (b), 42.207 ảnh, CLIP ViT-B/32 fp32 · cat, chỉ mục int8 22.285.296 B, R6 p95 294,5 ms): 9.512 cách, **0 cách đạt** (42 cách qua R1–R7 đều bằng nền; cách hơn nền đều trượt R1 + R2 + giữ riêng). Ảnh giúp vào top 5 nhưng làm sai vị trí 1. Không đổi app / máy chủ. Chi tiết: PLAN.md mục 8, đợt `lens`.
+Kết quả `lens` (mức (b), 42.207 ảnh, CLIP ViT-B/32 fp32 · cat, chỉ mục int8 22.285.296 B, R6 p95 294,5 ms): 9.512 cách, **0 cách đạt** (42 cách qua R1–R7 đều bằng nền; cách hơn nền đều trượt R1 + R2 + giữ riêng). Ở 14 ô nửa chỉnh (7 ảnh × 2 điều kiện OFF, mẫu nhỏ, chỉ tham khảo): mọi cách đưa trong 5 lên 12 / 14 (164 cách) làm vị trí 1 tụt còn 0, 2 hoặc 4; các cách nâng vị trí 1 lên 8 / 14 (11 cách) chỉ nhờ 1 ảnh và làm mất vị trí 1 ở A / B (trượt R1). A / B = 30 ảnh × 2 bộ chữ = 60 ca (120 ô), 29 / 30 ảnh bị ẩn mã đúng (chống ăn gian), nên ở A / B tín hiệu ảnh gần như chỉ có thể làm hại. Không đổi app / máy chủ. Chi tiết: PLAN.md mục 8, đợt `lens`.
 
 ---
 
