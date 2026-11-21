@@ -1369,5 +1369,27 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
       | CLIP int8 · vien | 281,9 | 295,8 | 301,7 | 109,5 | 410,0 | 290,4 → 295,8 (+5,3) |
       | DINOv2-small · cat | 316,2 | 332,7 | 365,3 | 109,6 | 345,7 | 342,1 → 332,7 (−9,4) |
       | DINOv2-small · vien | 340,7 | 351,6 | 351,9 | 109,6 | 345,7 | 361,0 → 351,6 (−9,4) |
+    - Đầu vào chỉ mục (b) (`lens-tai.mjs --vao-vec --muc b` → `D:\tmp\lens\vec-vao-b.json`, sha256 ebba02cc…5608): 42.207 ảnh chỉ mục, 54 truy vấn, thiếu file 0; `unavailable404` = 1 mã (không phải mã được bảo vệ: không phải mã bị loại / A / B / bộ P); 0 truy vấn ảnh thật có mã đúng rơi vào `unavailable404`; override chỉ còn A / B 8935049501503 → front_ru.17 (override bộ P không có ở (b)); 29 hàng ẩn đúng; checkIndexGuard 0 lỗi.
+  - Vòng 3 lượt C3 + D (21/11/2026, lam-viec — vẫn sau "review mốc 5: không còn mục chặn"; không sửa khối luật dòng 16–202, không đổi hàm phán / chọn / cổng, không chạy lại --chon-model / --cong / lens-tai; không commit, không sửa worktree từ lúc bắt đầu vec tới khi --do xong):
+    - Vector (b) (`lens-vec.py vec --model clip-fp32 --pre cat`, vòng lặp nền ngoài git `D:\tmp\lens\vec-b-loop.mjs`, 4 luồng, chạy nối theo phần 7,5 phút): XONG 165 / 165 phần, 42.207 ảnh chỉ mục, 54 truy vấn (thiếu 0), kiểm 4 luồng so 1 luồng cos nhỏ nhất 0,99999994 → ĐẠT. Vòng lặp (b) bị ngắt bởi máy ngủ (chết lúc 07:12:57 ở lượt 9 dở, 129 / 165 phần), chạy nối lúc 15:12 sau khi kiểm (không file `.tam` dở, sha256 lens-vec.py = `phan/dau.json`, worktree sạch), không mất phần đã dựng, chữ ký không đổi; `phan/heads.jsonl` 14 lượt, gitHead đều 084260c. Thời gian chạy thật ≈ 103 phút (06:06:54–07:12:57 và 15:12:42–15:49:25; ~6,8 ảnh / giây).
+    - Giờ: file sims (b) đầu tiên `D:\tmp\lens\vec\clip-fp32-cat\b\sims.npy` 2026-11-21 15:49:25 +0700 (không có file sims (b) sớm hơn), SAU mốc 6 079c489 (06:03:21) 9 giờ 46 phút; meta (b): vecPySha256 238c39c1…4c05 (= mốc 6), gitHead 084260c, gitDirty false, threadCheck pass, sha256 index.npy d5782fda…8f7d.
+    - int8 (`lens-vec.py int8 --model clip-fp32 --pre cat --muc b`, 15:50:12, 3 giây) → `b-int8`: quant "int8-sym-perVector-scaleF16-invNorm", fp32Sha256 = sha index.npy của (b), vecPySha256 238c39c1…4c05, gitDirty false, threadCheck pass, indexBytes = 42.207 × 528 = 22.285.296 B (= indexBytesInt8), sha256 index-int8.npy e9b76082…f4b3, scale-f16.npy ef7f6843…c57c. int8Loss (chỉ báo): nTruth 47 + noTruth 7 = 54 = nQueries; bỏ notInIndex 2, ẩn 29; n = 16 truy vấn: fp32 hạng 1 / trong 5 / trong 10 = 3 / 6 / 7, int8 = 3 / 6 / 7, đổi trạng thái 0 / 0 / 0; phần chung top 10 trung bình 0,98125; |sim int8 − sim fp32| lớn nhất 0,00609.
+    - Truy vấn ảnh thật (22): 7 không có mã đúng, 1 (#8) mã đúng không có trong chỉ mục (không do 404; 0 ảnh thật rơi vào `unavailable404`), 0 bị ẩn, 14 thấy được. Ngoài ảnh thật: buldak mã đúng ngoài chỉ mục; 29 / 30 hàng A / B ẩn mã đúng.
+    - Đo (`node --max-old-space-size=6144 test-ocr/chup-mat-do/lens-do.mjs --do --muc b`, worktree sạch 084260c, 15:50:55–15:51:27, mã thoát 0; tự kiểm khối luật trùng; kiểm chéo mergeLocal = serverMerge src 186 / 186, nền = khau-gop 186 / 186; 0 lượt OFF thật, 0 Azure; `D:\tmp\lens\ket-qua\do.json` sha256 8ee2e5e8…8ed9). Lệnh trong prompt ghi `lens-chay.mjs --do`, nhưng lens-chay.mjs không có điểm chạy (chỉ xuất `runMain`; chạy thẳng thoát 0, không ghi gì); điểm chạy là lens-do.mjs (như --chi-nen / --chon-model / --cong / --cong-chi-bao), cùng `runMain`.
+      - τ (p10 / p25 / p50 / p75 / p90) = 0,7134 / 0,7299 / 0,7692 / 0,7969 / 0,8229; μ = 0,00125 / 0,00391 / 0,00853 / 0,01948 / 0,04337.
+      - 9.512 cách; số cách qua từng cổng: R1 56, R2 616, R3 9.512, R4 2.100, R5 7.134, R6 9.512, R7 9.512; qua cả R1–R7: 42 (đều tầng app A0, U ∈ {U0, U-gap-μp10, U-simchu × 5}, tầng máy chủ S0, S3-1, S3-2, S3-3, S2-0.5, S2-1; không có S2-2, S1) và cả 42 có M = nền (6 / 8 / 6).
+      - Nền M1 / M2 / M3 = 6 / 8 / 6 (nửa chỉnh). 462 cách hơn nền ở ≥ 1 M mà không kém M nào: 0 qua R1, 0 qua R2, 0 giữ riêng 0 ô mất. Kết luận: **KHÔNG CÁCH NÀO ĐẠT**; chỉ để tham khảo: không có.
+      - R6 thật (CLIP fp32 · cat, 1.600 px, mốc 6): p95 294,5 ms ≤ 1.500, RAM ước 1.210,7 MiB ≤ 1.536 → qua; R7 thật 22.285.296 B ≤ 25.000.000 → qua.
+      - Bảng ba hàng (nửa chỉnh, M1 / M2 / M3; R trượt; giữ riêng):
+
+        | Hàng | Cách | M1 / M2 / M3 | Cổng trượt | Giữ riêng 0 ô mất |
+        |---|---|---|---|---|
+        | Chỉ ảnh | S1 · A0 · U0 | 4 / 6 / 6 | R2, R4, R5 | không |
+        | Chỉ chữ (nền) | S0 · A0 · U0 | 6 / 8 / 6 | không | có |
+        | Gộp (M1 cao nhất) | S2-1 · A2-0.5 · U0 | 8 / 8 / 6 | R1, R2, R4 | không ("chỉ nhờ 1 ảnh") |
+
+        Ngưỡng "không chắc": cách tốt nhất về M3 là S0 · A0 · U-sim-τp25 (sim ảnh < τp25 = 0,7299 → không tự mở): 6 / 8 / 2, trượt R1 + R2, giữ riêng có ô mất → không dùng được.
+      - n nhỏ (22 ảnh thật, 60 ô A / B trong đó 58 ô ẩn mã đúng), chỉ để tham khảo.
+    - Bước tiếp: không có cách đạt → không làm máy chủ / app ở vòng 4; chỉ ghi PLAN + docs (dieu-phoi quyết).
 
 
