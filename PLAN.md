@@ -1380,16 +1380,26 @@ Trạng thái: giai đoạn 1 đã lên https://khangnguyen196.github.io/quet-ma
       - 9.512 cách; số cách qua từng cổng: R1 56, R2 616, R3 9.512, R4 2.100, R5 7.134, R6 9.512, R7 9.512; qua cả R1–R7: 42 (đều tầng app A0, U ∈ {U0, U-gap-μp10, U-simchu × 5}, tầng máy chủ S0, S3-1, S3-2, S3-3, S2-0.5, S2-1; không có S2-2, S1) và cả 42 có M = nền (6 / 8 / 6).
       - Nền M1 / M2 / M3 = 6 / 8 / 6 (nửa chỉnh). 462 cách hơn nền ở ≥ 1 M mà không kém M nào: 0 qua R1, 0 qua R2, 0 giữ riêng 0 ô mất. Kết luận: **KHÔNG CÁCH NÀO ĐẠT**; chỉ để tham khảo: không có.
       - R6 thật (CLIP fp32 · cat, 1.600 px, mốc 6): p95 294,5 ms ≤ 1.500, RAM ước 1.210,7 MiB ≤ 1.536 → qua; R7 thật 22.285.296 B ≤ 25.000.000 → qua.
+      - Mẫu số: M1 / M2 đếm trên 14 ô (nửa chỉnh có nhãn mã: 6 ảnh thư mục 1 + 1 ảnh thư mục 2, × 2 điều kiện OFF (i)(ii)), M3 đếm trên 6 ô (3 ảnh thư mục 3 × 2). Nền 6 / 14, 8 / 14, 6 / 6.
       - Bảng ba hàng (nửa chỉnh, M1 / M2 / M3; R trượt; giữ riêng):
 
         | Hàng | Cách | M1 / M2 / M3 | Cổng trượt | Giữ riêng 0 ô mất |
         |---|---|---|---|---|
-        | Chỉ ảnh | S1 · A0 · U0 | 4 / 6 / 6 | R2, R4, R5 | không |
+        | Ảnh ở máy chủ (S1 · A0 · U0) | S1 · A0 · U0 | 4 / 6 / 6 | R2, R4, R5 | không |
         | Chỉ chữ (nền) | S0 · A0 · U0 | 6 / 8 / 6 | không | có |
-        | Gộp (M1 cao nhất) | S2-1 · A2-0.5 · U0 | 8 / 8 / 6 | R1, R2, R4 | không ("chỉ nhờ 1 ảnh") |
+        | Gộp (bản U0, M1 cao nhất) | S2-1 · A2-0.5 · U0 | 8 / 8 / 6 | R1, R2, R4 | không ("chỉ nhờ 1 ảnh") |
 
-        Ngưỡng "không chắc": cách tốt nhất về M3 là S0 · A0 · U-sim-τp25 (sim ảnh < τp25 = 0,7299 → không tự mở): 6 / 8 / 2, trượt R1 + R2, giữ riêng có ô mất → không dùng được.
-      - n nhỏ (22 ảnh thật, 60 ô A / B trong đó 58 ô ẩn mã đúng), chỉ để tham khảo.
+        Ghi chú bảng: (1) hàng S1 · A0 · U0 KHÔNG phải "chỉ ảnh" thuần: S1 lấy 10 ứng viên theo ảnh nhưng A0 (serverMerge của src) vẫn xếp lại theo chữ và bỏ mục khớp 0 từ. Số chỉ ảnh thuần (hạng ảnh, không qua chữ) là `int8Loss` trên n = 16 truy vấn có mã đúng thấy được sau khi ẩn: hạng 1 / trong 5 / trong 10 = 3 / 6 / 7 (int8 = fp32). (2) Hàng "Gộp" dùng bản U0 (không có ngưỡng "không chắc"); bản tốt nhất của cùng họ S2-1 · A2-0.5 theo thứ tự M1 → M2 → M3 là S2-1 · A2-0.5 · U-sim-τp25 = 8 / 8 / 2 (cũng trượt R1, R2, R4, giữ riêng có ô mất). (3) `--do` đọc độ giống từ bộ `b-int8` (không phải fp32 `b`; int8Loss cho thấy 0 truy vấn đổi trạng thái hạng 1 / 5 / 10). 42 cách qua R1–R7 đều bằng nền 6 / 8 / 6 có thể vì đều là tầng app A0 (serverMerge chấm lại theo chữ nên thứ tự ảnh của S gần như mất); chưa so từng ô với nền, ghi "chưa kiểm".
+
+        Ngưỡng "không chắc": trong nhóm S0 · A0 (máy chủ chỉ chữ, app nền, chỉ thêm U), cách tốt nhất về M3 mà giữ M1 = 6, M2 = 8 là S0 · A0 · U-sim-τp25 (sim ảnh < τp25 = 0,7299 → không tự mở; hòa với S0 · A0 · U-or-τp25-μp10): 6 / 8 / 2, trượt R1 + R2, giữ riêng có ô mất → không dùng được. Trong nhóm S0 · A0 có cách M3 = 0 nhưng M1 tụt còn 4 hoặc 0.
+
+        Cả lưới (tự đếm từ do.json): 42 cách có M1 = 6, M2 ≥ 8, M3 = 0 (cả 42 đều M2 = 8; họ S3-3 / S2-1 với A2-1 / A2-0.5; vd S3-3 · A2-1 · U-sim-τp75 = 6 / 8 / 0): cả 42 trượt R1 + R2 + R4, cả 42 giữ riêng có ô mất. Cách có M1 = 7 hoặc 8 và M3 ≤ 5: 6 cách (0 cách M1 = 7, 6 cách M1 = 8, đều họ S2-1 · A2-0.5; vd S2-1 · A2-0.5 · U-sim-τp25 = 8 / 8 / 2): cả 6 trượt R1 + R2 + R4, giữ riêng có ô mất. M2 cao nhất cả lưới = 12 / 14 (164 cách, vd S0 · A2-1 · U0 = 4 / 12 / 6; nền 8 / 14) nhưng M1 tụt (0, 2 hoặc 4), cả 164 trượt R1 + R2 + R4.
+
+        Đọc kết quả: ảnh giúp đưa mã đúng vào top 5 (M2 tới 12 / 14) nhưng làm sai vị trí 1 (M1 tụt). Với bộ A / B, 58 trong 60 ảnh A / B (29 mã × 2 bộ) bị ẩn mã đúng khỏi chỉ mục ảnh (chống ăn gian), nên ở A / B tín hiệu ảnh chỉ có thể làm hại; R1 (không ô A / B nào mất vị trí 1) vì vậy gần như loại mọi cách đẩy mục 1 theo ảnh. "Không cách nào đạt" KHÔNG có nghĩa ảnh vô ích.
+      - n nhỏ (22 ảnh thật; 60 ảnh A / B (120 ô), trong đó 58 ảnh (29 mã × 2 bộ) ẩn mã đúng), chỉ để tham khảo. Giờ chạy `--do`: bắt đầu 15:50:55, `at` = 15:50:59 (+0700); 15:51:27 là giờ ghi file do.json.
     - Bước tiếp: không có cách đạt → không làm máy chủ / app ở vòng 4; chỉ ghi PLAN + docs (dieu-phoi quyết).
+  - Vòng 4 (21/11/2026, lam-viec — vòng tài liệu cuối đợt, theo code-reviewer vòng 3; không chạy lại khung đo, không sửa lens-*.mjs / lens-vec.py / khối luật): sửa mục kết quả ở trên (mẫu số, ghi chú bảng, ngưỡng "không chắc" trong nhóm S0 · A0, dòng cả lưới; số tự đếm lại từ `D:\tmp\lens\ket-qua\do.json` bằng `node -e`, trùng số reviewer); thêm đoạn đợt lens ở CLAUDE.md (mục Cấu trúc, `test-ocr/`) và test-ocr/README.md Phần E.
+  - Gợi ý cho đợt sau (chưa làm, chưa chốt): ảnh mạnh ở top 5, yếu ở vị trí 1; luật R1 với A / B ẩn mã đúng gần như chặn mọi cách đẩy mục 1 theo ảnh. Muốn thử lại cần bộ ảnh đo có ảnh mặt trước KHÁC ảnh trong chỉ mục (không cùng imgid), để không phải ẩn mã đúng. Không đề xuất đổi luật của đợt này.
+  - Tổng kết đợt lens: model CLIP ViT-B/32 fp32 (MIT, ONNX), tiền xử lý "cat"; chỉ mục (b) 42.207 ảnh, int8 22.285.296 B; ảnh tải 1.031,9 MB ở `D:\tmp\lens` (2.388,6 MB cả thư mục); R6 p95 294,5 ms, RAM ước 1.210,7 MiB; **KHÔNG CÁCH NÀO ĐẠT** (9.512 cách); không đổi src / server / public, không có ảnh Docker mới, bước 6 (Azure) không áp dụng.
 
 
