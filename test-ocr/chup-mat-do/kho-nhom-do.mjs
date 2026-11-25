@@ -186,6 +186,107 @@ export function ruleBlockOf(text) {
   return text.slice(start, nl < 0 ? text.length : nl + 1);
 }
 
+// ---------------- ghim thêm cho --do (vòng 2, review vòng 1 NÊN SỬA 4, 5, 6; NGOÀI khối luật) ----------------
+/** Commit luật riêng (vòng 1): --do lấy khối luật từ commit này qua git show, so RULE_SHA256 và khối hiện tại. */
+export const RULE_COMMIT = "62dca696d184575b000e95c02311a1cc011bd89b";
+/** Mốc mã tính vector: vòng 1 là ce967ca; vòng 2 P3 sửa server/clip_engine.py (int32, bớt RAM, kết quả trùng từng số)
+ * ở bfc32a0 nên mốc đổi sang bfc32a0 (TRƯỚC mọi lần tính độ giống). --do đòi 2 file không đổi từ mốc và sha256 trong
+ * meta của vector trùng bản ở mốc. */
+export const VEC_CODE_BASE = "bfc32a04ef0033c4684886e2ed53f39a8d42ea98";
+export const VEC_CODE_FILES = Object.freeze({ vecPySha256: "test-ocr/chup-mat-do/kho-nhom-vec.py", clipEngineSha256: "server/clip_engine.py" });
+/** sha256 của NEN_FILE (D:\tmp\khau-gop\ket-qua\nen.json), tính 2026-11-26 trước mọi lần tính độ giống. */
+export const NEN_SHA256 = "88f17a8209b765dd6a6da12bc2f8452a706c73e2cf6fe6667e4c8e9cf8226f10";
+/** Cổng A/B theo luật: 30 ảnh A/B × 2 bộ chữ × 2 điều kiện OFF = 120 ô + 8 ảnh thật × 2 = 16 ô. */
+export const GATE_AB_CELLS = 120;
+export const GATE_REAL_CELLS = 16;
+export const GATE_CELLS = GATE_AB_CELLS + GATE_REAL_CELLS;
+export const GATE_NOTE = "cổng đạt do cách dựng (điểm nhóm của ô = s_neg của ảnh đó, T ≥ max s_neg + 0,03), không phải phép kiểm độc lập";
+export const EXIT_RULE = 3;
+
+function deepEqualJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** (b) Khối luật ở commit luật: committedText = nội dung RULE_FILE ở RULE_COMMIT (git show), currentText = file hiện tại.
+ * Trả danh sách lỗi (rỗng = đạt). */
+export function checkRuleAtCommit(committedText, currentText) {
+  const errors = [];
+  const old = ruleBlockOf(committedText);
+  const cur = ruleBlockOf(currentText);
+  if (old === null) errors.push(`không đọc được khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)} (${RULE_FILE})`);
+  else if (sha256Of(old) !== RULE_SHA256) errors.push(`khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)} có sha256 ${sha256Of(old)} khác RULE_SHA256`);
+  if (cur === null) errors.push("không đọc được khối luật của file hiện tại");
+  else if (old !== null && old !== cur) errors.push(`khối luật hiện tại khác khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)}`);
+  return errors;
+}
+
+/** (a) Mã tính vector ghim: meta = V.meta của vec.json; pinned = { vecPySha256, clipEngineSha256 } của 2 file ở
+ * VEC_CODE_BASE; diffEmpty = `git diff --quiet VEC_CODE_BASE HEAD -- <2 file>` trống; headIsAncestor = V.meta.gitHead là
+ * tổ tiên của HEAD (git merge-base --is-ancestor). Trả danh sách lỗi. */
+export function checkVecMeta(meta, { pinned, diffEmpty, headIsAncestor }) {
+  const errors = [];
+  const base = VEC_CODE_BASE.slice(0, 7);
+  if (diffEmpty !== true) errors.push(`${Object.values(VEC_CODE_FILES).join(" / ")} đã đổi từ mốc ${base} (git diff không trống)`);
+  for (const k of Object.keys(VEC_CODE_FILES)) {
+    if (!pinned || typeof pinned[k] !== "string") errors.push(`không lấy được sha256 ${VEC_CODE_FILES[k]} ở mốc ${base}`);
+    else if (meta?.[k] !== pinned[k]) errors.push(`vector tính bằng ${VEC_CODE_FILES[k]} khác bản ở mốc ${base} (meta.${k} ${meta?.[k] ?? "thiếu"})`);
+  }
+  if (!deepEqualJson(meta?.p2Transforms, [...P2_TRANSFORMS])) errors.push(`meta.p2Transforms khác P2_TRANSFORMS: ${JSON.stringify(meta?.p2Transforms ?? null)}`);
+  if (typeof meta?.gitHead !== "string" || !/^[0-9a-f]{40}$/.test(meta.gitHead)) errors.push(`meta.gitHead sai dạng: ${JSON.stringify(meta?.gitHead ?? null)}`);
+  else if (headIsAncestor !== true) errors.push(`meta.gitHead ${meta.gitHead.slice(0, 7)} không phải tổ tiên của HEAD`);
+  return errors;
+}
+
+/** sha256 nền khau-gop: lỗi khi khác NEN_SHA256. */
+export function checkNenSha(sha) {
+  return sha === NEN_SHA256 ? [] : [`sha256 ${NEN_FILE} = ${sha ?? "không đọc được"}, khác NEN_SHA256 ${NEN_SHA256}`];
+}
+
+/** (c) Ô cổng A/B từ bảng định danh + nền khau-gop. Ô A/B không đọc được chữ (thiếu perCase / may[cond]) được ĐẾM vào
+ * unreadable (không bỏ lặng lẽ); ảnh thật thiếu perCase là lỗi; tổng phải đúng GATE_CELLS (136), thiếu → lỗi.
+ * nhomOf(id ảnh) → { sp, code, score } (chỉ gọi khi đã có vector). Trả { cells, unreadable, errors }. */
+export function buildGateCells(table, nen, nhomOf) {
+  const cells = [];
+  const unreadable = [];
+  const errors = [];
+  const abImgs = (table?.images ?? []).filter((y) => y.nhom === "ab");
+  for (const s of AB_SETS) for (const x of abImgs) {
+    const code = x.sp.slice(3);
+    const per = nen?.perCase?.[`${s}|${code}|anh`];
+    for (const cond of CONDS) {
+      const id = `${s}|${code}|${cond}`;
+      if (!Array.isArray(per?.may?.[cond])) { unreadable.push(id); continue; }
+      cells.push({ id, code, base: per.may[cond], nhom: nhomOf(x.id) });
+    }
+  }
+  for (const n of REAL_CORRECT) {
+    const x = (table?.images ?? []).find((y) => y.id === `that-${n}`);
+    const per = nen?.perCase?.[`anh-${n}`];
+    if (!x) { errors.push(`bảng định danh thiếu ảnh thật that-${n}`); continue; }
+    for (const cond of CONDS) {
+      if (!Array.isArray(per?.may?.[cond])) { errors.push(`nền khau-gop thiếu perCase ảnh thật anh-${n} (${cond})`); continue; }
+      cells.push({ id: `that-${n}|${cond}`, code: x.sp.slice(3), base: per.may[cond], nhom: nhomOf(x.id) });
+    }
+  }
+  if (cells.length !== GATE_CELLS) {
+    errors.push(`cổng A/B có ${cells.length} ô, luật ghi ${GATE_CELLS} (${GATE_AB_CELLS} ô A/B + ${GATE_REAL_CELLS} ô ảnh thật); ${unreadable.length} ô A/B không đọc được chữ${unreadable.length ? `: ${unreadable.join(", ")}` : ""}`);
+  }
+  return { cells, unreadable, errors };
+}
+
+/** (d) Cặp file trùng sha256 giữa ảnh A/B và ảnh OFF trong bảng định danh (trùng → P1 đếm 2 lần). Trả danh sách
+ * { ab: sp, off: sp } (chỉ mã sản phẩm, không tên ảnh); ảnh thiếu sha256 → lỗi. */
+export function dupAbOff(table) {
+  const imgs = table?.images ?? [];
+  const errors = [];
+  const ab = imgs.filter((x) => x.nhom === "ab");
+  const off = imgs.filter((x) => x.nhom === "off");
+  for (const x of [...ab, ...off]) if (typeof x.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(x.sha256)) errors.push(`ảnh ${x.nhom} của ${x.sp} thiếu sha256`);
+  const pairs = [];
+  for (const a of ab) for (const o of off) if (a.sha256 && a.sha256 === o.sha256) pairs.push({ ab: a.sp, off: o.sp });
+  return { pairs, errors };
+}
+
 /** Phân vị nearest rank (p trong [0, 1]) của mảng số. */
 export function quantileNR(xs, p) {
   const s = [...xs].sort((a, b) => a - b);
@@ -243,27 +344,68 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const vecFile = arg("--vec", "D:\\tmp\\kho-nhom\\vec\\vec.json");
   const outDir = arg("--out", "D:\\tmp\\kho-nhom\\ket-qua");
   const cp = await import("node:child_process");
-  const git = (c) => { try { return cp.execSync(c, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 }).toString(); } catch { return null; } };
-  const block = ruleBlockOf(fs.readFileSync(new URL(import.meta.url), "utf8"));
+  const gitBuf = (c) => { try { return cp.execSync(c, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 }); } catch { return null; } };
+  const git = (c) => gitBuf(c)?.toString() ?? null;
+  const stop = (errors) => { for (const e of errors) console.error(`DỪNG (mã ${EXIT_RULE}): ${e}`); process.exit(EXIT_RULE); };
+  const selfText = fs.readFileSync(new URL(import.meta.url), "utf8");
+  const block = ruleBlockOf(selfText);
   const blockSha = block === null ? null : sha256Of(block);
   const tableSha = fs.existsSync(tableFile) ? sha256Of(fs.readFileSync(tableFile)) : null;
   console.log(`Khối luật sha256 ${blockSha} ${blockSha === RULE_SHA256 ? "TRÙNG" : "KHÁC"} RULE_SHA256`);
   console.log(`Bảng định danh ${tableFile}: sha256 ${tableSha} ${tableSha === ID_TABLE_SHA256 ? "TRÙNG" : "KHÁC"} ID_TABLE_SHA256`);
-  if (blockSha !== RULE_SHA256 || tableSha !== ID_TABLE_SHA256) process.exit(3);
+  if (blockSha !== RULE_SHA256 || tableSha !== ID_TABLE_SHA256) process.exit(EXIT_RULE);
+  // (d) ảnh A/B và ảnh OFF trùng file (sha256 trong bảng định danh) → P1 đếm 2 lần
+  const table = JSON.parse(fs.readFileSync(tableFile, "utf8"));
+  const dup = dupAbOff(table);
+  console.log(`Cặp file trùng sha256 giữa ảnh A/B và ảnh OFF: ${dup.pairs.length}`);
+  if (dup.errors.length) stop(dup.errors);
+  if (dup.pairs.length > 0) stop([`${dup.pairs.length} cặp ảnh A/B trùng file ảnh OFF (mã A/B → mã OFF): ${dup.pairs.map((p) => `${p.ab} → ${p.off}`).join(", ")}`]);
   if (mode === "kiem") { console.log("--kiem: không tính điểm. Đo bằng --do (cần vector của kho-nhom-vec.py)."); process.exit(0); }
 
+  // ----- --do: mọi kiểm dưới đây chạy TRƯỚC khi tính bất kỳ điểm độ giống nào -----
   const porcelain = git("git status --porcelain");
-  if (porcelain === null || porcelain.trim() !== "") { console.error("Worktree chưa sạch: commit rồi chạy lại."); process.exit(3); }
+  if (porcelain === null || porcelain.trim() !== "") { console.error("Worktree chưa sạch: commit rồi chạy lại."); process.exit(EXIT_RULE); }
   const head = git("git rev-parse HEAD")?.trim() ?? null;
+  // (b) khối luật ở commit luật (git show) == RULE_SHA256 == khối hiện tại
+  const committed = git(`git show ${RULE_COMMIT}:${RULE_FILE}`);
+  const ruleErrors = checkRuleAtCommit(committed, selfText);
+  if (ruleErrors.length) stop(ruleErrors);
+  console.log(`Khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)} trùng RULE_SHA256 và khối hiện tại.`);
   const outFile = path.join(outDir, "do.json");
   if (fs.existsSync(outFile) && !argv.includes("--ghi-de")) { console.error(`Đã có ${outFile}. Thêm --ghi-de nếu thật sự muốn ghi đè.`); process.exit(2); }
-  const table = JSON.parse(fs.readFileSync(tableFile, "utf8"));
   const V = JSON.parse(fs.readFileSync(vecFile, "utf8"));
   if (V.meta?.modelSha256 !== MODEL_SHA256 || V.meta?.pre !== "cat" || V.meta?.idTableSha256 !== ID_TABLE_SHA256
     || V.meta?.longEdge !== LONG_EDGE || V.meta?.jpegQuality !== JPEG_QUALITY || V.meta?.gitDirty !== false) {
     console.error(`Vector khác luật (model / tiền xử lý / bảng định danh / bước như app / worktree sạch): ${JSON.stringify(V.meta)}`);
-    process.exit(3);
+    process.exit(EXIT_RULE);
   }
+  // (a) mã tính vector ghim ở VEC_CODE_BASE; p2Transforms; gitHead là tổ tiên của HEAD; sha256 nền khau-gop
+  const files = Object.values(VEC_CODE_FILES);
+  const diffEmpty = gitBuf(`git diff --quiet ${VEC_CODE_BASE} HEAD -- ${files.join(" ")}`) !== null;
+  const pinned = Object.fromEntries(Object.entries(VEC_CODE_FILES).map(([k, f]) => {
+    const b = gitBuf(`git show ${VEC_CODE_BASE}:${f}`);
+    return [k, b === null ? null : sha256Of(b)];
+  }));
+  const gh = typeof V.meta?.gitHead === "string" && /^[0-9a-f]{40}$/.test(V.meta.gitHead) ? V.meta.gitHead : null;
+  const headIsAncestor = gh !== null && gitBuf(`git merge-base --is-ancestor ${gh} HEAD`) !== null;
+  const nenPath = arg("--nen", NEN_FILE);
+  const nenSha = fs.existsSync(nenPath) ? sha256Of(fs.readFileSync(nenPath)) : null;
+  const preErrors = [...checkVecMeta(V.meta, { pinned, diffEmpty, headIsAncestor }), ...checkNenSha(nenSha)];
+  if (preErrors.length) stop(preErrors);
+  console.log(`Mã tính vector trùng mốc ${VEC_CODE_BASE.slice(0, 7)}; p2Transforms đúng; gitHead là tổ tiên của HEAD; nền khau-gop sha256 đúng.`);
+
+  // cổng A/B: nền đã lưu của khau-gop (mã gộp không đổi từ NEN_SHA) — kiểm nền TRƯỚC khi tính điểm
+  const sameCode = git(`git diff --quiet ${NEN_SHA} HEAD -- ${NEN_PATHS.join(" ")}`) !== null;
+  const nen = JSON.parse(fs.readFileSync(nenPath, "utf8"));
+  if (!sameCode || nen.allOk !== true || nen.sha !== NEN_SHA) { console.error(`Nền A/B không dùng được: mã gộp đổi ${!sameCode}, allOk ${nen.allOk}, sha ${nen.sha}`); process.exit(EXIT_RULE); }
+  for (const n of REAL_CORRECT) {
+    const rb = nen.realBase?.[`anh-${n}`];
+    if (!(rb?.i?.pos === 1 && rb?.ii?.pos === 1)) { console.error(`Ảnh thật ${n} không đúng vị trí 1 ở nền khau-gop`); process.exit(EXIT_RULE); }
+  }
+  const gateDry = buildGateCells(table, nen, () => null); // chỉ đếm ô, chưa tính điểm
+  console.log(`Cổng A/B: ${gateDry.cells.length} ô (${gateDry.unreadable.length} ô A/B không đọc được chữ)`);
+  if (gateDry.errors.length) stop(gateDry.errors);
+
   const cs = buildCases(table, V.vec, V.p2);
   const sNeg = cs.neg.map((x) => x.top?.score ?? -Infinity);
   const maxNeg = Math.max(...sNeg);
@@ -272,33 +414,16 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const p1 = recallAt(cs.p1, T);
   const p2 = recallAt(cs.p2, T);
 
-  // cổng A/B: nền đã lưu của khau-gop (mã gộp không đổi từ NEN_SHA)
-  const sameCode = git(`git diff --quiet ${NEN_SHA} HEAD -- ${NEN_PATHS.join(" ")}`) !== null;
-  const nen = JSON.parse(fs.readFileSync(arg("--nen", NEN_FILE), "utf8"));
-  if (!sameCode || nen.allOk !== true || nen.sha !== NEN_SHA) { console.error(`Nền A/B không dùng được: mã gộp đổi ${!sameCode}, allOk ${nen.allOk}, sha ${nen.sha}`); process.exit(3); }
-  for (const n of REAL_CORRECT) {
-    const rb = nen.realBase?.[`anh-${n}`];
-    if (!(rb?.i?.pos === 1 && rb?.ii?.pos === 1)) { console.error(`Ảnh thật ${n} không đúng vị trí 1 ở nền khau-gop`); process.exit(3); }
-  }
-  const gateCells = [];
-  for (const s of AB_SETS) for (const x of table.images.filter((y) => y.nhom === "ab")) {
-    const code = x.sp.slice(3);
-    const per = nen.perCase?.[`${s}|${code}|anh`];
-    if (!per) continue; // ảnh không đọc được chữ ở bộ này: app không ra gì, không có ô
-    for (const cond of CONDS) gateCells.push({ id: `${s}|${code}|${cond}`, code, base: per.may[cond], nhom: cs.nhomOf(x.id) });
-  }
-  for (const n of REAL_CORRECT) {
-    const x = table.images.find((y) => y.id === `that-${n}`);
-    const per = nen.perCase?.[`anh-${n}`];
-    for (const cond of CONDS) gateCells.push({ id: `that-${n}|${cond}`, code: x.sp.slice(3), base: per.may[cond], nhom: cs.nhomOf(x.id) });
-  }
+  const gateBuilt = buildGateCells(table, nen, cs.nhomOf);
+  if (gateBuilt.errors.length) stop(gateBuilt.errors);
+  const gateCells = gateBuilt.cells;
   const gate = gateAB(gateCells, T ?? Infinity);
   const verdict = judge({ T, p1, p2, gate });
   const dist = (xs) => ({ n: xs.length, min: Math.min(...xs), p50: quantileNR(xs, 0.5), p90: quantileNR(xs, 0.9), max: Math.max(...xs) });
   const out = {
     at: new Date().toISOString(), head, ruleSha256: RULE_SHA256, idTableSha256: ID_TABLE_SHA256, vecMeta: V.meta,
-    n: { neg: cs.neg.length, p1: cs.p1.length, p2: cs.p2.length, gateCells: gateCells.length }, note: SMALL_N_NOTE,
-    maxNeg, worst, T, p1, p2, gate, verdict, NHOM_THRESHOLD: verdict.threshold === Infinity ? "Infinity" : verdict.threshold,
+    n: { neg: cs.neg.length, p1: cs.p1.length, p2: cs.p2.length, gateCells: gateCells.length, gateUnreadable: gateBuilt.unreadable.length }, note: SMALL_N_NOTE,
+    maxNeg, worst, T, p1, p2, gate, gateNote: GATE_NOTE, verdict, NHOM_THRESHOLD: verdict.threshold === Infinity ? "Infinity" : verdict.threshold,
     sNegDist: dist(sNeg), p1Dist: dist(cs.p1.map((x) => x.top.score)), p2Dist: dist(cs.p2.map((x) => x.top.score)),
     neg: cs.neg, p1Cases: cs.p1, p2Cases: cs.p2,
   };
@@ -306,6 +431,6 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
   console.log(`N ${cs.neg.length}, P1 ${cs.p1.length}, P2 ${cs.p2.length} (${SMALL_N_NOTE})`);
   console.log(`max s_neg ${maxNeg.toFixed(4)} (ảnh hỏi ${worst.id}, sản phẩm ${worst.top?.sp}); s_neg ${JSON.stringify(out.sNegDist)}`);
-  console.log(`T ${T}; recall P1 ${p1.hit}/${p1.n}, P2 ${p2.hit}/${p2.n} (chỉ ước lượng, lạc quan); cổng A/B ${gate.pass ? "ĐẠT" : "KHÔNG"} (${gate.lost.length}/${gate.cells} ô mất vị trí 1)`);
+  console.log(`T ${T}; recall P1 ${p1.hit}/${p1.n}, P2 ${p2.hit}/${p2.n} (chỉ ước lượng, lạc quan); cổng A/B ${gate.pass ? "ĐẠT" : "KHÔNG"} (${gate.lost.length}/${gate.cells} ô mất vị trí 1; ${GATE_NOTE})`);
   console.log(`${verdict.pass ? "ĐẠT" : "KHÔNG ĐẠT"}: NHOM_THRESHOLD = ${out.NHOM_THRESHOLD}${verdict.fails.length ? ` (${verdict.fails.join("; ")})` : ""}. Ghi ${outFile}`);
 }

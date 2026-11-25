@@ -6,6 +6,8 @@ import fs from "node:fs";
 import {
   RULE_SHA256, ruleBlockOf, sha256Of, pickThreshold, recallAt, applyNhom, gateAB, judge, productScores, topProduct,
   buildCases, quantileNR, T_GRID, MARGIN, P2_TRANSFORMS, REAL_CORRECT, MODEL_SHA256, ID_TABLE_SHA256,
+  RULE_COMMIT, RULE_FILE, VEC_CODE_BASE, VEC_CODE_FILES, NEN_SHA256, GATE_CELLS, GATE_NOTE, EXIT_RULE,
+  checkRuleAtCommit, checkVecMeta, checkNenSha, buildGateCells, dupAbOff,
 } from "../kho-nhom-do.mjs";
 
 const self = fs.readFileSync(new URL("../kho-nhom-do.mjs", import.meta.url), "utf8");
@@ -147,6 +149,123 @@ test("buildCases: ca âm bỏ cùng sản phẩm, P1 kho đủ, P2 so chính ả
   assert.equal(cs.nhomOf("ab-1").code, "2");
   assert.throws(() => buildCases(table, { ...vec, "that-2": undefined }, p2), /thiếu vector ảnh kho/);
   assert.throws(() => buildCases(table, vec, {}), /thiếu vector P2/);
+});
+
+// ---------------- vòng 2: ghim thêm cho --do (dữ liệu giả) ----------------
+test("hằng ghim vòng 2", () => {
+  assert.match(RULE_COMMIT, /^62dca69[0-9a-f]{33}$/);
+  assert.equal(RULE_FILE, "test-ocr/chup-mat-do/kho-nhom-do.mjs");
+  assert.match(VEC_CODE_BASE, /^[0-9a-f]{40}$/);
+  assert.deepEqual({ ...VEC_CODE_FILES }, { vecPySha256: "test-ocr/chup-mat-do/kho-nhom-vec.py", clipEngineSha256: "server/clip_engine.py" });
+  assert.match(NEN_SHA256, /^[0-9a-f]{64}$/);
+  assert.equal(GATE_CELLS, 136);
+  assert.equal(EXIT_RULE, 3);
+  assert.match(GATE_NOTE, /cổng đạt do cách dựng/);
+});
+
+test("(b) checkRuleAtCommit: khối luật ở commit luật khác → lỗi (thoát 3)", () => {
+  assert.deepEqual(checkRuleAtCommit(self, self), []);
+  // commit luật có khối khác (sửa 1 số) → sha khác RULE_SHA256 và khác khối hiện tại
+  const errs = checkRuleAtCommit(self.replace("0,03", "0,02"), self);
+  assert.equal(errs.length, 2);
+  assert.match(errs[0], /khác RULE_SHA256/);
+  assert.match(errs[1], /khối luật hiện tại khác/);
+  // khối hiện tại bị sửa (cùng lúc sửa hằng thì test cũ vẫn xanh; ở đây commit luật vẫn bắt)
+  assert.match(checkRuleAtCommit(self, self.replace("0,03", "0,02")).join(), /khối luật hiện tại khác/);
+  // git show lỗi (null) / không có khối
+  assert.match(checkRuleAtCommit(null, self).join(), /không đọc được khối luật ở commit luật/);
+  assert.match(checkRuleAtCommit("không có khối", self).join(), /không đọc được/);
+});
+
+test("(a) checkVecMeta: mã tính vector, p2Transforms, gitHead", () => {
+  const pinned = { vecPySha256: "a".repeat(64), clipEngineSha256: "b".repeat(64) };
+  const meta = { vecPySha256: pinned.vecPySha256, clipEngineSha256: pinned.clipEngineSha256, p2Transforms: [...P2_TRANSFORMS], gitHead: "c".repeat(40) };
+  assert.deepEqual(checkVecMeta(meta, { pinned, diffEmpty: true, headIsAncestor: true }), []);
+  assert.match(checkVecMeta(meta, { pinned, diffEmpty: false, headIsAncestor: true }).join(), /đã đổi từ mốc/);
+  assert.match(checkVecMeta({ ...meta, clipEngineSha256: "d".repeat(64) }, { pinned, diffEmpty: true, headIsAncestor: true }).join(), /server\/clip_engine\.py khác bản ở mốc/);
+  assert.match(checkVecMeta({ ...meta, vecPySha256: undefined }, { pinned, diffEmpty: true, headIsAncestor: true }).join(), /kho-nhom-vec\.py khác bản ở mốc/);
+  assert.match(checkVecMeta(meta, { pinned: { ...pinned, clipEngineSha256: null }, diffEmpty: true, headIsAncestor: true }).join(), /không lấy được sha256/);
+  assert.match(checkVecMeta({ ...meta, p2Transforms: [...P2_TRANSFORMS].reverse() }, { pinned, diffEmpty: true, headIsAncestor: true }).join(), /p2Transforms khác/);
+  assert.match(checkVecMeta({ ...meta, p2Transforms: undefined }, { pinned, diffEmpty: true, headIsAncestor: true }).join(), /p2Transforms khác/);
+  assert.match(checkVecMeta(meta, { pinned, diffEmpty: true, headIsAncestor: false }).join(), /không phải tổ tiên/);
+  assert.match(checkVecMeta({ ...meta, gitHead: "HEAD; rm -rf" }, { pinned, diffEmpty: true, headIsAncestor: true }).join(), /gitHead sai dạng/);
+  assert.deepEqual(checkNenSha(NEN_SHA256), []);
+  assert.match(checkNenSha("0".repeat(64)).join(), /khác NEN_SHA256/);
+  assert.match(checkNenSha(null).join(), /không đọc được/);
+});
+
+test("(b) khối luật ở commit luật thật (git show) trùng RULE_SHA256 và khối hiện tại", async (t) => {
+  const cp = await import("node:child_process");
+  let committed = null;
+  try {
+    committed = cp.execSync(`git show ${RULE_COMMIT}:${RULE_FILE}`, { cwd: new URL("../../..", import.meta.url), stdio: ["ignore", "pipe", "ignore"] }).toString();
+  } catch {
+    t.skip("không có lịch sử git chứa commit luật (bản clone nông)");
+    return;
+  }
+  assert.deepEqual(checkRuleAtCommit(committed, self), []);
+});
+
+/** Bảng + nền giả đủ 136 ô: 30 ảnh A/B (mã 1000…1029) + 8 ảnh thật REAL_CORRECT. */
+function fakeGate() {
+  const images = [];
+  const perCase = {};
+  for (let k = 0; k < 30; k++) {
+    const code = String(1000 + k);
+    images.push({ id: `ab-${code}`, nhom: "ab", sp: `ma:${code}`, sha256: sha256Of(`ab${k}`) });
+    for (const s of ["A", "B"]) perCase[`${s}|${code}|anh`] = { may: { i: [code], ii: [code, "9"] } };
+  }
+  for (const n of REAL_CORRECT) {
+    const code = String(5000 + n);
+    images.push({ id: `that-${n}`, nhom: "that", sp: `ma:${code}` });
+    perCase[`anh-${n}`] = { may: { i: [code], ii: [code] } };
+  }
+  for (let k = 0; k < 3; k++) images.push({ id: `off-${k}`, nhom: "off", sp: `ma:${7000 + k}`, sha256: sha256Of(`off${k}`) });
+  return { table: { images }, nen: { perCase } };
+}
+
+test("(c) buildGateCells: đủ 136 ô; thiếu ô A/B → đếm + lỗi; thiếu perCase ảnh thật → lỗi, không TypeError", () => {
+  const nhomOf = (id) => ({ sp: `nhom-${id}`, code: null, score: 0.1 });
+  const { table, nen } = fakeGate();
+  const ok = buildGateCells(table, nen, nhomOf);
+  assert.equal(ok.cells.length, 136);
+  assert.deepEqual(ok.unreadable, []);
+  assert.deepEqual(ok.errors, []);
+  assert.equal(gateAB(ok.cells, 0.5).pass, true);
+  // 1 ảnh A/B không đọc được chữ ở bộ B → 2 ô thiếu, được đếm và báo
+  const nen2 = structuredClone(nen);
+  delete nen2.perCase["B|1003|anh"];
+  const r2 = buildGateCells(table, nen2, nhomOf);
+  assert.equal(r2.cells.length, 134);
+  assert.deepEqual(r2.unreadable, ["B|1003|i", "B|1003|ii"]);
+  assert.equal(r2.errors.length, 1);
+  assert.match(r2.errors[0], /134 ô, luật ghi 136 .*2 ô A\/B không đọc được chữ: B\|1003\|i, B\|1003\|ii/);
+  // thiếu 1 điều kiện của 1 ô
+  const nen3 = structuredClone(nen);
+  delete nen3.perCase["A|1000|anh"].may.ii;
+  assert.deepEqual(buildGateCells(table, nen3, nhomOf).unreadable, ["A|1000|ii"]);
+  // ảnh thật thiếu perCase → lỗi rõ, không văng TypeError
+  const nen4 = structuredClone(nen);
+  delete nen4.perCase["anh-7"];
+  const r4 = buildGateCells(table, nen4, nhomOf);
+  assert.ok(r4.errors.some((e) => /thiếu perCase ảnh thật anh-7 \(i\)/.test(e)));
+  assert.ok(r4.errors.some((e) => /134 ô/.test(e)));
+  // nền rỗng / null
+  assert.match(buildGateCells(table, null, nhomOf).errors.join(), /16 ô|0 ô/);
+  // bảng thiếu ảnh thật
+  const t5 = { images: table.images.filter((x) => x.id !== "that-1") };
+  assert.match(buildGateCells(t5, nen, nhomOf).errors.join(), /thiếu ảnh thật that-1/);
+});
+
+test("(d) dupAbOff: cặp file A/B trùng file OFF → danh sách mã", () => {
+  const { table } = fakeGate();
+  assert.deepEqual(dupAbOff(table), { pairs: [], errors: [] });
+  const t2 = structuredClone(table);
+  t2.images.find((x) => x.id === "off-1").sha256 = t2.images.find((x) => x.id === "ab-1004").sha256;
+  assert.deepEqual(dupAbOff(t2).pairs, [{ ab: "ma:1004", off: "ma:7001" }]);
+  const t3 = structuredClone(table);
+  delete t3.images.find((x) => x.id === "off-0").sha256;
+  assert.match(dupAbOff(t3).errors.join(), /ảnh off của ma:7000 thiếu sha256/);
 });
 
 test("quantileNR", () => {
