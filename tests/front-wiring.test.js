@@ -512,7 +512,35 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
       ["main.js không gọi renderNhomAddForm", { ...good, "main.js": "function closeNhomAdd() { nhomAddBox.innerHTML = \"\"; }" }],
       ["nhomFormFromBackText có di_ung", { ...good, "nhom-add.js": na('return { thanh_phan: t, nguon: "ocr-mat-sau", di_ung: [] };') }],
       ["không có nhomFormFromBackText", { ...good, "nhom-add.js": "export function docMatSau(items) { return {}; }" }],
+      // vòng 8 (gợi ý 8): siết
+      [".move( trong src/", { ...good, "nhom-write.js": nw() + "\nawait client.storage.from(NHOM_BUCKET).move(a, b);" }],
+      [".copy( trong src/", { ...good, "front-extra.js": "await s.copy(a, b);" }],
+      [".from(NHOM_BUCKET) ngoài nhom-data / nhom-write", { ...good, "main.js": mj("await authClient.storage.from(NHOM_BUCKET).list();") }],
+      [".from(\"nhom_anh\") ở file khác", { ...good, "front-nhom.js": 'await c.from("nhom_anh").select("id");' }],
+      [".from( biến có chữ nhom ở file khác", { ...good, "render.js": "await c.from(nhomTable).select();" }],
     ]) assert.notDeepEqual(rule19(files), [], label);
+    // .from( không dính kho nhóm (Array.from…) vẫn qua ở mọi file
+    assert.deepEqual(rule19({ ...good, "main.js": mj("const xs = Array.from(list);") }), []);
+  });
+
+  // Đợt kho-nhom vòng 8 (NÊN SỬA 3 vòng 7): bấm "Đăng xuất" khi đang lưu vào kho nhóm → không đăng xuất
+  test("(20) #authBox click: kiểm nhomAdd.saving (if … return) TRƯỚC manualSignOuts++ và TRƯỚC signOut(", () => {
+    assert.deepEqual(rule20(CODE), []);
+  });
+  test("(20) luật bắt được chuỗi mẫu sai", () => {
+    const h = (body) => `authBox.addEventListener("click", async (ev) => {\n  const btn = ev.target.closest("button[data-auth]");\n  if (!btn || !authClient || authState.busy) return;\n${body}\n});`;
+    const guard = '  if (btn.dataset.auth === "logout" && nhomAdd.saving) { setAuth({ error: NHOM_LOGOUT_WAIT_TEXT }); return; }';
+    const inc = '  if (btn.dataset.auth === "logout") manualSignOuts++;';
+    const out = '  const { error } = await authClient.auth.signOut({ scope: "local" });';
+    assert.deepEqual(rule20(h([guard, inc, out].join("\n"))), []);
+    for (const [label, code] of [
+      ["không kiểm", h([inc, out].join("\n"))],
+      ["kiểm SAU manualSignOuts++", h([inc, guard, out].join("\n"))],
+      ["kiểm SAU signOut(", h([inc.replace("manualSignOuts++", "x++"), out, guard, inc].join("\n"))],
+      ["kiểm mà không return", h(['  if (btn.dataset.auth === "logout" && nhomAdd.saving) console.warn("đang lưu");', inc, out].join("\n"))],
+      ["kiểm ở hàm khác", "function f() { if (nhomAdd.saving) return; }\n" + h([inc, out].join("\n"))],
+      ["không có handler", "document.addEventListener(\"click\", () => {});"],
+    ]) assert.notDeepEqual(rule20(code), [], label);
   });
 
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
@@ -797,6 +825,38 @@ function rule19(files) {
   const back = bodyAfterParams(files["nhom-add.js"] || "", "nhomFormFromBackText");
   if (!back) out.push("nhom-add.js phải có function nhomFormFromBackText(…)");
   else if (/di_ung/.test(back)) out.push("nhomFormFromBackText có chữ di_ung (chữ mặt sau không được tự tích dị ứng)");
+  // Vòng 8 (gợi ý 8): không .move( / .copy( (đổi / chép file trên bucket) ở đâu cả; .from( có tham số chứa chữ nhom / NHOM
+  // (bảng nhom_*, bucket nhom-anh, NHOM_BUCKET, biến nhom…) chỉ ở nhom-data.js (đọc) và nhom-write.js (ghi).
+  for (const [name, code] of Object.entries(files)) {
+    for (const m of code.matchAll(/\.(move|copy)\s*\(/g)) out.push(`${name} dòng ${lineOf(code, m.index)}: có ".${m[1]}("`);
+    if (name === "nhom-data.js" || name === "nhom-write.js") continue;
+    for (const m of code.matchAll(/\.from\s*\(/g)) {
+      const args = topArgs(code, m.index + m[0].length - 1).join(",");
+      if (/nhom/i.test(args)) out.push(`${name} dòng ${lineOf(code, m.index)}: .from(${args.slice(0, 30)}) ngoài nhom-data.js / nhom-write.js`);
+    }
+  }
+  return out;
+}
+
+/** Luật (20) (đợt kho-nhom vòng 8): handler click của #authBox (authBox.addEventListener("click", …)) phải có một câu
+ *  `if (… nhomAdd.saving …) { … return … }` (hoặc `if (…) return`) đứng TRƯỚC manualSignOuts++ và TRƯỚC signOut(:
+ *  bấm "Đăng xuất" khi đang lưu vào kho nhóm thì không đăng xuất, không tăng số lần tự đăng xuất. */
+function rule20(code) {
+  const h = /\bauthBox\.addEventListener\(\s*["']click["']\s*,/.exec(code);
+  if (!h) return ["không có authBox.addEventListener(\"click\", …)"];
+  const [s, e] = blockAt(code, h.index + h[0].length);
+  const body = code.slice(s, e);
+  const out = [];
+  const guard = /\bif\s*\(((?:[^()]|\([^()]*\))*\bnhomAdd\.saving\b(?:[^()]|\([^()]*\))*)\)\s*(\{(?:[^{}]|\{[^{}]*\})*?\breturn\b|return\b)/.exec(body);
+  const inc = /\bmanualSignOuts\s*\+\+|\+\+\s*manualSignOuts\b|\bmanualSignOuts\s*\+=/.exec(body);
+  const so = /\.signOut\s*\(/.exec(body);
+  if (!inc) out.push("handler #authBox phải tăng manualSignOuts");
+  if (!so) out.push("handler #authBox phải gọi signOut(");
+  if (!guard) out.push("handler #authBox phải có if (… nhomAdd.saving …) { … return } trước khi đăng xuất");
+  else {
+    if (inc && guard.index > inc.index) out.push("kiểm nhomAdd.saving đứng SAU manualSignOuts++");
+    if (so && guard.index > so.index) out.push("kiểm nhomAdd.saving đứng SAU signOut(");
+  }
   return out;
 }
 
