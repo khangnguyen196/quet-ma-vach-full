@@ -337,14 +337,18 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
                 log.info("khách ngắt kết nối khi đang gửi ảnh")
                 return error(400, "Kết nối bị ngắt khi đang gửi ảnh.")
             request.state.nbytes = nbytes
+            kho = None
+            if kho_task is not None and st.nhom_parallel:
+                # SONG SONG (vòng 5): chờ kho (thường có sẵn trong cache; tối đa store.timeout giây) TRƯỚC khi giữ khóa
+                # OCR, để lúc chờ Supabase không chặn ảnh của người khác. Vẫn giữ CHỖ hàng đợi (RAM có trần như cũ).
+                kho = await kho_task
             await slot.acquire()  # chờ khóa OCR (ảnh đã nằm trong RAM, đã tính vào chỗ đã giành)
             nhom = None
             clip = request.app.state.clip
             if kho_task is None:
                 result = await run_in_threadpool(process, eng, data, st.max_pixels, st.max_pixels_progressive)
             elif st.nhom_parallel:
-                # SONG SONG: chờ kho (thường có sẵn trong cache), rồi OCR + CLIP chạy 2 luồng cùng lúc
-                kho = await kho_task
+                # SONG SONG: kho đã chờ ở trên, OCR + CLIP chạy 2 luồng cùng lúc
                 result, nhom = await run_in_threadpool(process_parallel, eng, clip, kho, data, st.max_pixels,
                                                        st.max_pixels_progressive)
             else:
