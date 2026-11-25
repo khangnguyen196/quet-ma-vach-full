@@ -247,9 +247,13 @@ def test_requirements_chi_chu_ascii():
 
 # --- kho nhóm (đợt kho-nhom vòng 4) ---------------------------------------------------------------------------------
 def test_clip_tai_luc_build_dung_nguon_va_sha256_cua_clip_engine():
-    """Dockerfile tải model CLIP từ ĐÚNG MODEL_URL, kiểm ĐÚNG MODEL_SHA256 của clip_engine.py bằng sha256sum -c (nối &&,
-    trước chmod), ENV CLIP_MODEL_PATH trỏ đúng file đó; lớp tải đứng sau pip install và trước COPY mã máy chủ."""
+    """Dockerfile tải model CLIP từ ĐÚNG MODEL_URL (clip_model.py, vòng 5), kiểm ĐÚNG MODEL_SHA256 của clip_engine.py
+    bằng sha256sum -c (nối &&, trước chmod), ENV CLIP_MODEL_PATH trỏ đúng file đó; lớp tải đứng sau pip install và trước
+    COPY mã máy chủ."""
     import clip_engine
+    import clip_model
+
+    assert clip_model.MODEL_SHA256 == clip_engine.MODEL_SHA256 and clip_model.MODEL_INFO is clip_engine.MODEL_INFO
 
     src = _dockerfile()
     flat = re.sub(r"\\\n", " ", src).splitlines()
@@ -258,13 +262,13 @@ def test_clip_tai_luc_build_dung_nguon_va_sha256_cua_clip_engine():
     run = run[0]
     dest = _env(src)["CLIP_MODEL_PATH"]
     assert dest == "/app/models/clip/vision_model_quantized.onnx"
-    assert f"urlretrieve('{clip_engine.MODEL_URL}', '{dest}')" in run
+    assert f"urlretrieve('{clip_model.MODEL_URL}', '{dest}')" in run
     i_get, i_sum = run.find("urlretrieve"), run.find(f'echo "{clip_engine.MODEL_SHA256}  {dest}" | sha256sum -c -')
     i_chmod = run.find("chmod -R a+rX /app/models")
     assert 0 <= i_get < i_sum < i_chmod, (i_get, i_sum, i_chmod)
     assert "&&" in run[i_get:i_sum] and "&&" in run[i_sum:i_chmod]
-    assert clip_engine.MODEL_URL.startswith("https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/")
-    assert clip_engine.MODEL_INFO["revision"] in clip_engine.MODEL_URL
+    assert clip_model.MODEL_URL.startswith("https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/")
+    assert clip_engine.MODEL_INFO["revision"] in clip_model.MODEL_URL
     idx = lambda pred: next(i for i, ln in enumerate(flat) if pred(ln))  # noqa: E731
     pip = idx(lambda ln: ln.startswith("RUN ") and "pip install" in ln)
     clip = flat.index(run)
@@ -273,6 +277,22 @@ def test_clip_tai_luc_build_dung_nguon_va_sha256_cua_clip_engine():
     lines = src.splitlines()
     user = next(i for i, ln in enumerate(lines) if ln.strip() == "USER ocr")
     assert any("ClipEngine(os.environ['CLIP_MODEL_PATH'])" in ln for ln in lines[user:]), "người dùng ocr phải nạp thử CLIP"
+
+
+def test_clip_model_url_bytes_trung_licenses_va_model_that():
+    """Vòng 5: MODEL_URL / MODEL_BYTES nằm ở clip_model.py (clip_engine.py giữ đúng bản mốc vector bfc32a0, không có 2 hằng
+    này); số byte trùng LICENSES.md và file model thật (nếu máy có, như test_clip_engine.py)."""
+    import clip_engine
+    import clip_model
+    from test_clip_engine import MODEL
+
+    assert not hasattr(clip_engine, "MODEL_URL") and not hasattr(clip_engine, "MODEL_BYTES")
+    assert clip_model.MODEL_URL.endswith("/onnx/" + clip_engine.MODEL_INFO["file"])
+    lic = (SERVER / "LICENSES.md").read_text(encoding="utf-8")
+    assert f"{clip_model.MODEL_BYTES:,}".replace(",", ".") + " byte" in lic
+    assert "`MODEL_URL` của `clip_model.py`" in lic
+    if MODEL.is_file():
+        assert MODEL.stat().st_size == clip_model.MODEL_BYTES
 
 
 def test_khoa_ky_kho_nhom_khong_bao_gio_o_dockerfile():

@@ -25,10 +25,6 @@ MODEL_INFO = {"name": "clip-vit-base-patch32", "repo": "Xenova/clip-vit-base-pat
               "revision": "6b7c523703ae26e39be4b03774966f8571c7f523", "file": "vision_model_quantized.onnx",
               "quant": "int8", "license": "MIT", "pre": "cat"}
 MODEL_ID = "clip-vit-b32-int8-cat"  # ghi vào cột model của bảng nhom_anh
-# Nguồn tải ghim theo revision (Dockerfile tải lúc build rồi sha256sum -c với MODEL_SHA256; test_dockerfile.py kiểm trùng)
-MODEL_URL = ("https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523"
-             "/onnx/vision_model_quantized.onnx")
-MODEL_BYTES = 89_117_001
 DIMS = 512
 SIZE = 224  # shortest_edge = crop 224 (preprocessor_config.json)
 MEAN = (0.48145466, 0.4578275, 0.40821073)

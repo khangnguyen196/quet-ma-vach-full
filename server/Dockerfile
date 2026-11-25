@@ -38,7 +38,7 @@ RUN echo "370a9ab314b3f6fc88ad7cf1fdd67011ab0a8cd57e9557d5362f8136a7bcd164  /tmp
  && chmod -R a+rX /app/catalog-index
 
 # Model CLIP ViT-B/32 int8 cho kho nhóm (đợt kho-nhom vòng 4; MIT, LICENSES.md): tải LÚC BUILD từ nguồn ghim theo revision
-# (= MODEL_URL của clip_engine.py), kiểm sha256 (= MODEL_SHA256 của clip_engine.py; test_dockerfile.py kiểm trùng) bằng
+# (= MODEL_URL của clip_model.py), kiểm sha256 (= MODEL_SHA256 của clip_engine.py; test_dockerfile.py kiểm trùng) bằng
 # sha256sum -c: sai thì build hỏng. Lớp này đứng TRƯỚC COPY mã máy chủ (sửa app.py không tải lại 89 MB). Lúc chạy không tải.
 RUN mkdir -p /app/models/clip \
  && python -c "import urllib.request; urllib.request.urlretrieve('https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523/onnx/vision_model_quantized.onnx', '/app/models/clip/vision_model_quantized.onnx')" \
