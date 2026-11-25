@@ -583,6 +583,7 @@ def test_embed_sai_uid_403():
 @pytest.mark.parametrize("bad", [
     "", "abc", path_of(ext="gif"), path_of(ext="JPG"), path_of() + "\n", "/" + path_of(), path_of().upper(),
     SUB + "/" + OTHER_UUID + ".jpg/x.jpg", SUB + "//" + OTHER_UUID + ".jpg", SUB + "/../" + OTHER_UUID + ".jpg",
+    path_of(ext="webp"), path_of(ext="jpeg"),
 ])
 def test_embed_duong_dan_sai_dang_400(bad):
     r = req(make_nhom_app(), "/embed", token=es256(), duong_dan=bad)
@@ -616,8 +617,91 @@ def test_embed_anh_qua_hep_400():
             clip_engine.preprocess(np.asarray(img))
             raise AssertionError("không được tới đây")
 
-    r = req(make_nhom_app(clip=ClipThat()), "/embed", token=es256(), duong_dan=path_of(), img=buf.getvalue())
+    # vòng 5: ảnh PNG -> đường dẫn .png (đuôi phải khớp định dạng byte)
+    r = req(make_nhom_app(clip=ClipThat()), "/embed", token=es256(), duong_dan=path_of(ext="png"), img=buf.getvalue())
     assert r.status_code == 400 and r.json()["error"] == "Ảnh quá hẹp để tính vector."
+
+
+# ---------------- vòng 5: /embed khớp bucket nhom-anh (JPEG / PNG ≤ 2.097.152 B, đuôi khớp định dạng) ----------------
+
+def _padded(data: bytes, size: int) -> bytes:
+    """Ảnh hợp lệ + byte 0 sau phần kết thúc, đúng `size` byte (Pillow bỏ qua phần thừa sau EOI / IEND)."""
+    assert len(data) <= size
+    return data + b"\x00" * (size - len(data))
+
+
+def test_embed_duong_dan_webp_400_khong_tinh_vector():
+    a = make_nhom_app()
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(ext="webp"))
+    assert r.status_code == 400
+    assert r.json()["error"] == "Đường dẫn ảnh sai dạng (cần <mã tài khoản>/<mã ảnh>.jpg hoặc .png)."
+    assert a.state.clip.calls == 0
+    assert kho_nhom.path_uid(path_of(ext="webp")) is None and kho_nhom.path_format(path_of(ext="webp")) is None
+    assert kho_nhom.path_format(path_of()) == "jpeg" and kho_nhom.path_format(path_of(ext="png")) == "png"
+
+
+def test_embed_tran_2097152_byte():
+    import app as app_module
+    from conftest import png_bytes
+
+    assert app_module.EMBED_MAX_BYTES == 2_097_152
+    a = make_nhom_app()
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(), img=_padded(jpeg_bytes(), 2_097_152))
+    assert r.status_code == 200, r.text
+    assert "ky" in r.json()
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(ext="png"), img=_padded(png_bytes(), 2_097_152))
+    assert r.status_code == 200, r.text
+    calls = a.state.clip.calls
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(), img=_padded(jpeg_bytes(), 2_097_153))
+    assert r.status_code == 413 and r.json()["error"] == "Ảnh quá lớn (tối đa 2 MB)."
+    assert a.state.clip.calls == calls
+    # /ocr KHÔNG đổi: vẫn nhận ảnh 2.097.153 B (trần 5 MB)
+    r = req(a, "/ocr", token=es256(), img=_padded(jpeg_bytes(), 2_097_153))
+    assert r.status_code == 200, r.text
+
+
+def test_embed_byte_lech_duoi_400():
+    from conftest import png_bytes
+
+    a = make_nhom_app()
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(), img=png_bytes())  # byte PNG, đuôi .jpg
+    assert r.status_code == 400
+    assert r.json()["error"] == ("Ảnh là PNG nhưng đường dẫn không có đuôi .png: gửi đúng ảnh sẽ tải lên kho nhóm, với "
+                                 "đuôi khớp định dạng ảnh.")
+    r = req(a, "/embed", token=es256(), duong_dan=path_of(ext="png"), img=jpeg_bytes())  # byte JPEG, đuôi .png
+    assert r.status_code == 400
+    assert r.json()["error"] == ("Ảnh là JPEG nhưng đường dẫn không có đuôi .jpg: gửi đúng ảnh sẽ tải lên kho nhóm, với "
+                                 "đuôi khớp định dạng ảnh.")
+    assert a.state.clip.calls == 0
+    assert req(a, "/embed", token=es256(), duong_dan=path_of(ext="png"), img=png_bytes()).status_code == 200
+
+
+@pytest.mark.parametrize("ext", ["jpg", "png"])
+def test_embed_heic_va_loai_khac_415(ext):
+    a = make_nhom_app()
+    heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + b"\x00" * 64
+    webp = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 64
+    gif = b"GIF89a" + b"\x00" * 64
+    for data in (heic, webp, gif):
+        r = req(a, "/embed", token=es256(), duong_dan=path_of(ext=ext), img=data)
+        assert r.status_code == 415 and r.json()["error"] == "Kho nhóm chỉ nhận ảnh JPEG hoặc PNG.", data[:12]
+    assert a.state.clip.calls == 0
+    # /ocr KHÔNG đổi: HEIC vẫn đi đường cũ (không bị câu 415 của kho nhóm)
+    r = req(a, "/ocr", token=es256(), img=heic)
+    assert r.json().get("error") != "Kho nhóm chỉ nhận ảnh JPEG hoặc PNG."
+
+
+def test_dong_kho_webp_chu_ky_dung_cong_thuc_van_bi_bo():
+    """SQL dòng 1–306 vẫn cho duong_dan .webp; máy chủ không ký .webp, và dòng .webp có chữ ký ĐÚNG công thức (vd ký bằng
+    khóa thật ở nơi khác) vẫn bị bỏ khi nạp (lý do "ky")."""
+    rng = np.random.default_rng(23)
+    v = rand_vec(rng)
+    p_webp = path_of(ext="webp")
+    dong = row(v, duong_dan=p_webp, ky=kho_nhom.sign(KEY, p_webp, MODEL_ID, v))
+    assert kho_nhom.verify(KEY, p_webp, MODEL_ID, v, dong["ky"])  # chữ ký đúng công thức
+    tot = row(rand_vec(rng), duong_dan=path_of(img=OTHER_UUID), pid="sp-tot")
+    kho = kho_nhom.build_kho([dong, tot], KEY)
+    assert kho.n == 1 and kho.row_pid == ["sp-tot"] and kho.dropped == {"ky": 1}
 
 
 def test_embed_tinh_vao_luot_ngay_va_phut_nhu_ocr():

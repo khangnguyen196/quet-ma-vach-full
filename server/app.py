@@ -378,7 +378,8 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
         """Vector CLIP + chữ ký HMAC cho 1 ảnh mặt trước sắp lưu vào kho nhóm (README "Hợp đồng API kho nhóm")."""
         st: Settings = request.app.state.settings
         # Tắt -> 503 ngay (không đọc token, không gọi Supabase, không tính lượt). Bật: giới hạn IP -> token -> giới hạn
-        # người dùng phút + ngày (CÙNG bộ đếm với /ocr) -> hàng đợi -> đọc ảnh + duong_dan.
+        # người dùng phút + ngày (CÙNG bộ đếm với /ocr) -> hàng đợi -> đọc ảnh (≤ 2.097.152 B, vượt 413) + duong_dan
+        # (thiếu / sai dạng 400, khác uid 403) -> định dạng byte (không phải JPEG / PNG 415; lệch đuôi 400) -> vector.
         if not nhom_enabled(request.app.state):
             return error(503, "Kho nhóm chưa bật trên máy chủ.")
         user_id, resp = await check_limits_and_auth(request, st)
@@ -392,8 +393,10 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
             return error(503, "Máy chủ đang bận (hàng đợi đầy). Thử lại sau ít giây.", {"Retry-After": str(QUEUE_RETRY_AFTER)})
         try:
             try:
+                # trần ảnh = giới hạn bucket nhom-anh (2.097.152 B), không phải MAX_BYTES của /ocr (vòng 5)
                 async with asyncio.timeout(st.body_timeout_s):
-                    data, nbytes, fields = await upload.read_form(request, st.max_bytes, st.max_body,
+                    data, nbytes, fields = await upload.read_form(request, EMBED_MAX_BYTES,
+                                                                  EMBED_MAX_BYTES + st.multipart_overhead,
                                                                   text_fields=(EMBED_PATH_FIELD,))
             except TimeoutError:
                 secs = f"{st.body_timeout_s:g}".replace(".", ",")
@@ -409,9 +412,17 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
                 return error(400, f"Thiếu trường '{EMBED_PATH_FIELD}' (đường dẫn ảnh trong kho nhóm).")
             uid = kho_nhom.path_uid(duong_dan)
             if uid is None:
-                return error(400, "Đường dẫn ảnh sai dạng (cần <mã tài khoản>/<mã ảnh>.jpg, .png hoặc .webp).")
+                return error(400, "Đường dẫn ảnh sai dạng (cần <mã tài khoản>/<mã ảnh>.jpg hoặc .png).")
             if uid != user_id:
                 return error(403, "Đường dẫn ảnh phải nằm trong thư mục của chính tài khoản đang đăng nhập.")
+            # vòng 5: bucket nhom-anh chỉ để JPEG / PNG ở đây; byte gửi /embed phải ĐÚNG là file sẽ tải lên (đuôi khớp)
+            kind = imaging.detect_format(data)
+            if kind not in ("jpeg", "png"):
+                return error(415, "Kho nhóm chỉ nhận ảnh JPEG hoặc PNG.")
+            if kind != kho_nhom.path_format(duong_dan):
+                ext = ".jpg" if kind == "jpeg" else ".png"
+                return error(400, f"Ảnh là {kind.upper()} nhưng đường dẫn không có đuôi {ext}: gửi đúng ảnh sẽ tải lên "
+                                  f"kho nhóm, với đuôi khớp định dạng ảnh.")
             await slot.acquire()
             vec = await run_in_threadpool(embed_image_bytes, request.app.state.clip, data, st.max_pixels,
                                           st.max_pixels_progressive)
@@ -432,6 +443,7 @@ def create_app(settings: Settings | None = None, engine=None, verifier=None, cat
 
 
 EMBED_PATH_FIELD = "duong_dan"
+EMBED_MAX_BYTES = 2_097_152  # = file_size_limit của bucket nhom-anh (kho-nhom.sql); ảnh lớn hơn -> 413
 
 
 def embed_image_bytes(clip, data, max_pixels: int, max_pixels_progressive: int | None = None):

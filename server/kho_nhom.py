@@ -38,8 +38,12 @@ DOMAIN = b"kho-nhom-v1"
 SEP = b"\x00"
 _KEY_RE = re.compile(r"[0-9a-fA-F]{64}")
 _KY_RE = re.compile(r"[0-9a-f]{64}")
-# đường dẫn trong bucket nhom-anh: "<uid>/<uuid ảnh>.<jpg|png|webp>" (trùng CHECK cột duong_dan của kho-nhom.sql)
-PATH_RE = re.compile(r"([0-9a-f-]{36})/[0-9a-f-]{36}\.(jpg|png|webp)")
+# đường dẫn trong bucket nhom-anh: "<uid>/<uuid ảnh>.<jpg|png>". Vòng 5: máy chủ CHẶT HƠN CHECK cột duong_dan / policy
+# storage của kho-nhom.sql (SQL dòng 1–306 đã chạy, vẫn cho .webp, không đổi): /embed chỉ nhận JPEG / PNG nên không bao giờ
+# ký đường dẫn .webp; dòng .webp trong bảng (nếu có) bị bỏ khi nạp kho (lý do "ky").
+PATH_RE = re.compile(r"([0-9a-f-]{36})/[0-9a-f-]{36}\.(jpg|png)")
+# đuôi đường dẫn <-> định dạng thật của byte ảnh (imaging.detect_format)
+EXT_FORMAT = {"jpg": "jpeg", "png": "png"}
 PATH_MAX = 128
 NORM_TOL = 1e-3  # |chuẩn L2 − 1| < 1e-3 (trùng hàm nhom_vec_hop_le của SQL)
 
@@ -139,6 +143,13 @@ def path_uid(duong_dan) -> str | None:
         return None
     m = PATH_RE.fullmatch(duong_dan)
     return m.group(1) if m else None
+
+
+def path_format(duong_dan) -> str | None:
+    """Đường dẫn đúng dạng -> định dạng ảnh mà đuôi đòi ('jpeg' | 'png'); sai dạng -> None."""
+    if path_uid(duong_dan) is None:
+        return None
+    return EXT_FORMAT[duong_dan.rsplit(".", 1)[1]]
 
 
 # ---------------- kho ----------------

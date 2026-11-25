@@ -183,9 +183,15 @@ Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/oc
 Bảng Supabase + bucket: `server/kho-nhom.sql`. Vector KHÔNG tin app: app chỉ lưu vector máy chủ tính + ký; máy chủ bỏ mọi
 dòng sai chữ ký khi nạp kho.
 
-**`POST /embed`** — `multipart/form-data`: trường file `image` (như `/ocr`: JPEG / PNG / HEIC ≤ 5 MB) + trường chữ
-`duong_dan` = đường dẫn ảnh trong bucket `nhom-anh` mà app SẼ tải lên, dạng `<uid>/<uuid ảnh>.jpg|png|webp` (≤ 128 ký
-tự). Trả:
+**`POST /embed`** — `multipart/form-data`: trường file `image` = JPEG hoặc PNG **≤ 2.097.152 B** (= giới hạn bucket
+`nhom-anh`; KHÔNG như `/ocr`: không HEIC, không 5 MB) + trường chữ `duong_dan` = đường dẫn ảnh trong bucket `nhom-anh` mà
+app SẼ tải lên, dạng `<uid>/<uuid ảnh>.jpg|png` (≤ 128 ký tự; vòng 5 bỏ `.webp`: máy chủ chặt hơn CHECK của
+`kho-nhom.sql`, SQL vẫn cho `.webp` nhưng dòng `.webp` không bao giờ có chữ ký hợp lệ nên bị bỏ khi nạp). Đuôi phải khớp
+định dạng THẬT của byte ảnh (JPEG ↔ `.jpg`, PNG ↔ `.png`).
+
+**App phải** gửi `/embed` ĐÚNG các byte sẽ tải lên bucket (CÙNG một Blob cho `/embed` và cho lệnh tải lên), JPEG hoặc PNG
+≤ 2 MB, `contentType` khớp đuôi (`image/jpeg` cho `.jpg`, `image/png` cho `.png`), tải lên với `upsert: false` (không
+ghi đè ảnh đã có ở cùng đường dẫn). Trả:
 
 ```json
 { "model": "clip-vit-b32-int8-cat", "vec": [0.0123456789, "… 512 số"], "ky": "<64 ký tự hex thường>" }
@@ -199,9 +205,11 @@ tự). Trả:
   `vec` + `ky` sang đường dẫn khác thì bị bỏ.
 - Thứ tự kiểm: kho nhóm tắt -> **503** "Kho nhóm chưa bật trên máy chủ." (không đọc token, không tính lượt) -> giới hạn IP
   -> token (thiếu / sai **401**, Supabase lỗi 503) -> giới hạn người dùng phút + ngày -> hàng đợi -> đọc ảnh + `duong_dan`
-  (thiếu / quá dài / gửi 2 lần **400**) -> sai dạng **400** "Đường dẫn ảnh sai dạng …" -> phần trước "/" khác uid (`sub`)
-  của token **403** "Đường dẫn ảnh phải nằm trong thư mục của chính tài khoản đang đăng nhập." -> ảnh lỗi 413 / 415, ảnh
-  quá hẹp (cạnh dài > 20 × cạnh ngắn) 400.
+  (ảnh > 2.097.152 B **413** "Ảnh quá lớn (tối đa 2 MB)."; thiếu / quá dài / gửi 2 lần **400**) -> sai dạng (kể cả
+  `.webp`) **400** "Đường dẫn ảnh sai dạng …" -> phần trước "/" khác uid (`sub`) của token **403** "Đường dẫn ảnh phải
+  nằm trong thư mục của chính tài khoản đang đăng nhập." -> byte không phải JPEG / PNG (HEIC, WebP, loại khác) **415**
+  "Kho nhóm chỉ nhận ảnh JPEG hoặc PNG." -> định dạng byte lệch đuôi **400** "Ảnh là PNG nhưng đường dẫn không có đuôi
+  .png: …" -> ảnh hỏng / quá nhiều điểm ảnh 415 / 413, ảnh quá hẹp (cạnh dài > 20 × cạnh ngắn) 400 (vòng 5).
 - **Có tính vào lượt**: `/embed` dùng CHUNG bộ đếm với `/ocr` (IP / phút, người / phút, người / ngày `DAILY_LIMIT_PER_USER`):
   thêm 1 ảnh vào kho = 1 lượt. Tính vector chạy trong cùng hàng đợi `MAX_CONCURRENT` với OCR.
 
@@ -256,10 +264,10 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 
 | Mã | Khi nào |
 |---|---|
-| 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn; khách ngắt kết nối giữa chừng (1 dòng log, không traceback) |
+| 400 | không phải multipart, thiếu trường `image`, ảnh rỗng, 2 file trở lên, multipart hỏng / chưa trọn; khách ngắt kết nối giữa chừng (1 dòng log, không traceback); (`/embed`) `duong_dan` thiếu / sai dạng / `.webp`, định dạng byte ảnh lệch đuôi, ảnh quá hẹp |
 | 408 | gửi thân ảnh quá `BODY_TIMEOUT_S` giây (mạng quá chậm / gửi treo) |
-| 413 | ảnh > 5 MB (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG nhiều lượt quét quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
-| 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif |
+| 413 | ảnh > 5 MB (`/embed`: > 2.097.152 B) (Content-Length khai lớn -> từ chối trước khi đọc; thân thật vượt -> dừng đọc ngay), quá `MAX_PIXELS`, JPEG nhiều lượt quét quá `MAX_PIXELS_PROGRESSIVE`, bom điểm ảnh của Pillow |
+| 415 | không phải JPEG / PNG / HEIC (vd file chữ đặt đuôi .jpg), ảnh hỏng; HEIC khi không có pi-heif; (`/embed`) không phải JPEG / PNG (kể cả HEIC) |
 | 422 | yêu cầu không hợp lệ khác |
 | 401 | (`AUTH_MODE=supabase`) thiếu token, token sai / hết hạn / alg không nhận; có `WWW-Authenticate: Bearer` |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng, hoặc quá `DAILY_LIMIT_PER_USER` ảnh / người / ngày UTC; có `Retry-After` (giới hạn ngày: số giây tới 00:00 UTC) |
