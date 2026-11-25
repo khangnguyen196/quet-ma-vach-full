@@ -225,12 +225,13 @@ ghi đè ảnh đã có ở cùng đường dẫn). Trả:
 - ≤ 3 mục, mỗi sản phẩm lấy ảnh giống nhất; `diem` = tích vô hướng 2 vector chuẩn 1 (= cos), làm tròn 4 số, giảm dần
   (bằng điểm thì món xuất hiện trước trong kho trước). `thuong_hieu` / `ma_vach` có thể `null`. Máy chủ KHÔNG có ngưỡng:
   `NHOM_THRESHOLD` ở app.
-- Nạp kho: `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000`
+- Nạp kho:
+  `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000`
   theo trang 1.000 dòng (vòng 5: trang sau thêm `&id=gt.<id cuối của trang trước>`, KHÔNG offset, nên thêm / xóa dòng
-  giữa 2 trang không làm sót dòng; id cuối trang sai dạng uuid -> dừng phân trang, dùng phần đã nạp), tối đa 10 trang, header `apikey` = publishable key, `Authorization` = token của CHÍNH request
-  (RLS; không service_role). Bắt đầu ngay sau khi token đã kiểm hợp lệ, song song với đọc ảnh (+ OCR ở chế độ nối tiếp; chế độ song song chờ kho
-xong rồi mới giữ khóa OCR, vòng 5). Cache DÙNG CHUNG 60
-  giây (RLS cho mọi người đăng nhập thấy cùng dữ liệu); lỗi nhớ 2 giây. Bỏ dòng: `model` khác `MODEL_ID`, `vec` không
+  giữa 2 trang không làm sót dòng; id cuối trang sai dạng uuid -> dừng phân trang, dùng phần đã nạp), tối đa 10 trang,
+  header `apikey` = publishable key, `Authorization` = token của CHÍNH request (RLS; không service_role). Bắt đầu ngay
+  sau khi token đã kiểm hợp lệ, song song với đọc ảnh (+ OCR ở chế độ nối tiếp; chế độ song song chờ kho xong rồi mới
+  giữ khóa OCR, vòng 5). Cache DÙNG CHUNG 60 giây (RLS cho mọi người đăng nhập thấy cùng dữ liệu); lỗi nhớ 2 giây. Bỏ dòng: `model` khác `MODEL_ID`, `vec` không
   đúng 512 số hữu hạn / chuẩn lệch 1 quá 1e-3, `ky` sai dạng / HMAC sai, `duong_dan` sai dạng, thiếu món. Log chỉ số dòng
   nạp / bỏ theo lý do (không token, khóa, tên món, đường dẫn).
 - Số đo (`do_kho_nhom.py`, cách đo ở đầu file): xem mục "Số đo kho nhóm" ngay dưới.
@@ -256,11 +257,16 @@ commit). Máy không có Docker nên giới hạn 1 vCPU = ghim tiến trình m�
   đạt). Nạp + kiểm chữ ký 300 dòng 344 ms, mỗi 60 giây một lần, chạy song song với đọc ảnh + OCR.
 - Song song không giảm việc CPU phải làm trên 1 vCPU (2 luồng chia 1 nhân); số "song" nhanh hơn "tat" nằm trong độ dao
   động, không coi là lợi. Mặc định giữ NỐI TIẾP (`NHOM_SONG_SONG=0`): đơn giản hơn, RAM đỉnh thấp hơn 6 MiB.
-- RAM đỉnh (max peak_wset / peak_pagefile, gồm cả ảnh 40 MP): CLIP thêm ~94 MiB (goc 635,5 -> tat 729,4), kho 300 vector
-  + tính vector thêm ~10–16 MiB; cao nhất 745,8 MiB < trần 1.536 MiB. memory.peak trong CI gồm nạp CLIP, KHÔNG gồm kho
-  nhóm bật (CI không có token Supabase); RAM đỉnh khi bật 745,8 MiB chỉ đo trên Windows. CI run 45707768628 (764347a):
-  memory.peak 805,8 MB, ảnh 301,7 MB, /health 200 sau 4,7 giây (main 96499ab trước đợt, run 43728924624: 682,0 MB,
-  235,8 MB, 3,8 giây).
+- Đơn vị (vòng 6, không trộn): số đo trên Windows (`do_kho_nhom.py`) ghi **MiB** (1 MiB = 1.048.576 byte); số CI
+  (`memory.peak` của cgroup, cỡ ảnh Docker) ghi **MB theo CI** (byte / 1.048.576, workflow in nhãn "MB"). Hai nguồn đo
+  khác thứ (Windows: đỉnh working set / bộ nhớ riêng; CI: `memory.peak` gồm cả bộ đệm trang / file mmap đã chạm) nên
+  KHÔNG so thẳng số Windows với số CI.
+- RAM đỉnh Windows (max peak_wset / peak_pagefile, gồm cả ảnh 40 MP): CLIP thêm **+94 MiB** (goc 635,5 -> tat 729,4 MiB;
+  nạp CLIP riêng ~120 MiB, nên ghi khoảng **+94–120 MiB**), kho 300 vector + tính vector thêm ~10–16 MiB; cao nhất
+  745,8 MiB < trần 1.536 MiB. RAM đỉnh khi bật kho chỉ đo trên Windows.
+- CI (`memory.peak` gồm nạp CLIP, KHÔNG gồm kho nhóm bật vì CI không có token Supabase): **682,0 -> 805,8 MB (+123,8 MB,
+  gồm bộ đệm trang)** — main 96499ab trước đợt (run 43728924624: 682,0 MB, ảnh 235,8 MB, /health 200 sau 3,8 giây) ->
+  764347a (run 45707768628: 805,8 MB, ảnh 301,7 MB, /health 200 sau 4,7 giây).
 - Giới hạn kho: nạp tối đa 10 trang × 1.000 dòng (10.000 ảnh), mới đo với 300 dòng; kho > 1.000 dòng thì đo lại RAM
   (`do_kho_nhom.py` với `N_KHO` lớn hơn) trước khi coi là an toàn.
 

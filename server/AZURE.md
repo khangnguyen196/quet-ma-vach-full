@@ -243,8 +243,10 @@ Ra 64 ký tự 0-9 a-f. Chép vào 2 nơi, **CÙNG MỘT khóa** (khác nhau th�
 **Giá của CLIP khi CHƯA đặt khóa** (quyết định đã chốt: ảnh mới luôn nạp CLIP, kể cả khi kho nhóm tắt): mỗi lần Container
 App thức dậy từ 0 bản sao, máy chủ nạp thêm model CLIP trước khi `/health` trả 200 — CI (1 vCPU / 2 GiB): /health 200 sau
 **4,7 giây** (run 45707768628, commit 764347a) so với **3,8 giây** trước đợt (run 43728924624, main 96499ab), tức chậm thêm
-khoảng **0,9 giây** (mỗi bên 1 lần đo, chỉ tham khảo); RAM thêm khoảng **94–120 MiB** (Windows: 635,5 → 729,4 MiB đỉnh;
-nạp CLIP ~120 MiB; CI memory.peak 682,0 → 805,8 MB, gồm cả bộ đệm trang). Ảnh Docker 235,8 → 301,7 MB.
+khoảng **0,9 giây** (mỗi bên 1 lần đo, chỉ tham khảo). RAM thêm (hai nguồn đo khác thứ, đơn vị khác, KHÔNG trộn):
+Windows (đỉnh working set / bộ nhớ riêng, **MiB** = 1.048.576 byte) **+94–120 MiB** (635,5 → 729,4 MiB đỉnh; nạp CLIP
+riêng ~120 MiB); CI (`memory.peak` của cgroup, **MB theo CI** = byte / 1.048.576) **682,0 → 805,8 MB (+123,8 MB, gồm bộ
+đệm trang)**. Ảnh Docker (MB theo CI) 235,8 → 301,7 MB.
 3. Kiểm `https://<địa chỉ app>/health`: `"clip":{"loaded":true,"model":"clip-vit-b32-int8-cat"}` và `"nhom":{"enabled":true}`.
    `enabled` false: xem **Log stream** dòng "kho nhóm TẮT: …" (chỉ nêu tên biến: thiếu / sai dạng, cần AUTH_MODE=supabase,
    hoặc CLIP chưa nạp).
