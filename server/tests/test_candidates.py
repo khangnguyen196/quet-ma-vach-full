@@ -135,7 +135,8 @@ def test_nap_loi_ocr_van_chay(monkeypatch, caplog, tmp_path):
     assert app.state.catalog is None
 
 
-HEALTH_OLD = {"ok", "modelLoaded", "engine", "version", "commit"}
+# clip / nhom: đợt kho-nhom vòng 4 (luôn có, test_kho_nhom.py kiểm giá trị)
+HEALTH_OLD = {"ok", "modelLoaded", "engine", "version", "commit", "clip", "nhom"}
 
 
 def test_health_catalog_khong_co_bien(monkeypatch):

@@ -432,8 +432,10 @@ def test_health_khong_lo_bien_moi_truong(make_app, monkeypatch):
     with TestClient(make_app()) as c:
         j = c.get("/health").json()
     # commit: đợt cung-co vòng 2; catalog: đợt kho-lon vòng 3 (không có CATALOG_PATH -> chưa nạp)
-    assert set(j) == {"ok", "modelLoaded", "engine", "version", "commit", "catalog"}
+    # clip / nhom: đợt kho-nhom vòng 4 (không có CLIP_MODEL_PATH / khóa -> chưa nạp, tắt)
+    assert set(j) == {"ok", "modelLoaded", "engine", "version", "commit", "catalog", "clip", "nhom"}
     assert j["catalog"] == {"loaded": False, "n": 0}
+    assert j["clip"] == {"loaded": False, "model": None} and j["nhom"] == {"enabled": False}
     assert j["ok"] is True and j["modelLoaded"] is True and j["commit"] == "unknown"
     assert "khong-duoc-lo" not in str(j)
 

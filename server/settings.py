@@ -190,6 +190,9 @@ class Settings:
     cors_allow_localhost: bool = False
     allowed_origins: tuple = field(default=(DEFAULT_ORIGIN,))
     commit: str = "unknown"         # 7 ký tự mã commit của ảnh Docker (GIT_SHA), /health trả về
+    # kho nhóm (đợt kho-nhom): 1 = tính vector CLIP SONG SONG với OCR (2 luồng), 0 = nối tiếp sau OCR. Khóa ký
+    # KHO_NHOM_HMAC_KEY KHÔNG nằm ở đây (bí mật: kho_nhom.key_from_env đọc thẳng, không vào repr / log).
+    nhom_parallel: bool = False
 
     @property
     def max_body(self) -> int:
@@ -231,4 +234,5 @@ def load_settings(env=None) -> Settings:
         cors_allow_localhost=_flag(env, "CORS_ALLOW_LOCALHOST"),
         allowed_origins=parse_allowed_origins(env.get("ALLOWED_ORIGINS")),
         commit=commit_from_env(env.get("GIT_SHA")),
+        nhom_parallel=_flag(env, "NHOM_SONG_SONG"),
     )

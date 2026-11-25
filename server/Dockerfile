@@ -37,7 +37,7 @@ RUN echo "370a9ab314b3f6fc88ad7cf1fdd67011ab0a8cd57e9557d5362f8136a7bcd164  /tmp
  && rm -rf /tmp/catalog-src \
  && chmod -R a+rX /app/catalog-index
 
-COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py LICENSES.md ./
+COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py clip_engine.py kho_nhom.py LICENSES.md ./
 
 # Model lúc build: wheel rapidocr==3.10.0 đã kèm PP-OCRv6_det_small.onnx + PP-OCRv6_rec_small.onnx trong
 # site-packages/rapidocr/models. Kiểm sha256 (trùng server/README.md và MODEL_SHA256 của ocr_engine.py): sai thì build hỏng.

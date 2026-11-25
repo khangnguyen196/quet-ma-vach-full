@@ -30,8 +30,11 @@ def _mb(n: int) -> str:
 class _Collector:
     """Callback cho MultipartParser: giữ dữ liệu phần "image", các phần khác chỉ đếm."""
 
-    def __init__(self, max_bytes: int):
+    def __init__(self, max_bytes: int, text_fields=(), text_max: int = 256):
         self.max_bytes = max_bytes
+        self.text_fields = frozenset(text_fields)
+        self.text_max = text_max
+        self.texts = {}  # {tên trường chữ: bytearray} (chỉ các trường trong text_fields, không có filename)
         self.parts = []  # [{name, filename, size}]
         self.image = None  # bytearray của phần image (nếu có)
         self.image_count = 0
@@ -57,7 +60,7 @@ class _Collector:
     def on_part_begin(self):
         if len(self.parts) >= MAX_PARTS:
             raise UploadError(400, "Yêu cầu có quá nhiều phần. Chỉ gửi 1 ảnh trong trường 'image'.")
-        self._cur = {"name": None, "filename": None, "size": 0, "is_image": False}
+        self._cur = {"name": None, "filename": None, "size": 0, "is_image": False, "text": None}
         self._disposition = b""
 
     def on_header_field(self, data, start, end):
@@ -90,6 +93,10 @@ class _Collector:
             self.image = bytearray()
         if self.file_count > 1:
             raise UploadError(400, "Chỉ gửi 1 ảnh mỗi lần.")
+        if cur["name"] in self.text_fields and not has_file:
+            if cur["name"] in self.texts:
+                raise UploadError(400, f"Trường '{cur['name']}' bị gửi 2 lần.")
+            cur["text"] = self.texts[cur["name"]] = bytearray()
 
     def on_part_data(self, data, start, end):
         n = end - start
@@ -99,6 +106,10 @@ class _Collector:
             if cur["size"] > self.max_bytes:
                 raise UploadError(413, f"Ảnh quá lớn (tối đa {_mb(self.max_bytes)}).")
             self.image += data[start:end]
+        elif cur["text"] is not None:
+            if cur["size"] > self.text_max:
+                raise UploadError(400, f"Trường '{cur['name']}' quá dài.")
+            cur["text"] += data[start:end]
 
     def on_part_end(self):
         self.parts.append(self._cur)
@@ -117,7 +128,15 @@ def boundary_of(content_type: str):
 
 
 async def read_image(request, max_bytes: int, max_body: int):
-    """-> (bytearray của ảnh, số byte thân đã đọc). Ném UploadError (400 / 413).
+    """-> (bytearray của ảnh, số byte thân đã đọc). Ném UploadError (400 / 413). Xem read_form."""
+    data, total, _ = await read_form(request, max_bytes, max_body)
+    return data, total
+
+
+async def read_form(request, max_bytes: int, max_body: int, text_fields=(), text_max: int = 256):
+    """-> (bytearray của ảnh, số byte thân đã đọc, {tên: chuỗi} của các trường chữ trong text_fields có gửi).
+    Ném UploadError (400 / 413). Trường chữ (đợt kho-nhom, /embed): không có filename, ≤ text_max byte, UTF-8 (sai ->
+    400), gửi 2 lần -> 400; trường khác chỉ đếm byte như trước.
 
     Trả thẳng bytearray đã gom (không chép sang bytes). Không tự đặt hạn giờ: app.py bọc lời gọi trong
     asyncio.timeout(BODY_TIMEOUT_S). Khách ngắt giữa chừng -> starlette ClientDisconnect bay ra cho app.py bắt."""
@@ -132,7 +151,7 @@ async def read_image(request, max_bytes: int, max_body: int):
             raise UploadError(400, "Content-Length không hợp lệ.") from None
         if declared > max_body:
             raise UploadError(413, f"Ảnh quá lớn (tối đa {_mb(max_bytes)}).")
-    col = _Collector(max_bytes)
+    col = _Collector(max_bytes, text_fields, text_max)
     try:
         parser = MultipartParser(boundary, col.callbacks())
     except (FormParserError, ValueError):
@@ -157,4 +176,10 @@ async def read_image(request, max_bytes: int, max_body: int):
         raise UploadError(400, "Thiếu trường 'image' chứa ảnh.")
     if not col.image:
         raise UploadError(400, "Ảnh rỗng (0 byte).")
-    return col.image, total
+    texts = {}
+    for name, raw in col.texts.items():
+        try:
+            texts[name] = bytes(raw).decode("utf-8")
+        except UnicodeDecodeError:
+            raise UploadError(400, f"Trường '{name}' không phải chữ UTF-8.") from None
+    return col.image, total, texts
