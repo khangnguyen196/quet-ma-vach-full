@@ -6,8 +6,10 @@
 -- Gồm:
 --   1. Bảng public.nhom_san_pham: thông tin món do nhóm nhập (tên, thương hiệu, khối lượng, mã vạch, thành phần,
 --      dinh dưỡng, dị ứng, nguồn, người thêm, thời gian).
---   2. Bảng public.nhom_anh: ảnh mặt trước (đường dẫn trong bucket) + vector ảnh CLIP 512 số.
---   3. Trigger: cập nhật sua_luc; giới hạn ≤ 3 ảnh / sản phẩm và ≤ 300 ảnh / người (bảo vệ gói miễn phí).
+--   2. Bảng public.nhom_anh: ảnh mặt trước (đường dẫn trong bucket) + vector ảnh CLIP 512 số (độ dài 1, đúng model)
+--      + chữ ký HMAC của máy chủ (cột ky). Hàm public.nhom_vec_hop_le kiểm vector.
+--   3. Trigger: cập nhật sua_luc; giới hạn ≤ 300 món / người, ≤ 3 ảnh / sản phẩm và ≤ 300 ảnh / người
+--      (bảo vệ gói miễn phí).
 --   4. RLS: chỉ người đã đăng nhập đọc; ai đăng nhập cũng thêm được; chỉ người thêm sửa / xóa món của mình.
 --   5. Bucket ảnh riêng tư "nhom-anh" (≤ 2 MB / ảnh, jpeg / png / webp) + policy trên storage.objects.
 --   Cuối file: khối "KIỂM SAU KHI CHẠY" (chạy được, kết quả mong đợi ghi trong comment) và khối "GỠ" (trong comment).
@@ -18,7 +20,8 @@
 create table if not exists public.nhom_san_pham (
   id          uuid primary key default gen_random_uuid(),
   nguoi_them  uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  ten         text not null check (char_length(btrim(ten)) between 1 and 200),
+  -- tên: tối đa 200 ký tự kể cả khoảng trắng, và sau khi bỏ khoảng trắng hai đầu còn 1–200 ký tự
+  ten         text not null check (char_length(ten) <= 200 and char_length(btrim(ten)) between 1 and 200),
   thuong_hieu text check (thuong_hieu is null or char_length(thuong_hieu) <= 200),
   khoi_luong  text check (khoi_luong is null or char_length(khoi_luong) <= 200),
   ma_vach     text check (ma_vach is null or ma_vach ~ '^[0-9]{8,14}$'),
@@ -42,18 +45,46 @@ create index if not exists nhom_san_pham_ma_vach_idx on public.nhom_san_pham (ma
 -- ===================================================================================================================
 -- 2. Bảng ảnh + vector
 -- ===================================================================================================================
+-- XÓA MÓN: app phải xóa file trong bucket TRƯỚC rồi mới xóa món (xóa món chỉ xóa dòng nhom_anh, không xóa file).
+-- Khóa ngoại "on delete cascade" chỉ xóa dòng nhom_anh; file trong bucket nhom-anh vẫn còn (file mồ côi, chiếm chỗ).
+-- Câu K7 ở khối KIỂM tìm file mồ côi.
+--
+-- Vector ảnh KHÔNG tin app: máy chủ tính vector từ ảnh rồi ký HMAC-SHA256 (cột ky); máy chủ bỏ mọi dòng chữ ký sai.
+-- Hàm dưới đây là lớp chặn thêm trong SQL: vector phải đúng 512 số hữu hạn, độ dài (chuẩn L2) ≈ 1.
+-- Luôn trả true / false, không bao giờ NULL (CHECK coi NULL là qua, nên mọi nhánh đi qua coalesce(…, false)).
+create or replace function public.nhom_vec_hop_le(v real[])
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(
+    v is not null
+    and array_ndims(v) = 1
+    and array_length(v, 1) = 512
+    and array_position(v, null) is null
+    and not exists (
+      select 1 from unnest(v) as x(f)
+      where x.f = 'NaN'::real or x.f = 'Infinity'::real or x.f = '-Infinity'::real
+    )
+    and abs(sqrt((select sum(x.f::double precision * x.f::double precision) from unnest(v) as x(f))) - 1) < 1e-3,
+    false
+  );
+$$;
+
 create table if not exists public.nhom_anh (
   id          uuid primary key default gen_random_uuid(),
   san_pham_id uuid not null references public.nhom_san_pham (id) on delete cascade,
   nguoi_them  uuid not null default auth.uid() references auth.users (id) on delete cascade,
   -- đường dẫn trong bucket nhom-anh: "<uid người thêm>/<uuid ảnh>.<đuôi>"
   duong_dan   text not null unique check (duong_dan ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|png|webp)$'),
-  -- vector ảnh CLIP ViT-B/32: đúng 1 chiều, 512 số, không có null / NaN
-  vec         real[] not null check (
-                array_ndims(vec) = 1 and array_length(vec, 1) = 512
-                and array_position(vec, null) is null and not ('NaN'::real = any (vec))
-              ),
-  model       text not null check (char_length(model) between 1 and 100),
+  -- vector ảnh CLIP ViT-B/32: 1 chiều, 512 số, không null / NaN / vô cực, độ dài ≈ 1 (xem nhom_vec_hop_le)
+  vec         real[] not null check (public.nhom_vec_hop_le(vec)),
+  -- đúng MODEL_ID của server/clip_engine.py
+  model       text not null check (model = 'clip-vit-b32-int8-cat'),
+  -- chữ ký HMAC-SHA256 do máy chủ cấp khi tính vector; máy chủ bỏ mọi dòng chữ ký sai;
+  -- khóa chỉ máy chủ giữ, không bao giờ ở app / SQL
+  ky          text not null check (ky ~ '^[0-9a-f]{64}$'),
   tao_luc     timestamptz not null default now()
 );
 
@@ -82,7 +113,33 @@ create trigger nhom_san_pham_truoc_sua
   before update on public.nhom_san_pham
   for each row execute function public.nhom_san_pham_truoc_sua();
 
--- 3b. Giới hạn số ảnh: ≤ 3 ảnh / sản phẩm, ≤ 300 ảnh / người.
+-- 3b. Giới hạn số món: ≤ 300 món / người. Cùng kiểu 3c: KHÔNG security definer (policy SELECT cho người đăng nhập đọc
+-- mọi dòng nên đếm thấy đủ), khóa theo người thêm để 2 lần thêm cùng lúc không vượt. Chỉ cần lúc thêm: trigger 3a
+-- không cho đổi nguoi_them khi sửa.
+create or replace function public.nhom_san_pham_gioi_han()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  n_mon integer;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('nhom_san_pham:' || new.nguoi_them::text));
+  select count(*) into n_mon from public.nhom_san_pham sp
+    where sp.nguoi_them = new.nguoi_them;
+  if n_mon >= 300 then
+    raise exception 'Mỗi người chỉ được thêm tối đa 300 món vào kho nhóm.' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists nhom_san_pham_gioi_han on public.nhom_san_pham;
+create trigger nhom_san_pham_gioi_han
+  before insert on public.nhom_san_pham
+  for each row execute function public.nhom_san_pham_gioi_han();
+
+-- 3c. Giới hạn số ảnh: ≤ 3 ảnh / sản phẩm, ≤ 300 ảnh / người.
 -- Chạy với quyền của người gọi (KHÔNG security definer): policy SELECT cho người đăng nhập đọc mọi dòng nhom_anh nên
 -- đếm thấy đủ. Khóa theo người thêm (pg_advisory_xact_lock) để 2 lần thêm cùng lúc không vượt giới hạn.
 create or replace function public.nhom_anh_gioi_han()
@@ -197,7 +254,11 @@ create policy nhom_anh_storage_doc on storage.objects
   for select to authenticated
   using (bucket_id = 'nhom-anh');
 
--- Thêm: chỉ vào thư mục mang uid của chính mình, tên đúng dạng "<uid>/<uuid>.<jpg|png|webp>".
+-- Thêm: chỉ vào thư mục mang uid của chính mình, tên đúng dạng "<uid>/<uuid>.<jpg|png|webp>", và thư mục đó đang có
+-- dưới 300 file (đếm cả file chưa có dòng nhom_anh, nên tải file mà không thêm dòng cũng không vượt được 300 file).
+-- Rủi ro còn lại: ai có tài khoản Google cũng đăng nhập được, nên nhiều tài khoản vẫn làm đầy được 1 GB storage;
+-- gói miễn phí của Supabase chặn (không cho tải thêm) chứ không tính tiền. Đếm không khóa: tải song song cùng lúc
+-- có thể vượt 300 vài file.
 drop policy if exists nhom_anh_storage_them on storage.objects;
 create policy nhom_anh_storage_them on storage.objects
   for insert to authenticated
@@ -205,6 +266,10 @@ create policy nhom_anh_storage_them on storage.objects
     bucket_id = 'nhom-anh'
     and (storage.foldername(name))[1] = (select auth.uid())::text
     and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|png|webp)$'
+    and (
+      select count(*) from storage.objects o
+      where o.bucket_id = 'nhom-anh' and (storage.foldername(o.name))[1] = (select auth.uid())::text
+    ) < 300
   );
 
 -- Xóa: theo THƯ MỤC ĐẦU = uid (chọn cách này thay vì owner_id): policy thêm đã ép mọi ảnh của một người nằm trong thư
@@ -220,6 +285,7 @@ create policy nhom_anh_storage_xoa on storage.objects
 -- ===================================================================================================================
 -- KIỂM SAU KHI CHẠY (chỉ đọc; chạy riêng từng câu trong SQL Editor, so với kết quả mong đợi ở comment)
 -- ===================================================================================================================
+-- Chạy riêng từng câu K1–K7 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối).
 -- (K1) RLS bật cả 2 bảng. Mong đợi 2 dòng, cột rls = true:
 --      nhom_anh | true
 --      nhom_san_pham | true
@@ -253,11 +319,20 @@ select table_name, privilege_type
 from information_schema.role_table_grants
 where grantee = 'anon' and table_schema = 'public' and table_name in ('nhom_san_pham', 'nhom_anh');
 
--- (K6) Trigger. Mong đợi 2 dòng: nhom_anh_gioi_han (trên nhom_anh) và nhom_san_pham_truoc_sua (trên nhom_san_pham).
+-- (K6) Trigger. Mong đợi 3 dòng: nhom_anh_gioi_han (trên nhom_anh), nhom_san_pham_gioi_han và
+--      nhom_san_pham_truoc_sua (trên nhom_san_pham).
 select tgname, tgrelid::regclass as bang
 from pg_trigger
-where tgname in ('nhom_anh_gioi_han', 'nhom_san_pham_truoc_sua')
+where tgname in ('nhom_anh_gioi_han', 'nhom_san_pham_gioi_han', 'nhom_san_pham_truoc_sua')
 order by tgname;
+
+-- (K7) File mồ côi: file trong bucket nhom-anh không có dòng nhom_anh nào cùng duong_dan. Mong đợi 0 dòng
+--      (ngay lúc có người đang thêm ảnh thì có thể thấy tạm 1 file: app tải file trước rồi mới thêm dòng).
+select o.name, o.created_at
+from storage.objects o
+where o.bucket_id = 'nhom-anh'
+  and not exists (select 1 from public.nhom_anh a where a.duong_dan = o.name)
+order by o.name;
 
 -- ===================================================================================================================
 -- GỠ (để trong comment; chỉ chạy khi muốn bỏ hẳn kho nhóm — MẤT HẾT dữ liệu kho nhóm, không lấy lại được)
@@ -268,7 +343,10 @@ order by tgname;
 -- drop policy if exists nhom_anh_storage_doc on storage.objects;
 -- drop policy if exists nhom_anh_storage_them on storage.objects;
 -- drop policy if exists nhom_anh_storage_xoa on storage.objects;
+-- drop trigger if exists nhom_san_pham_gioi_han on public.nhom_san_pham;
 -- drop table if exists public.nhom_anh;
 -- drop table if exists public.nhom_san_pham;
 -- drop function if exists public.nhom_anh_gioi_han();
+-- drop function if exists public.nhom_san_pham_gioi_han();
 -- drop function if exists public.nhom_san_pham_truoc_sua();
+-- drop function if exists public.nhom_vec_hop_le(real[]);

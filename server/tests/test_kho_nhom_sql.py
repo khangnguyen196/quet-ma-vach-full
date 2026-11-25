@@ -112,7 +112,7 @@ def test_rang_buoc_cot():
     code = code_only(sql_text())
     assert "char_length(btrim(ten)) between 1 and 200" in code
     assert "ma_vach ~ '^[0-9]{8,14}$'" in code
-    assert "array_length(vec, 1) = 512" in code and "array_ndims(vec) = 1" in code
+    assert "array_length(v, 1) = 512" in code and "array_ndims(v) = 1" in code
     assert r"'^[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|png|webp)$'" in code
     assert "pg_column_size(dinh_duong) <= 8192" in code
     assert "nguon in ('tay', 'off', 'ocr-mat-sau')" in code
@@ -127,3 +127,105 @@ def test_khoi_kiem_va_khoi_go():
     go = text[text.index("-- GỠ"):]
     # khoi go nam trong comment: khong co cau lenh chay duoc
     assert code_only(go).strip() == ""
+
+
+# ---------------- vong 2 (review vong 1) ----------------
+def _func_body(code, name):
+    m = re.search(rf"create or replace function public\.{name}\((.*?)\)(.*?)\$\$(.*?)\$\$;", code, re.S)
+    assert m, name
+    return m.group(1), m.group(2), m.group(3)
+
+
+def test_a_ham_kiem_vector():
+    code = code_only(sql_text())
+    args, head, body = _func_body(code, "nhom_vec_hop_le")
+    assert args.strip() == "v real[]"
+    assert re.search(r"returns boolean\s+language sql\s+immutable\s+set search_path = ''", head)
+    # tao TRUOC bang nhom_anh
+    assert code.index("create or replace function public.nhom_vec_hop_le") < code.index("create table if not exists public.nhom_anh")
+    # luon true / false: toan bo than boc trong coalesce(..., false)
+    b = " ".join(body.split())
+    assert b.startswith("select coalesce(") and b.endswith(", false );")
+    for part in ("v is not null", "array_ndims(v) = 1", "array_length(v, 1) = 512", "array_position(v, null) is null",
+                 "'NaN'::real", "'Infinity'::real", "'-Infinity'::real",
+                 "sum(x.f::double precision * x.f::double precision)", "- 1) < 1e-3"):
+        assert part in b, part
+    assert "abs(sqrt(" in b
+    # CHECK cua cot vec goi ham
+    assert re.search(r"vec\s+real\[\] not null check \(public\.nhom_vec_hop_le\(vec\)\)", code)
+
+
+def test_b_model_trung_model_id_cua_clip_engine():
+    eng = (Path(__file__).resolve().parents[1] / "clip_engine.py").read_text(encoding="utf-8")
+    model_id = re.search(r'^MODEL_ID = "([^"]+)"', eng, re.M).group(1)
+    m = re.search(r"model\s+text not null check \(model = '([^']+)'\)", code_only(sql_text()))
+    assert m and m.group(1) == model_id == "clip-vit-b32-int8-cat"
+
+
+def test_c_cot_ky():
+    text = sql_text()
+    assert re.search(r"ky\s+text not null check \(ky ~ '\^\[0-9a-f\]\{64\}\$'\)", code_only(text))
+    assert "chữ ký HMAC-SHA256 do máy chủ cấp khi tính vector; máy chủ bỏ mọi dòng chữ ký sai;" in text
+    assert "khóa chỉ máy chủ giữ, không bao giờ ở app / SQL" in text
+
+
+def test_d_ten_toi_da_200_ky_tu_ke_ca_khoang_trang():
+    assert "check (char_length(ten) <= 200 and char_length(btrim(ten)) between 1 and 200)" in code_only(sql_text())
+
+
+def test_e_trigger_300_mon_moi_nguoi():
+    code = code_only(sql_text())
+    _, head, body = _func_body(code, "nhom_san_pham_gioi_han")
+    assert "security definer" not in head
+    assert "set search_path = ''" in head
+    assert "pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('nhom_san_pham:' || new.nguoi_them::text))" in body
+    assert "if n_mon >= 300 then" in body
+    assert "Mỗi người chỉ được thêm tối đa 300 món vào kho nhóm." in sql_text()
+    assert re.search(r"create trigger nhom_san_pham_gioi_han\s+before insert on public\.nhom_san_pham\s+"
+                     r"for each row execute function public\.nhom_san_pham_gioi_han\(\);", code)
+    assert "drop trigger if exists nhom_san_pham_gioi_han on public.nhom_san_pham;" in code
+
+
+def test_f_storage_toi_da_300_file_moi_nguoi():
+    st = {c: body for n, t, c, _, body in policies(sql_text()) if t == "storage.objects"}
+    ins = re.sub(r"\s+\)", ")", re.sub(r"\(\s+", "(", " ".join(st["insert"].split())))
+    assert ("(select count(*) from storage.objects o where o.bucket_id = 'nhom-anh' and "
+            "(storage.foldername(o.name))[1] = (select auth.uid())::text) < 300") in ins
+    text = sql_text()
+    assert "ai có tài khoản Google cũng đăng nhập được" in text
+    assert "chặn (không cho tải thêm) chứ không tính tiền" in text
+
+
+def test_g_xoa_file_truoc_va_k7_k6():
+    text = sql_text()
+    assert "app phải xóa file trong bucket TRƯỚC rồi mới xóa món (xóa món chỉ xóa dòng nhom_anh, không xóa file)" in text
+    kiem = text[text.index("-- KIỂM SAU KHI CHẠY"):text.index("-- GỠ")]
+    assert "Chạy riêng từng câu K1–K7 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối)" in kiem
+    assert "(K6) Trigger. Mong đợi 3 dòng" in kiem
+    assert "'nhom_anh_gioi_han', 'nhom_san_pham_gioi_han', 'nhom_san_pham_truoc_sua'" in kiem
+    k7 = kiem[kiem.index("(K7)"):]
+    assert "Mong đợi 0 dòng" in k7
+    k7code = " ".join(code_only(k7).split())
+    assert ("where o.bucket_id = 'nhom-anh' and not exists (select 1 from public.nhom_anh a "
+            "where a.duong_dan = o.name)") in k7code
+    # khoi KIEM chi doc: chi co cau select
+    stmts = [s.strip() for s in code_only(kiem).split(";") if s.strip()]
+    assert len(stmts) == 7 and all(s.lower().startswith("select") for s in stmts)
+
+
+def test_i_khoi_go_co_ham_va_trigger_moi():
+    go = sql_text()[sql_text().index("-- GỠ"):]
+    for line in ("-- drop function if exists public.nhom_vec_hop_le(real[]);",
+                 "-- drop function if exists public.nhom_san_pham_gioi_han();",
+                 "-- drop trigger if exists nhom_san_pham_gioi_han on public.nhom_san_pham;"):
+        assert line in go, line
+    # bo bang nhom_anh truoc ham kiem vector (CHECK phu thuoc ham)
+    assert go.index("drop table if exists public.nhom_anh;") < go.index("drop function if exists public.nhom_vec_hop_le")
+
+
+def test_goi_y_policy_xoa_storage_va_update_san_pham():
+    ps = {(t, c): body for n, t, c, _, body in policies(sql_text())}
+    xoa = " ".join(ps[("storage.objects", "delete")].split())
+    assert "using (bucket_id = 'nhom-anh' and (storage.foldername(name))[1] = (select auth.uid())::text)" in xoa
+    upd = " ".join(ps[("public.nhom_san_pham", "update")].split())
+    assert "using (nguoi_them = (select auth.uid())) with check (nguoi_them = (select auth.uid()))" in upd
