@@ -69,29 +69,69 @@ def _fixed_tables(n_in, n_out):
     return ix, np.trunc(cf).astype(np.int64)
 
 
-def _round_shift(v):
-    return (v + (1 << (INTERP_SHIFT - 1))) >> INTERP_SHIFT
+def _round_shift_(v):
+    """Làm tròn rồi dịch phải INTERP_SHIFT bit, TẠI CHỖ (không tạo mảng mới); >> của numpy là dịch số học như int64."""
+    v += 1 << (INTERP_SHIFT - 1)
+    v >>= INTERP_SHIFT
+    return v
+
+
+INT32_MAX = (1 << 31) - 1
+
+
+def int32_bounds():
+    """Chứng minh resize_affine tính bằng int32 không tràn số, bằng giá trị lớn nhất có thể (không phụ thuộc ảnh):
+    s = tổng |hệ số nguyên| lớn nhất của 1 điểm ra, xét MỌI vị trí lẻ t = 0..64 (bảng chỉ có 65 giá trị t);
+    lượt 1 (theo hàng, điểm vào 0..255): |tổng| ≤ 255·s + 2048 = acc1;
+    sau làm tròn |R| ≤ acc1 / 4096 + 1 = r_max (R chưa cắt về 0..255, có thể âm hoặc > 255);
+    lượt 2 (theo cột, điểm vào là R): |tổng| ≤ r_max·s + 2048 = acc2. Cần acc2 < 2^31 − 1."""
+    coef = [np.trunc(_catmull(t / TRANSFORM_SCALE) * (1 << INTERP_SHIFT)) for t in range(TRANSFORM_SCALE + 1)]
+    s = max(int(np.abs(c).sum()) for c in coef)
+    half = 1 << (INTERP_SHIFT - 1)
+    acc1 = 255 * s + half
+    r_max = acc1 // (1 << INTERP_SHIFT) + 1
+    acc2 = r_max * s + half
+    return {"s": s, "acc1": acc1, "r_max": r_max, "acc2": acc2, "int32_max": INT32_MAX}
+
+
+_BOUNDS = int32_bounds()
+if _BOUNDS["acc2"] >= INT32_MAX:  # không xảy ra với bảng Catmull-Rom × 4096 (s = 5.120, acc2 = 1.640.448); giữ để đổi bảng thì biết
+    raise RuntimeError("resize_affine: int32 có thể tràn số, phải dùng int64.")
+
+
+def _sum4(A, idx, coef, axis):
+    """Σ_k coef[:, k] · A[idx + k − 1] theo trục axis, int32, cộng dồn tại chỗ; điểm ngoài biên = 0 (hệ số 0)."""
+    n = A.shape[axis]
+    shape = [1] * A.ndim
+    shape[axis] = -1
+    out = None
+    for k in range(4):
+        j = idx + k - 1
+        c = np.where((j >= 0) & (j < n), coef[:, k], 0).astype(np.int32).reshape(shape)
+        term = np.take(A, np.clip(j, 0, n - 1), axis=axis).astype(np.int32, copy=False)
+        term *= c
+        if out is None:
+            out = term
+        else:
+            out += term
+    return out
 
 
 def resize_affine(arr, w, h):
-    """uint8 HxWx3 -> uint8 hxwx3 giống từng điểm sharp affine bicubic (như lens-vec.py resize_affine, center False)."""
+    """uint8 HxWx3 -> uint8 hxwx3 giống từng điểm sharp affine bicubic (như lens-vec.py resize_affine, center False).
+
+    Tính bằng int32 (không tràn: xem int32_bounds) và chỉ đổi kiểu phần đã lấy theo bảng, cộng dồn tại chỗ: không đổi cả
+    ảnh sang int64 như lens-vec.py (ảnh 1600 × 1200 int64 ≈ 46 MB). Phép tính nguyên nên kết quả trùng từng số."""
     H, W = arr.shape[:2]
     if (W, H) == (w, h):
         return arr
-    P = arr.astype(np.int64)
     ix, cx = _fixed_tables(W, w)
     iy, cy = _fixed_tables(H, h)
-
-    def take(A, idx, axis):
-        ok = (idx >= 0) & (idx < A.shape[axis])
-        out = np.take(A, np.clip(idx, 0, A.shape[axis] - 1), axis=axis)
-        shape = [1] * A.ndim
-        shape[axis] = -1
-        return out * ok.reshape(shape)
-
-    R = _round_shift(sum(cx[:, k][None, :, None] * take(P, ix + k - 1, 1) for k in range(4)))
-    O = _round_shift(sum(cy[:, k][:, None, None] * take(R, iy + k - 1, 0) for k in range(4)))
-    return np.clip(O, 0, 255).astype(np.uint8)
+    R = _round_shift_(_sum4(arr, ix, cx, 1))  # H × w × 3
+    O = _round_shift_(_sum4(R, iy, cy, 0))  # h × w × 3
+    del R
+    np.clip(O, 0, 255, out=O)
+    return O.astype(np.uint8)
 
 
 def shortest_size(W, H, s=SIZE):

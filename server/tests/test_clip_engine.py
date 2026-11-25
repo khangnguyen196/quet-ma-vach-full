@@ -231,6 +231,59 @@ def test_gia_khoa_luong():
     assert all(np.array_equal(out[0], o) for o in out)
 
 
+def _resize_int64(arr, w, h):
+    """Bản int64 cũ (ce967ca, = lens-vec.py resize_affine center False) để so: phép nguyên nên phải trùng từng số."""
+    H, W = arr.shape[:2]
+    if (W, H) == (w, h):
+        return arr
+    P = arr.astype(np.int64)
+    ix, cx = clip_engine._fixed_tables(W, w)
+    iy, cy = clip_engine._fixed_tables(H, h)
+
+    def take(A, idx, axis):
+        ok = (idx >= 0) & (idx < A.shape[axis])
+        out = np.take(A, np.clip(idx, 0, A.shape[axis] - 1), axis=axis)
+        shape = [1] * A.ndim
+        shape[axis] = -1
+        return out * ok.reshape(shape)
+
+    def rs(v):
+        return (v + (1 << (clip_engine.INTERP_SHIFT - 1))) >> clip_engine.INTERP_SHIFT
+
+    R = rs(sum(cx[:, k][None, :, None] * take(P, ix + k - 1, 1) for k in range(4)))
+    O = rs(sum(cy[:, k][:, None, None] * take(R, iy + k - 1, 0) for k in range(4)))
+    return np.clip(O, 0, 255).astype(np.uint8), int(np.abs(R).max()), int(max(
+        np.abs(sum(cy[:, k][:, None, None] * take(R, iy + k - 1, 0) for k in range(4))).max(),
+        np.abs(sum(cx[:, k][None, :, None] * take(P, ix + k - 1, 1) for k in range(4))).max()))
+
+
+def test_int32_khong_tran_so_gia_tri_lon_nhat():
+    b = clip_engine.int32_bounds()
+    # 65 vị trí lẻ t: tổng |hệ số| lớn nhất (5.120 = 4096 × 1,25); chặn trên 2 lượt (≈ 1,64 triệu) nhỏ hơn int32 > 1.000 lần
+    assert 4096 <= b["s"] < 2 * 4096
+    assert b["acc1"] == 255 * b["s"] + 2048 and b["r_max"] == b["acc1"] // 4096 + 1
+    assert b["acc2"] == b["r_max"] * b["s"] + 2048
+    assert b["acc2"] < clip_engine.INT32_MAX // 100
+
+
+@pytest.mark.parametrize("shape", [(1600, 1200), (1200, 1600), (1600, 1600), (100, 80), (37, 501), (2000, 100)])
+def test_int32_trung_int64_tung_so(shape):
+    H, W = shape
+    rng = np.random.default_rng(H * 7919 + W)
+    imgs = [rng.integers(0, 256, (H, W, 3), dtype=np.uint8)]
+    # ảnh bàn cờ 0 / 255 (đẩy phần vượt của bicubic lớn nhất) + ảnh toàn 255
+    yy, xx = np.indices((H, W))
+    imgs.append(np.repeat((((yy + xx) % 2) * 255).astype(np.uint8)[..., None], 3, axis=2))
+    imgs.append(np.full((H, W, 3), 255, np.uint8))
+    w, h = clip_engine.shortest_size(W, H)
+    b = clip_engine.int32_bounds()
+    for arr in imgs:
+        ref, r_abs, acc_abs = _resize_int64(arr, w, h)
+        out = clip_engine.resize_affine(arr, w, h)
+        assert out.dtype == np.uint8 and np.array_equal(out, ref), shape
+        assert r_abs <= b["r_max"] and acc_abs <= b["acc2"]  # chặn trên đúng cả trên số thật
+
+
 def test_gia_vector_chuan_0_bao_loi():
     class Zero(FakeSession):
         def run(self, _n, feed):
