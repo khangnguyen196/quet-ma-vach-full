@@ -9,6 +9,8 @@ Cách đo (ghi kèm số):
   bật, tính vector SAU OCR; song = kho nhóm bật, CLIP song song OCR (NHOM_SONG_SONG=1).
 - Kho nhóm bật: AUTH_MODE=supabase với Supabase GIẢ ở trong tiến trình (JWKS = khóa EC sinh lúc đo, token ES256 tự ký;
   REST giả trả 300 dòng vector ngẫu nhiên đã ký bằng khóa HMAC thử sinh lúc đo, không in ra). Không gọi mạng ngoài.
+  Vòng 6: id dòng giả là uuid in thường (str(uuid.UUID(int=i))) để phân trang theo id như Postgres; máy chủ đo nạp thử
+  kho một lần trước khi phục vụ và DỪNG nếu số dòng nạp được khác N_KHO (test tests/test_do_kho_nhom.py).
 - Ảnh: 30 front.jpg bộ B (như do_h2h3.py) gửi tuần tự, rồi ảnh nặng JPEG CMYK nhiều lượt quét 40 MP. Mọi lượt phải 200.
 - Thời gian = giây phía khách (gửi -> nhận xong) từng ảnh; "thêm" = so trung vị / p95 của cấu hình với tat (cùng ảnh).
 - RAM đỉnh = số lớn hơn giữa peak_wset và peak_pagefile (do_rss.PeakTracker, Windows, gồm tiến trình con), đọc sau
@@ -38,6 +40,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -61,44 +64,76 @@ def _load(name, file):
     return mod
 
 
+# ---------------- Supabase giả (dùng chung cho máy chủ đo và test) ----------------
+
+def fake_rows(key: bytes, n: int = N_KHO) -> list:
+    """n dòng nhom_anh giả (vector ngẫu nhiên seed cố định, ký bằng `key`), sắp theo id tăng dần như Postgres.
+    id = str(uuid.UUID(int=i)) (uuid in thường như Postgres; so chuỗi = so uuid, nên thứ tự i = thứ tự id). Vòng 6: id cũ
+    f"{i:08d}" không phải uuid làm máy chủ dừng phân trang sau trang đầu (kho > 1.000 dòng chỉ nạp 1.000)."""
+    sys.path.insert(0, str(HERE))
+    import numpy as np
+
+    import kho_nhom
+    from clip_engine import MODEL_ID
+
+    rng = np.random.default_rng(20261126)
+    rows = []
+    for i in range(n):
+        v = rng.standard_normal(512)
+        v = (v / np.linalg.norm(v)).astype(np.float32)
+        p = f"{SUB}/{i:08x}-2222-4333-8444-555555555555.jpg"
+        rows.append({"id": str(uuid.UUID(int=i)),"san_pham_id": f"sp-{i // 3}", "duong_dan": p, "vec": kho_nhom.vec_to_json(v),
+                     "model": MODEL_ID, "ky": kho_nhom.sign(key, p, MODEL_ID, v),
+                     "nhom_san_pham": {"ten": f"Món {i // 3}", "thuong_hieu": None, "ma_vach": None}})
+    return rows
+
+
+def fake_fetch(rows: list):
+    """Hàm tải giả của KhoStore: phân trang như PostgREST (order=id, limit, trang sau id=gt.<id cuối>; so chuỗi id như
+    Postgres so uuid in thường), trả qua JSON như phản hồi thật."""
+    from urllib.parse import parse_qs, urlsplit
+
+    def fetch(url, headers, timeout):
+        q = parse_qs(urlsplit(url).query)
+        after = q["id"][0][3:] if "id" in q else None
+        page = [r for r in rows if after is None or r["id"] > after][:int(q["limit"][0])]
+        return 200, json.loads(json.dumps(page))
+
+    return fetch
+
+
+def count_loaded(supabase_url: str, apikey: str, key: bytes, fetch, **kw) -> int:
+    """Nạp kho MỘT lần bằng một KhoStore RIÊNG (không đụng cache của máy chủ đo) -> số dòng nạp được (-1 nếu lỗi)."""
+    sys.path.insert(0, str(HERE))
+    import kho_nhom
+
+    kho = kho_nhom.KhoStore(supabase_url, apikey, key, fetch=fetch, **kw).get("kiem-dem")
+    return -1 if kho is None else kho.n
+
+
 # ---------------- phía máy chủ (tiến trình con) ----------------
 
 def serve(a):
     """Tiến trình con: dựng app với Supabase giả trong tiến trình, chạy uvicorn trên 127.0.0.1."""
     sys.path.insert(0, str(HERE))
-    import numpy as np
     import uvicorn
 
     import app as app_module
     import auth
     import kho_nhom
-    from clip_engine import MODEL_ID
     from settings import load_settings
 
     jwks = json.loads(Path(a.jwks).read_text(encoding="utf-8"))
     raw = os.environ.get(kho_nhom.KEY_ENV)
     key = kho_nhom.parse_key(raw)
-    rows = []
-    if key is not None:
-        rng = np.random.default_rng(20261126)
-        for i in range(N_KHO):
-            v = rng.standard_normal(512)
-            v = (v / np.linalg.norm(v)).astype(np.float32)
-            p = f"{SUB}/{i:08x}-2222-4333-8444-555555555555.jpg"
-            rows.append({"id": f"{i:08d}", "san_pham_id": f"sp-{i // 3}", "duong_dan": p, "vec": kho_nhom.vec_to_json(v),
-                         "model": MODEL_ID, "ky": kho_nhom.sign(key, p, MODEL_ID, v),
-                         "nhom_san_pham": {"ten": f"Món {i // 3}", "thuong_hieu": None, "ma_vach": None}})
-
-    def fetch(url, headers, timeout):
-        from urllib.parse import parse_qs, urlsplit
-
-        q = parse_qs(urlsplit(url).query)
-        # vòng 5: máy chủ phân trang theo id (order=id, trang sau id=gt.<id cuối>), không offset
-        after = q["id"][0][3:] if "id" in q else None
-        page = [r for r in rows if after is None or r["id"] > after][:int(q["limit"][0])]
-        return 200, json.loads(json.dumps(page))  # qua JSON như phản hồi thật
+    rows = fake_rows(key) if key is not None else []
+    fetch = fake_fetch(rows)
 
     s = load_settings()
+    if key is not None:
+        got = count_loaded(s.supabase_url, s.supabase_publishable_key, key, fetch)
+        if got != N_KHO:
+            raise SystemExit(f"Supabase giả: kho nạp được {got} dòng, cần đúng {N_KHO}: dừng đo")
     v = auth.SupabaseVerifier(s.supabase_url, s.supabase_publishable_key, fetch_jwks=lambda url: (200, jwks),
                               fetch_user=lambda url, k, t: (401, None))
     store = kho_nhom.KhoStore(s.supabase_url, s.supabase_publishable_key, key, fetch=fetch) if key else None

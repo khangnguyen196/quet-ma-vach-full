@@ -614,6 +614,25 @@ def test_kho_bat_chi_lap_cache_sau_khi_token_hop_le(parallel):
     assert b.state.test_fetch.calls == 1 and b.state.clip.calls == 1
 
 
+@pytest.mark.parametrize("parallel", [False, True])
+@pytest.mark.parametrize("limit", [{"daily_limit_per_user": 1}, {"rate_limit_user_per_min": 1}])
+def test_kho_bat_token_dung_het_luot_nguoi_dung_khong_nap_kho_khong_tinh_vector(parallel, limit):
+    """Vòng 6 (review vòng 5 GỢI Ý 1): kho BẬT, token ĐÚNG; lượt 1 -> 200 có nhom (nạp kho 1 lần, tính vector 1 lần);
+    lượt 2 hết lượt người dùng (ngày hoặc phút) -> 429, KHÔNG nạp kho (cache đã xóa giữa 2 lượt để lượt 2 nếu đụng kho
+    thì phải gọi Supabase giả) và KHÔNG tính vector."""
+    rng = np.random.default_rng(31)
+    a = make_nhom_app(rows=[row(rand_vec(rng))], parallel=parallel, **limit)
+    tok = es256()
+    r = req(a, "/ocr", token=tok)
+    assert r.status_code == 200 and "nhom" in r.json()
+    assert a.state.test_fetch.calls == 1 and a.state.clip.calls == 1 and a.state.nhom_store.fetches == 1
+    a.state.nhom_store._cache = None
+    r = req(a, "/ocr", token=tok)
+    assert r.status_code == 429 and "Retry-After" in r.headers
+    assert a.state.test_fetch.calls == 1 and a.state.clip.calls == 1 and a.state.nhom_store.fetches == 1
+    assert a.state.nhom_store._cache is None
+
+
 def test_song_song_cho_kho_truoc_khi_giu_khoa_ocr(monkeypatch):
     """Vòng 5 (review NÊN SỬA 2): chế độ song song chờ nạp kho XONG rồi mới giữ khóa OCR (không giữ khóa trong lúc chờ
     Supabase). Supabase giả chậm (chờ tối đa 1 giây, dưới hết giờ 3 giây); Slot.acquire được bọc để ghi lúc giữ khóa thì
