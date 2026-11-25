@@ -82,7 +82,7 @@ def fake_rows(key: bytes, n: int = N_KHO) -> list:
         v = rng.standard_normal(512)
         v = (v / np.linalg.norm(v)).astype(np.float32)
         p = f"{SUB}/{i:08x}-2222-4333-8444-555555555555.jpg"
-        rows.append({"id": str(uuid.UUID(int=i)),"san_pham_id": f"sp-{i // 3}", "duong_dan": p, "vec": kho_nhom.vec_to_json(v),
+        rows.append({"id": str(uuid.UUID(int=i)), "san_pham_id": f"sp-{i // 3}", "duong_dan": p, "vec": kho_nhom.vec_to_json(v),
                      "model": MODEL_ID, "ky": kho_nhom.sign(key, p, MODEL_ID, v),
                      "nhom_san_pham": {"ten": f"Món {i // 3}", "thuong_hieu": None, "ma_vach": None}})
     return rows

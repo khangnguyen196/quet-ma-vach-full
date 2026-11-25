@@ -615,13 +615,20 @@ def test_kho_bat_chi_lap_cache_sau_khi_token_hop_le(parallel):
 
 
 @pytest.mark.parametrize("parallel", [False, True])
-@pytest.mark.parametrize("limit", [{"daily_limit_per_user": 1}, {"rate_limit_user_per_min": 1}])
-def test_kho_bat_token_dung_het_luot_nguoi_dung_khong_nap_kho_khong_tinh_vector(parallel, limit):
+@pytest.mark.parametrize("kind", ["daily", "minute"])
+def test_kho_bat_token_dung_het_luot_nguoi_dung_khong_nap_kho_khong_tinh_vector(parallel, kind):
     """Vòng 6 (review vòng 5 GỢI Ý 1): kho BẬT, token ĐÚNG; lượt 1 -> 200 có nhom (nạp kho 1 lần, tính vector 1 lần);
     lượt 2 hết lượt người dùng (ngày hoặc phút) -> 429, KHÔNG nạp kho (cache đã xóa giữa 2 lượt để lượt 2 nếu đụng kho
-    thì phải gọi Supabase giả) và KHÔNG tính vector."""
+    thì phải gọi Supabase giả) và KHÔNG tính vector.
+    Vòng 7 (review vòng 6 NÊN SỬA 3): giới hạn IP đặt RÕ rất cao (429 không thể đến từ giới hạn IP); Retry-After đúng loại:
+    lượt ngày > 60 giây (app hiểu là hết lượt ngày, DAILY_RETRY_MIN_S của src/front-photo.js), lượt phút 1–60 giây; câu
+    lỗi là câu giới hạn theo tài khoản, không phải theo IP."""
+    limit = {"rate_limit_per_min": 100_000}
+    limit.update({"daily_limit_per_user": 1} if kind == "daily" else {"rate_limit_user_per_min": 1})
     rng = np.random.default_rng(31)
     a = make_nhom_app(rows=[row(rand_vec(rng))], parallel=parallel, **limit)
+    # đồng hồ giả 08:00 UTC: Retry-After của lượt ngày luôn 16 giờ (không chập chờn khi chạy test lúc 23:59 UTC)
+    a.state.daily_limiter.clock = lambda: 1_800_000_000.0
     tok = es256()
     r = req(a, "/ocr", token=tok)
     assert r.status_code == 200 and "nhom" in r.json()
@@ -629,6 +636,12 @@ def test_kho_bat_token_dung_het_luot_nguoi_dung_khong_nap_kho_khong_tinh_vector(
     a.state.nhom_store._cache = None
     r = req(a, "/ocr", token=tok)
     assert r.status_code == 429 and "Retry-After" in r.headers
+    retry = int(r.headers["Retry-After"])
+    if kind == "daily":
+        assert retry > 60
+    else:
+        assert 1 <= retry <= 60
+    assert r.json()["error"].startswith("Tài khoản này")
     assert a.state.test_fetch.calls == 1 and a.state.clip.calls == 1 and a.state.nhom_store.fetches == 1
     assert a.state.nhom_store._cache is None
 
