@@ -14,6 +14,7 @@ import logging
 import secrets
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -44,7 +45,7 @@ def path_of(uid=SUB, img="11111111-2222-4333-8444-555555555555", ext="jpg"):
 
 def row(vec, duong_dan=None, pid="sp-1", ten="Bánh thử", ky=None, model=MODEL_ID, vec_json=None, **sp):
     duong_dan = duong_dan or path_of()
-    return {"id": "a-" + duong_dan[-12:], "san_pham_id": pid, "duong_dan": duong_dan,
+    return {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, duong_dan)), "san_pham_id": pid, "duong_dan": duong_dan,
             "vec": kho_nhom.vec_to_json(vec) if vec_json is None else vec_json, "model": model,
             "ky": kho_nhom.sign(KEY, duong_dan, MODEL_ID, vec) if ky is None else ky,
             "nhom_san_pham": {"ten": ten, "thuong_hieu": sp.get("thuong_hieu", "Hãng A"), "ma_vach": sp.get("ma_vach")}}
@@ -219,12 +220,26 @@ def test_top_matches_moi_san_pham_lay_anh_giong_nhat_toi_da_3():
 
 # ---------------- KhoStore với máy chủ Supabase GIẢ (HTTP thật trên 127.0.0.1) ----------------
 
+def pg_page(rows, q):
+    """Như PostgREST cho `order=id&limit=N[&id=gt.X]`: xếp theo id (uuid in thường: so chuỗi = so uuid), lọc id > X, lấy N.
+    Có `offset` -> lỗi (vòng 5: máy chủ không được dùng offset)."""
+    assert "offset" not in q, "không được phân trang bằng offset"
+    assert q["order"] == ["id"]
+    out = sorted(rows, key=lambda r: r["id"])
+    if "id" in q:
+        (cond,) = q["id"]
+        assert cond.startswith("gt."), cond
+        out = [r for r in out if r["id"] > cond[3:]]
+    return out[:int(q["limit"][0])]
+
+
 class FakeRest:
-    """PostgREST giả: GET /rest/v1/nhom_anh?…&limit=&offset= -> trang của self.rows. mode: ok / 500 / 401 / slow /
-    notlist."""
+    """PostgREST giả: GET /rest/v1/nhom_anh?…&order=id&limit=[&id=gt.] -> trang của self.rows (pg_page). mode: ok / 500 /
+    401 / slow / notlist. after_call(rest): chạy sau khi đã lấy trang (test xóa / thêm dòng giữa 2 lượt gọi)."""
 
     def __init__(self, rows):
         self.rows = rows
+        self.after_call = None
         self.mode = "ok"
         self.calls = []
         self.slow_s = 2.0
@@ -243,8 +258,9 @@ class FakeRest:
                 elif rest.mode == "notlist":
                     body, code = b'{"a":1}', 200
                 else:
-                    lim, off = int(q["limit"][0]), int(q["offset"][0])
-                    body, code = json.dumps(rest.rows[off:off + lim]).encode(), 200
+                    body, code = json.dumps(pg_page(rest.rows, q)).encode(), 200
+                    if rest.after_call is not None:
+                        rest.after_call(rest)
                 try:
                     self.send_response(code)
                     self.send_header("Content-Type", "application/json")
@@ -292,12 +308,65 @@ def test_store_theo_trang_dung_url_header(rest):
     st = kho_nhom.KhoStore(rest.url, PUB_KEY, KEY, page_size=2)
     kho = st.get(TOKEN)
     assert kho.n == 5 and len(kho.products) == 3
-    assert [c["q"]["offset"][0] for c in rest.calls] == ["0", "2", "4"]  # 2 + 2 + 1 dòng: dừng khi trang thiếu
+    ids = sorted(r["id"] for r in rest.rows)
+    # 2 + 2 + 1 dòng: dừng khi trang thiếu; trang sau lọc id > id cuối trang trước, không offset (vòng 5)
+    assert [c["q"].get("id") for c in rest.calls] == [None, ["gt." + ids[1]], ["gt." + ids[3]]]
+    assert all("offset" not in c["q"] for c in rest.calls)
     for c in rest.calls:
         assert c["path"] == "/rest/v1/nhom_anh"
         assert c["q"]["select"] == [kho_nhom.SELECT] and c["q"]["order"] == ["id"] and c["q"]["limit"] == ["2"]
         assert c["apikey"] == PUB_KEY and c["auth"] == "Bearer " + TOKEN
     assert kho_nhom.PAGE_SIZE == 1000 and kho_nhom.MAX_PAGES == 10 and kho_nhom.FETCH_TIMEOUT_S <= 3.0
+
+
+def test_store_url_trang_2_co_id_gt_ma_hoa_dung():
+    st = kho_nhom.KhoStore("https://x.supabase.co/", PUB_KEY, KEY)
+    u1 = st.page_url()
+    last = "0a1b2c3d-0000-4000-8000-00000000c0de"
+    u2 = st.page_url(last)
+    assert u1.startswith("https://x.supabase.co/rest/v1/nhom_anh?select=") and "offset" not in u1 and "&id=" not in u1
+    assert u2 == u1 + "&id=gt." + last and "offset" not in u2
+    assert parse_qs(urlsplit(u2).query)["id"] == ["gt." + last]
+    assert st.page_url("a b&c=d").endswith("&id=gt.a%20b%26c%3Dd")  # mã hóa URL (không chèn được tham số)
+
+
+def test_store_xoa_dong_trang_1_giua_2_luot_khong_sot_dong_trang_2(rest):
+    """Xóa 1 dòng của trang 1 SAU khi trang 1 đã trả: phân trang offset sẽ bỏ sót dòng đầu của trang 2; theo id thì không."""
+    st = kho_nhom.KhoStore(rest.url, PUB_KEY, KEY, page_size=2)
+    ids = sorted(r["id"] for r in rest.rows)
+    xoa = ids[0]
+
+    def after(r):
+        if len(r.calls) == 1:  # vừa trả trang 1: xóa dòng đầu của trang 1
+            r.rows = [x for x in r.rows if x["id"] != xoa]
+
+    rest.after_call = after
+    kho = st.get(TOKEN)
+    assert len(rest.rows) == 4
+    assert kho.n == 5  # 2 dòng trang 1 (đã nhận trước khi xóa) + 3 dòng còn lại, không sót dòng nào
+    assert [c["q"].get("id") for c in rest.calls] == [None, ["gt." + ids[1]], ["gt." + ids[3]]]
+
+
+@pytest.mark.parametrize("bad_id", [None, 12, "khong-phai-uuid", "0A1B2C3D-0000-4000-8000-00000000C0DE"])
+def test_store_id_cuoi_trang_sai_dang_dung_phan_trang_dung_phan_da_co(bad_id, caplog):
+    rng = np.random.default_rng(31)
+    rows = [row(rand_vec(rng), path_of(img=f"{i:08x}-2222-4333-8444-555555555555"), pid=f"sp-{i}") for i in range(5)]
+    calls = []
+
+    def fetch(url, headers, timeout):
+        q = parse_qs(urlsplit(url).query)
+        calls.append(q)
+        page = pg_page(rows, q)
+        if len(calls) == 1:
+            page = [dict(page[0]), dict(page[1], id=bad_id)]
+        return 200, page
+
+    st = kho_nhom.KhoStore(SB_URL, PUB_KEY, KEY, fetch=fetch, page_size=2)
+    with caplog.at_level(logging.WARNING, logger="ocr_server.kho_nhom"):
+        kho = st.get(TOKEN)
+    assert len(calls) == 1 and kho is not None and kho.n == 2  # dùng phần đã nạp, không gọi trang 2
+    assert any("id cuối trang sai dạng" in r.getMessage() for r in caplog.records)
+    assert not any("chạm trần" in r.getMessage() for r in caplog.records)
 
 
 def test_store_cham_tran_so_trang(rest, caplog):
@@ -388,9 +457,7 @@ class FakeFetch:
         self.headers.append(headers)
         if self.fail is not None:
             raise self.fail
-        q = parse_qs(urlsplit(url).query)
-        off, lim = int(q["offset"][0]), int(q["limit"][0])
-        return 200, self.rows[off:off + lim]
+        return 200, pg_page(self.rows, parse_qs(urlsplit(url).query))
 
 
 def make_nhom_app(rows=None, key=KEY, auth_mode="supabase", clip="fake", fetch=None, parallel=False, **kw):

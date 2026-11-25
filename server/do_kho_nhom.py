@@ -86,8 +86,10 @@ def serve(a):
         from urllib.parse import parse_qs, urlsplit
 
         q = parse_qs(urlsplit(url).query)
-        off, lim = int(q["offset"][0]), int(q["limit"][0])
-        return 200, json.loads(json.dumps(rows[off:off + lim]))  # qua JSON như phản hồi thật
+        # vòng 5: máy chủ phân trang theo id (order=id, trang sau id=gt.<id cuối>), không offset
+        after = q["id"][0][3:] if "id" in q else None
+        page = [r for r in rows if after is None or r["id"] > after][:int(q["limit"][0])]
+        return 200, json.loads(json.dumps(page))  # qua JSON như phản hồi thật
 
     s = load_settings()
     v = auth.SupabaseVerifier(s.supabase_url, s.supabase_publishable_key, fetch_jwks=lambda url: (200, jwks),

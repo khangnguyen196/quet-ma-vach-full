@@ -225,8 +225,9 @@ ghi đè ảnh đã có ở cùng đường dẫn). Trả:
 - ≤ 3 mục, mỗi sản phẩm lấy ảnh giống nhất; `diem` = tích vô hướng 2 vector chuẩn 1 (= cos), làm tròn 4 số, giảm dần
   (bằng điểm thì món xuất hiện trước trong kho trước). `thuong_hieu` / `ma_vach` có thể `null`. Máy chủ KHÔNG có ngưỡng:
   `NHOM_THRESHOLD` ở app.
-- Nạp kho: `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000&offset=…`
-  theo trang 1.000 dòng, tối đa 10 trang, header `apikey` = publishable key, `Authorization` = token của CHÍNH request
+- Nạp kho: `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000`
+  theo trang 1.000 dòng (vòng 5: trang sau thêm `&id=gt.<id cuối của trang trước>`, KHÔNG offset, nên thêm / xóa dòng
+  giữa 2 trang không làm sót dòng; id cuối trang sai dạng uuid -> dừng phân trang, dùng phần đã nạp), tối đa 10 trang, header `apikey` = publishable key, `Authorization` = token của CHÍNH request
   (RLS; không service_role). Bắt đầu ngay sau khi token đã kiểm hợp lệ, song song với đọc ảnh + OCR. Cache DÙNG CHUNG 60
   giây (RLS cho mọi người đăng nhập thấy cùng dữ liệu); lỗi nhớ 2 giây. Bỏ dòng: `model` khác `MODEL_ID`, `vec` không
   đúng 512 số hữu hạn / chuẩn lệch 1 quá 1e-3, `ky` sai dạng / HMAC sai, `duong_dan` sai dạng, thiếu món. Log chỉ số dòng

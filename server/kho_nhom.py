@@ -8,7 +8,8 @@
   sang đường dẫn khác.
 - Vector KHÔNG tin app: chỉ vector máy chủ tính + ký (POST /embed) mới được dùng; nạp kho thì bỏ mọi dòng sai chữ ký /
   sai model / vector sai dạng.
-- Nạp kho: GET <SUPABASE_URL>/rest/v1/nhom_anh?select=…&order=id theo trang ≤ 1.000 dòng, tối đa 10 trang, bằng
+- Nạp kho: GET <SUPABASE_URL>/rest/v1/nhom_anh?select=…&order=id theo trang ≤ 1.000 dòng (trang sau lọc
+  id=gt.<id cuối trang trước>, không offset; vòng 5), tối đa 10 trang, bằng
   publishable key + token của CHÍNH người gửi (qua RLS; không bao giờ service_role). Cache dùng chung 60 giây (RLS cho mọi
   người đăng nhập thấy cùng dữ liệu), chỉ lấp sau khi token đã kiểm hợp lệ (app.py gọi sau auth). Lỗi / hết giờ (≤ 3 giây)
   -> None (request đó coi như kho rỗng); lỗi chỉ nhớ 2 giây.
@@ -38,6 +39,7 @@ DOMAIN = b"kho-nhom-v1"
 SEP = b"\x00"
 _KEY_RE = re.compile(r"[0-9a-fA-F]{64}")
 _KY_RE = re.compile(r"[0-9a-f]{64}")
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")  # id nhom_anh (Postgres in thường)
 # đường dẫn trong bucket nhom-anh: "<uid>/<uuid ảnh>.<jpg|png>". Vòng 5: máy chủ CHẶT HƠN CHECK cột duong_dan / policy
 # storage của kho-nhom.sql (SQL dòng 1–306 đã chạy, vẫn cho .webp, không đổi): /embed chỉ nhận JPEG / PNG nên không bao giờ
 # ký đường dẫn .webp; dòng .webp trong bảng (nếu có) bị bỏ khi nạp kho (lý do "ky").
@@ -264,9 +266,13 @@ class KhoStore:
         """Chữ ký của vector máy chủ vừa tính (POST /embed), model = MODEL_ID."""
         return sign(self._key, duong_dan, MODEL_ID, vec)
 
-    def page_url(self, page: int) -> str:
-        return (f"{self.base}?select={quote(SELECT, safe=',()')}&order=id"
-                f"&limit={self.page_size}&offset={page * self.page_size}")
+    def page_url(self, after_id: str | None = None) -> str:
+        """Trang đầu: không lọc id. Trang sau (vòng 5): `id=gt.<id cuối của trang trước>` (phân trang theo khóa, không
+        offset: có dòng thêm / xóa giữa 2 trang thì không sót / trùng dòng)."""
+        url = f"{self.base}?select={quote(SELECT, safe=',()')}&order=id&limit={self.page_size}"
+        if after_id is not None:
+            url += "&id=gt." + quote(after_id, safe="")
+        return url
 
     def _fresh(self, now):
         c = self._cache
@@ -306,17 +312,24 @@ class KhoStore:
         self.fetches += 1
         headers = {"apikey": self._apikey, "Authorization": "Bearer " + token}
         rows = []
-        for page in range(self.max_pages):
+        after = None
+        for _ in range(self.max_pages):
             left = deadline - self._clock()
             if left <= 0:
                 raise KhoLoadError("hết giờ")
-            status, data = self._fetch(self.page_url(page), headers, left)
+            status, data = self._fetch(self.page_url(after), headers, left)
             if status not in (200, 206):
                 raise KhoLoadError(f"HTTP {status}")
             if not isinstance(data, list):
                 raise KhoLoadError("phản hồi không phải danh sách")
             rows.extend(data)
             if len(data) < self.page_size:
+                break
+            last = data[-1]
+            after = last.get("id") if isinstance(last, dict) else None
+            if not isinstance(after, str) or not _UUID_RE.fullmatch(after):
+                # không biết trang sau bắt đầu từ đâu: DỪNG phân trang, dùng phần đã nạp (như khi chạm trần số trang)
+                log.warning("kho nhóm: id cuối trang sai dạng, dừng phân trang, chỉ dùng phần đã nạp (%d dòng)", len(rows))
                 break
         else:
             log.warning("kho nhóm: chạm trần %d trang (%d dòng), chỉ dùng phần đã nạp", self.max_pages, len(rows))
