@@ -1,4 +1,4 @@
 {
-  "doCodeBase": "ae021c994d1422d623e2b1ca0b73f4c8b88ce218",
-  "ghiChu": "Mốc khung đo kho-nhom-do.mjs (vòng 3): --do đòi git diff --quiet <doCodeBase> HEAD -- test-ocr/chup-mat-do/kho-nhom-do.mjs trống và doCodeBase là tổ tiên của HEAD. Sửa khung đo thì phải đặt mốc mới ở commit riêng TRƯỚC lần đo."
+  "doCodeBase": "0e08879a149f139eefb3c94c758d431f67b8f340",
+  "ghiChu": "Mốc khung đo kho-nhom-do.mjs (vòng 3, đặt lại vòng 4 sau khi sửa checkNenSha): --do đòi git diff --quiet <doCodeBase> HEAD -- test-ocr/chup-mat-do/kho-nhom-do.mjs trống và doCodeBase là tổ tiên của HEAD. Sửa khung đo thì phải đặt mốc mới ở commit riêng TRƯỚC lần đo."
 }
