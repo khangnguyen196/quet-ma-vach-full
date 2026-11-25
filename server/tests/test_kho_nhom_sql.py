@@ -164,7 +164,7 @@ def test_b_model_trung_model_id_cua_clip_engine():
 
 def test_c_cot_ky():
     text = sql_text()
-    assert re.search(r"ky\s+text not null check \(ky ~ '\^\[0-9a-f\]\{64\}\$'\)", code_only(text))
+    assert re.search(r"ky\s+text not null unique check \(ky ~ '\^\[0-9a-f\]\{64\}\$'\)", code_only(text))
     assert "chữ ký HMAC-SHA256 do máy chủ cấp khi tính vector; máy chủ bỏ mọi dòng chữ ký sai;" in text
     assert "khóa chỉ máy chủ giữ, không bao giờ ở app / SQL" in text
 
@@ -189,8 +189,12 @@ def test_e_trigger_300_mon_moi_nguoi():
 def test_f_storage_toi_da_300_file_moi_nguoi():
     st = {c: body for n, t, c, _, body in policies(sql_text()) if t == "storage.objects"}
     ins = re.sub(r"\s+\)", ")", re.sub(r"\(\s+", "(", " ".join(st["insert"].split())))
-    assert ("(select count(*) from storage.objects o where o.bucket_id = 'nhom-anh' and "
-            "(storage.foldername(o.name))[1] = (select auth.uid())::text) < 300") in ins
+    # vong 3: dem qua ham (tranh de quy policy), khong con cau con doc storage.objects trong than policy
+    assert "and public.nhom_anh_so_file() < 300" in ins
+    assert "from storage.objects" not in ins.lower()
+    _, _, body = _func_body(code_only(sql_text()), "nhom_anh_so_file")
+    assert ("select count(*) from storage.objects o where o.bucket_id = 'nhom-anh' and "
+            "(storage.foldername(o.name))[1] = (select auth.uid())::text") in " ".join(body.split())
     text = sql_text()
     assert "ai có tài khoản Google cũng đăng nhập được" in text
     assert "chặn (không cho tải thêm) chứ không tính tiền" in text
@@ -200,17 +204,17 @@ def test_g_xoa_file_truoc_va_k7_k6():
     text = sql_text()
     assert "app phải xóa file trong bucket TRƯỚC rồi mới xóa món (xóa món chỉ xóa dòng nhom_anh, không xóa file)" in text
     kiem = text[text.index("-- KIỂM SAU KHI CHẠY"):text.index("-- GỠ")]
-    assert "Chạy riêng từng câu K1–K7 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối)" in kiem
+    assert "Chạy riêng từng câu K1–K8 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối)" in kiem
     assert "(K6) Trigger. Mong đợi 3 dòng" in kiem
     assert "'nhom_anh_gioi_han', 'nhom_san_pham_gioi_han', 'nhom_san_pham_truoc_sua'" in kiem
-    k7 = kiem[kiem.index("(K7)"):]
+    k7 = kiem[kiem.index("(K7)"):kiem.index("(K8)")]
     assert "Mong đợi 0 dòng" in k7
     k7code = " ".join(code_only(k7).split())
     assert ("where o.bucket_id = 'nhom-anh' and not exists (select 1 from public.nhom_anh a "
             "where a.duong_dan = o.name)") in k7code
     # khoi KIEM chi doc: chi co cau select
     stmts = [s.strip() for s in code_only(kiem).split(";") if s.strip()]
-    assert len(stmts) == 7 and all(s.lower().startswith("select") for s in stmts)
+    assert len(stmts) == 8 and all(s.lower().startswith("select") for s in stmts)
 
 
 def test_i_khoi_go_co_ham_va_trigger_moi():
@@ -229,3 +233,48 @@ def test_goi_y_policy_xoa_storage_va_update_san_pham():
     assert "using (bucket_id = 'nhom-anh' and (storage.foldername(name))[1] = (select auth.uid())::text)" in xoa
     upd = " ".join(ps[("public.nhom_san_pham", "update")].split())
     assert "using (nguoi_them = (select auth.uid())) with check (nguoi_them = (select auth.uid()))" in upd
+
+
+# ---------------- vong 3 (review vong 2) ----------------
+def test_j_ham_dem_file_storage():
+    code = code_only(sql_text())
+    args, head, body = _func_body(code, "nhom_anh_so_file")
+    assert args.strip() == ""
+    assert re.search(r"returns bigint\s+language sql\s+stable\s+set search_path = ''", head)
+    assert "security definer" not in head
+    # tao TRUOC policy them
+    assert code.index("create or replace function public.nhom_anh_so_file") < code.index("create policy nhom_anh_storage_them")
+    assert "revoke execute on function public.nhom_anh_so_file() from public, anon;" in code
+    assert "grant execute on function public.nhom_anh_so_file() to authenticated;" in code
+    # KHONG revoke quyen goi ham kiem vector (CHECK can)
+    assert not re.search(r"revoke [^;]*nhom_vec_hop_le", code, re.I)
+    assert ("dùng hàm có set search_path để Postgres không gộp câu đếm vào policy "
+            "(tránh lỗi đệ quy policy trên storage.objects)").lower() in sql_text().lower()
+
+
+def test_k_cot_ky_unique_va_cach_ky():
+    text = sql_text()
+    assert re.search(r"ky\s+text not null unique check", code_only(text))
+    i = text.index("Cách ký (máy chủ làm ở vòng endpoint)")
+    cmt = " ".join(line.strip().lstrip("-").strip() for line in text[i:text.index("ky          text")].splitlines())
+    assert ('HMAC-SHA256(khóa máy chủ, "kho-nhom-v1" || 0x00 || duong_dan (UTF-8) || 0x00 || model (UTF-8) || 0x00 '
+            "|| 512 số float32 little-endian của vec)") in cmt
+    assert "hex thường 64 ký tự" in cmt and "Không ký chuỗi JSON" in cmt
+    assert "Máy chủ kiểm lại khi nạp kho và bỏ dòng sai" in cmt
+    assert "duong_dan" in cmt and "float32" in cmt
+
+
+def test_l_k8_va_khoi_go_vong_3():
+    text = sql_text()
+    kiem = text[text.index("-- KIỂM SAU KHI CHẠY"):text.index("-- GỠ")]
+    assert "(K8) Hàm của kho nhóm. Mong đợi đúng 5 dòng" in kiem
+    k8code = " ".join(code_only(kiem[kiem.index("(K8)"):]).split())
+    for f in ("nhom_vec_hop_le", "nhom_san_pham_truoc_sua", "nhom_san_pham_gioi_han", "nhom_anh_gioi_han", "nhom_anh_so_file"):
+        assert f"'{f}'" in k8code, f
+    assert "from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'" in k8code
+    go = text[text.index("-- GỠ"):]
+    assert "-- drop function if exists public.nhom_anh_so_file();" in go
+    assert "delete from storage.buckets" not in go
+    assert "xóa hết ảnh rồi xóa bucket nhom-anh bằng Dashboard → Storage" in go
+    # drop function sau cac drop policy storage (policy phu thuoc ham)
+    assert go.index("drop policy if exists nhom_anh_storage_them") < go.index("drop function if exists public.nhom_anh_so_file")

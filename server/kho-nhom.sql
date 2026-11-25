@@ -11,7 +11,8 @@
 --   3. Trigger: cập nhật sua_luc; giới hạn ≤ 300 món / người, ≤ 3 ảnh / sản phẩm và ≤ 300 ảnh / người
 --      (bảo vệ gói miễn phí).
 --   4. RLS: chỉ người đã đăng nhập đọc; ai đăng nhập cũng thêm được; chỉ người thêm sửa / xóa món của mình.
---   5. Bucket ảnh riêng tư "nhom-anh" (≤ 2 MB / ảnh, jpeg / png / webp) + policy trên storage.objects.
+--   5. Bucket ảnh riêng tư "nhom-anh" (≤ 2 MB / ảnh, jpeg / png / webp) + policy trên storage.objects
+--      (policy thêm đếm file qua hàm public.nhom_anh_so_file).
 --   Cuối file: khối "KIỂM SAU KHI CHẠY" (chạy được, kết quả mong đợi ghi trong comment) và khối "GỠ" (trong comment).
 
 -- ===================================================================================================================
@@ -84,7 +85,13 @@ create table if not exists public.nhom_anh (
   model       text not null check (model = 'clip-vit-b32-int8-cat'),
   -- chữ ký HMAC-SHA256 do máy chủ cấp khi tính vector; máy chủ bỏ mọi dòng chữ ký sai;
   -- khóa chỉ máy chủ giữ, không bao giờ ở app / SQL
-  ky          text not null check (ky ~ '^[0-9a-f]{64}$'),
+  -- Cách ký (máy chủ làm ở vòng endpoint):
+  --   HMAC-SHA256(khóa máy chủ, "kho-nhom-v1" || 0x00 || duong_dan (UTF-8) || 0x00 || model (UTF-8) || 0x00
+  --               || 512 số float32 little-endian của vec)
+  --   ghi hex thường 64 ký tự. Không ký chuỗi JSON. Máy chủ kiểm lại khi nạp kho và bỏ dòng sai.
+  --   Chữ ký phủ duong_dan (chứa uid, duy nhất) nên không chép được cặp vec + ky sang dòng của người khác.
+  -- unique: lớp chặn rẻ (chữ ký đã phủ duong_dan nên dữ liệu đúng không bao giờ trùng).
+  ky          text not null unique check (ky ~ '^[0-9a-f]{64}$'),
   tao_luc     timestamptz not null default now()
 );
 
@@ -254,6 +261,25 @@ create policy nhom_anh_storage_doc on storage.objects
   for select to authenticated
   using (bucket_id = 'nhom-anh');
 
+-- Số file của người đang đăng nhập trong bucket nhom-anh (policy thêm bên dưới dùng).
+-- Dùng hàm có set search_path để Postgres không gộp câu đếm vào policy (tránh lỗi đệ quy policy trên storage.objects):
+-- câu con đọc storage.objects nằm thẳng trong policy của chính storage.objects thì chỉ cần một policy SELECT nào đó
+-- trên storage.objects có câu con (kể cả của bucket khác) là mọi lần tải ảnh báo "infinite recursion detected in policy".
+-- Chạy với quyền của người gọi (KHÔNG security definer): policy đọc cho thấy mọi file nhom-anh nên đếm đủ.
+-- Chỉ người đăng nhập được gọi.
+create or replace function public.nhom_anh_so_file()
+returns bigint
+language sql
+stable
+set search_path = ''
+as $$
+  select count(*) from storage.objects o
+  where o.bucket_id = 'nhom-anh' and (storage.foldername(o.name))[1] = (select auth.uid())::text
+$$;
+
+revoke execute on function public.nhom_anh_so_file() from public, anon;
+grant execute on function public.nhom_anh_so_file() to authenticated;
+
 -- Thêm: chỉ vào thư mục mang uid của chính mình, tên đúng dạng "<uid>/<uuid>.<jpg|png|webp>", và thư mục đó đang có
 -- dưới 300 file (đếm cả file chưa có dòng nhom_anh, nên tải file mà không thêm dòng cũng không vượt được 300 file).
 -- Rủi ro còn lại: ai có tài khoản Google cũng đăng nhập được, nên nhiều tài khoản vẫn làm đầy được 1 GB storage;
@@ -266,10 +292,7 @@ create policy nhom_anh_storage_them on storage.objects
     bucket_id = 'nhom-anh'
     and (storage.foldername(name))[1] = (select auth.uid())::text
     and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|png|webp)$'
-    and (
-      select count(*) from storage.objects o
-      where o.bucket_id = 'nhom-anh' and (storage.foldername(o.name))[1] = (select auth.uid())::text
-    ) < 300
+    and public.nhom_anh_so_file() < 300
   );
 
 -- Xóa: theo THƯ MỤC ĐẦU = uid (chọn cách này thay vì owner_id): policy thêm đã ép mọi ảnh của một người nằm trong thư
@@ -285,7 +308,7 @@ create policy nhom_anh_storage_xoa on storage.objects
 -- ===================================================================================================================
 -- KIỂM SAU KHI CHẠY (chỉ đọc; chạy riêng từng câu trong SQL Editor, so với kết quả mong đợi ở comment)
 -- ===================================================================================================================
--- Chạy riêng từng câu K1–K7 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối).
+-- Chạy riêng từng câu K1–K8 (chạy cả file thì SQL Editor chỉ hiện kết quả câu cuối).
 -- (K1) RLS bật cả 2 bảng. Mong đợi 2 dòng, cột rls = true:
 --      nhom_anh | true
 --      nhom_san_pham | true
@@ -304,6 +327,7 @@ order by tablename, policyname;
 
 -- (K3) Policy storage. Mong đợi 3 dòng, roles = {authenticated}, KHÔNG có dòng UPDATE:
 --      nhom_anh_storage_doc | SELECT ; nhom_anh_storage_them | INSERT ; nhom_anh_storage_xoa | DELETE
+--      (policy them dùng hàm nhom_anh_so_file để đếm file, xem K8).
 select policyname, cmd, roles
 from pg_policies
 where schemaname = 'storage' and tablename = 'objects' and policyname like 'nhom_anh_storage_%'
@@ -334,15 +358,24 @@ where o.bucket_id = 'nhom-anh'
   and not exists (select 1 from public.nhom_anh a where a.duong_dan = o.name)
 order by o.name;
 
+-- (K8) Hàm của kho nhóm. Mong đợi đúng 5 dòng, cột security_definer = false, cột cau_hinh = {search_path=""}:
+--      nhom_anh_gioi_han ; nhom_anh_so_file ; nhom_san_pham_gioi_han ; nhom_san_pham_truoc_sua ; nhom_vec_hop_le
+select p.proname, p.prosecdef as security_definer, p.proconfig as cau_hinh
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname in ('nhom_vec_hop_le', 'nhom_san_pham_truoc_sua', 'nhom_san_pham_gioi_han', 'nhom_anh_gioi_han',
+                    'nhom_anh_so_file')
+order by p.proname;
+
 -- ===================================================================================================================
 -- GỠ (để trong comment; chỉ chạy khi muốn bỏ hẳn kho nhóm — MẤT HẾT dữ liệu kho nhóm, không lấy lại được)
 -- ===================================================================================================================
--- Bước 1: xóa hết ảnh trong bucket "nhom-anh" bằng Dashboard → Storage (Supabase không cho xóa thẳng bảng
---         storage.objects bằng SQL), rồi xóa bucket ở đó hoặc chạy: delete from storage.buckets where id = 'nhom-anh';
--- Bước 2:
+-- Bước 1: xóa hết ảnh rồi xóa bucket nhom-anh bằng Dashboard → Storage.
+-- Bước 2 (SQL Editor sẽ hỏi xác nhận vì có lệnh drop):
 -- drop policy if exists nhom_anh_storage_doc on storage.objects;
 -- drop policy if exists nhom_anh_storage_them on storage.objects;
 -- drop policy if exists nhom_anh_storage_xoa on storage.objects;
+-- drop function if exists public.nhom_anh_so_file();
 -- drop trigger if exists nhom_san_pham_gioi_han on public.nhom_san_pham;
 -- drop table if exists public.nhom_anh;
 -- drop table if exists public.nhom_san_pham;
