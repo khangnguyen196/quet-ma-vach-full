@@ -96,10 +96,22 @@ describe("nhomRowFromForm (khớp CHECK của server/kho-nhom.sql)", () => {
   });
   test("mã vạch 8–14 chữ số hoặc rỗng", () => {
     for (const ok of ["12345678", "12345678901234", " 8934563163150 "]) assert.equal(nhomRowFromForm({ ten: "A", ma_vach: ok }).row.ma_vach, ok.trim());
-    for (const bad of ["1234567", "123456789012345", "12345678a", "1234 5678", "-12345678", "١٢٣٤٥٦٧٨"]) {
+    for (const bad of ["1234567", "123456789012345", "12345678a", "1234 567", "-12345678", "١٢٣٤٥٦٧٨"]) {
       assert.ok(nhomRowFromForm({ ten: "A", ma_vach: bad }).errors.ma_vach, bad);
     }
     assert.equal(nhomRowFromForm({ ten: "A", ma_vach: "" }).row.ma_vach, null);
+    assert.equal(nhomRowFromForm({ ten: "A", ma_vach: " \t " }).row.ma_vach, null);
+  });
+  test("vòng 8 (gợi ý 4): mã vạch bỏ MỌI khoảng trắng trước khi kiểm (gõ / dán '8 934563 163150')", () => {
+    for (const [inp, out] of [["8 934563 163150", "8934563163150"], ["1234 5678", "12345678"], ["8934 563\t163150\n", "8934563163150"]]) {
+      assert.equal(nhomRowFromForm({ ten: "A", ma_vach: inp }).row.ma_vach, out, inp);
+    }
+  });
+  test("vòng 8 (gợi ý 5): số dinh dưỡng rất nhỏ / rất lớn không ra dạng 1e-7 / 1e21 (bỏ ô đó)", () => {
+    const f = nhomFormFromOff({ nutriments: { fat_100g: 1e-7, sugars_100g: 1e21, proteins_100g: 0.000001, salt_100g: 2.5 } }, "");
+    for (const v of Object.values(f.dinh_duong)) assert.doesNotMatch(v, /e/i, v);
+    assert.deepEqual(f.dinh_duong, { proteins_100g: "0,000001", salt_100g: "2,5" });
+    assert.equal(nhomRowFromForm({ ten: "A", ...f }).ok, true);
   });
   test("thành phần: 5.000 qua, 5.001 lỗi, rỗng → null", () => {
     assert.equal(nhomRowFromForm({ ten: "A", thanh_phan: "z".repeat(5000) }).ok, true);

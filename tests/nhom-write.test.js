@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   sendEmbed, saveNhomProduct, encodeWithLimit, nhomSaveText, NHOM_IMAGE_MAX_BYTES, NHOM_MODEL, EMBED_TIMEOUT_MS
 } from "../src/nhom-write.js";
+import { frontErrorText } from "../src/front-photo.js";
 
 const UID = "0d0d0d0d-1111-4222-8333-444444444444";
 const PID = "99999999-9999-4999-8999-999999999999";
@@ -68,7 +69,7 @@ describe("sendEmbed", () => {
       [{ status: 404, body: { detail: "Not Found" } }, "notReady"],
       [{ status: 503, body: { error: "Kho nhóm chưa bật trên máy chủ." } }, "notReady"],
       [{ status: 503, body: { error: "Máy chủ đang bận (hàng đợi đầy). Thử lại sau ít giây." }, headers: { "Retry-After": "3" } }, "busy"],
-      [{ status: 503, body: "xau" }, "busy"],
+      [{ status: 503, body: "xau", headers: { "Retry-After": "3" } }, "busy"],
       [{ status: 401, body: { error: "x" } }, "auth"],
       [{ status: 429, headers: { "Retry-After": "42" } }, "rate"],
       [{ status: 429, headers: { "Retry-After": "60" } }, "rate"],
@@ -87,6 +88,21 @@ describe("sendEmbed", () => {
     }
     const r = await sendEmbed({ baseUrl: BASE, token: "t", blob: jpeg(), path: PATH, fetch: fakeFetch({ status: 429, headers: { "Retry-After": "42" } }) });
     assert.equal(r.retryAfter, 42);
+  });
+  test("vòng 8: 503 'chưa bật' nhận bằng THIẾU Retry-After hoặc câu 'chưa bật'; 503 có Retry-After + câu khác → busy", async () => {
+    const cases = [
+      [{ status: 503, body: { error: "Service Unavailable" } }, "notReady"],
+      [{ status: 503, body: { detail: "bất kỳ" } }, "notReady"],
+      [{ status: 503, body: "xau" }, "notReady"],
+      [{ status: 503, body: { error: "Hàng đợi đầy" }, headers: { "Retry-After": "5" } }, "busy"],
+      [{ status: 503, body: { error: "bất kỳ" }, headers: { "Retry-After": "abc" } }, "notReady"], // Retry-After sai dạng = không có
+      [{ status: 503, body: { error: "Kho nhóm chưa bật trên máy chủ." }, headers: { "Retry-After": "5" } }, "notReady"],
+      [{ status: 404, body: { detail: "Not Found" } }, "notReady"],
+    ];
+    for (const [opt, kind] of cases) {
+      const r = await sendEmbed({ baseUrl: BASE, token: "t", blob: jpeg(), path: PATH, fetch: fakeFetch(opt) });
+      assert.equal(r.kind, kind, JSON.stringify(opt));
+    }
   });
   test("không gọi mạng khi token rỗng (auth) / địa chỉ, ảnh, đường dẫn sai (other) / đã hủy (aborted)", async () => {
     const f = fakeFetch();
@@ -114,12 +130,22 @@ describe("sendEmbed", () => {
   });
 });
 
-/** Client supabase-js giả: ghi mọi lệnh theo thứ tự vào log; fail = { product, upload: [số ảnh], image: [số ảnh], remove, del }. */
+/**
+ * Client supabase-js giả: ghi mọi lệnh theo thứ tự vào log. fail = {
+ *   product (error của insert sản phẩm), productThrows, upload: [số ảnh trả error], uploadThrows: [số ảnh ném lỗi],
+ *   uploadLanded: [số ảnh trả error / ném nhưng file VẪN lên bucket (mất phản hồi)], uploadError (error trả về),
+ *   image: [số ảnh], imageError, remove (error của remove), removeDrops: [đường dẫn remove "quên" không trả về],
+ *   del (error của delete), delThrows, delRows (số dòng delete trả về, mặc định 1) }.
+ * remove trả như storage-js 2.119.0: data = mảng đối tượng ĐÃ XÓA (trường name = đường dẫn trong bucket); đường dẫn
+ * không có trên bucket thì không có trong data, KHÔNG báo lỗi.
+ */
 function fakeClient(fail = {}) {
   const log = [];
+  const bucket = new Set(); // file đang có trên bucket giả
   let up = 0, img = 0;
   const client = {
     log,
+    bucket,
     from(table) {
       return {
         insert(row) {
@@ -130,6 +156,7 @@ function fakeClient(fail = {}) {
                 return {
                   single: async () => {
                     log.push({ op: "select", table, cols });
+                    if (fail.productThrows) throw new TypeError("Load failed");
                     if (fail.product) return { data: null, error: fail.product };
                     return { data: { id: PID }, error: null };
                   }
@@ -143,10 +170,16 @@ function fakeClient(fail = {}) {
         },
         delete() {
           return {
-            eq: async (col, val) => {
+            eq(col, val) {
               log.push({ op: "delete", table, col, val });
-              if (fail.delThrows) throw new Error("mạng");
-              return { error: fail.del || null };
+              return {
+                select: async (cols) => {
+                  log.push({ op: "deleteSelect", table, cols });
+                  if (fail.delThrows) throw new Error("mạng");
+                  if (fail.del) return { data: null, error: fail.del };
+                  return { data: Array.from({ length: fail.delRows ?? 1 }, () => ({ id: val })), error: null };
+                }
+              };
             }
           };
         },
@@ -155,16 +188,23 @@ function fakeClient(fail = {}) {
       };
     },
     storage: {
-      from(bucket) {
+      from(bucketId) {
         return {
           upload: async (path, blob, opts) => {
             up++;
-            log.push({ op: "upload", bucket, path, blob, opts });
-            return fail.upload?.includes(up) ? { data: null, error: { message: "x", statusCode: "403" } } : { data: { path }, error: null };
+            log.push({ op: "upload", bucket: bucketId, path, blob, opts });
+            if (fail.uploadLanded?.includes(up)) bucket.add(path);
+            if (fail.uploadThrows?.includes(up)) throw new TypeError("Load failed");
+            if (fail.upload?.includes(up)) return { data: null, error: fail.uploadError || { message: "x", status: 400, statusCode: "500" } };
+            bucket.add(path);
+            return { data: { path }, error: null };
           },
           remove: async (paths) => {
-            log.push({ op: "remove", bucket, paths });
-            return { error: fail.remove || null };
+            log.push({ op: "remove", bucket: bucketId, paths });
+            if (fail.remove) return { data: null, error: fail.remove };
+            const gone = paths.filter((p) => bucket.has(p) && !fail.removeDrops?.includes(p));
+            for (const p of gone) bucket.delete(p);
+            return { data: gone.map((name) => ({ name, bucket_id: bucketId, id: "x" })), error: null };
           }
         };
       }
@@ -257,24 +297,68 @@ describe("saveNhomProduct", () => {
       assert.ok(!c.log.some((x) => x.op === "upload" || x.op === "remove" || x.op === "delete"));
     }
   });
-  test("tải ảnh 2 lỗi → xóa file 1 + xóa dòng sản phẩm (file trước, dòng sau)", async () => {
-    const c = fakeClient({ upload: [2] });
-    const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
-    assert.deepEqual({ ok: r.ok, kind: r.kind, step: r.step, cleaned: r.cleaned }, { ok: false, kind: "upload", step: "upload", cleaned: true });
-    const up1 = c.log.filter((x) => x.op === "upload")[0].path;
-    const tail = c.log.slice(-2);
-    assert.deepEqual(tail.map((x) => x.op), ["remove", "delete"]);
-    assert.deepEqual(tail[0].paths, [up1]);
-    assert.equal(tail[0].bucket, "nhom-anh");
-    assert.deepEqual([tail[1].table, tail[1].col, tail[1].val], ["nhom_san_pham", "id", PID]);
-    assert.equal(c.log.filter((x) => x.op === "insert" && x.table === "nhom_anh").length, 1);
+  test("vòng 8: insert sản phẩm MẤT PHẢN HỒI (error không có mã Postgres / ném lỗi) → db, cleaned: false (dòng có thể đã ghi)", async () => {
+    for (const f of [{ product: { message: "TypeError: Load failed", code: "" } }, { product: { message: "x" } }, { productThrows: true }]) {
+      const c = fakeClient(f);
+      const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+      assert.deepEqual({ ok: r.ok, kind: r.kind, step: r.step, cleaned: r.cleaned }, { ok: false, kind: "db", step: "product", cleaned: false }, JSON.stringify(f));
+      assert.ok(!c.log.some((x) => x.op === "upload" || x.op === "remove" || x.op === "delete"), "không có id thì không dọn được");
+      assert.ok(!("id" in c.log.find((x) => x.op === "insert").row), "app không gửi id");
+      assert.match(nhomSaveText(r), /lưu dở/);
+    }
+    // có mã Postgres (vd 42501) → server đã từ chối rõ ràng → cleaned: true như cũ
+    const c = fakeClient({ product: { code: "42501", message: "x" } });
+    const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+    assert.deepEqual({ kind: r.kind, cleaned: r.cleaned }, { kind: "db", cleaned: true });
   });
-  test("tải ảnh 1 lỗi → không có file để xóa, chỉ xóa dòng sản phẩm", async () => {
+  test("tải ảnh 2 lỗi → xóa file 1 VÀ file 2 (có thể đã lên) + xóa dòng sản phẩm (file trước, dòng sau)", async () => {
+    for (const f of [{ upload: [2] }, { uploadThrows: [2] }]) {
+      const c = fakeClient(f);
+      const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+      assert.deepEqual({ ok: r.ok, kind: r.kind, step: r.step, cleaned: r.cleaned }, { ok: false, kind: "upload", step: "upload", cleaned: true }, JSON.stringify(f));
+      const [up1, up2] = c.log.filter((x) => x.op === "upload").map((x) => x.path);
+      const tail = c.log.slice(-3);
+      assert.deepEqual(tail.map((x) => x.op), ["remove", "delete", "deleteSelect"]);
+      assert.deepEqual(tail[0].paths, [up1, up2], "remove gồm ảnh 1 (đã lên) và ảnh 2 (upload lỗi: có thể đã lên)");
+      assert.equal(tail[0].bucket, "nhom-anh");
+      assert.deepEqual([tail[1].table, tail[1].col, tail[1].val], ["nhom_san_pham", "id", PID]);
+      assert.equal(tail[2].cols, "id");
+      assert.equal(c.log.filter((x) => x.op === "insert" && x.table === "nhom_anh").length, 1);
+      assert.equal(c.bucket.size, 0);
+    }
+  });
+  test("vòng 8: upload ảnh 2 báo lỗi nhưng file đã lên (mất phản hồi) → vẫn bị xóa, không còn file mồ côi", async () => {
+    for (const f of [{ upload: [2], uploadLanded: [2] }, { uploadThrows: [2], uploadLanded: [2] }]) {
+      const c = fakeClient(f);
+      const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+      assert.equal(r.cleaned, true);
+      assert.equal(c.bucket.size, 0, "bucket giả không còn file nào");
+    }
+  });
+  test("tải ảnh 1 lỗi → xóa đường dẫn ảnh 1 (có thể đã lên) + dòng sản phẩm; file không có trên bucket không làm dọn lỗi", async () => {
     const c = fakeClient({ upload: [1] });
     const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
-    assert.equal(r.kind, "upload");
-    assert.ok(!c.log.some((x) => x.op === "remove"));
-    assert.equal(c.log.at(-1).op, "delete");
+    assert.deepEqual({ kind: r.kind, cleaned: r.cleaned }, { kind: "upload", cleaned: true });
+    const p1 = c.log.find((x) => x.op === "upload").path;
+    assert.deepEqual(c.log.find((x) => x.op === "remove").paths, [p1]);
+    assert.equal(c.log.at(-1).op, "deleteSelect");
+  });
+  test("vòng 8: dọn kiểm KẾT QUẢ THẬT: delete trả 0 dòng / 2 dòng → cleaned false; remove thiếu file chắc chắn đã lên → false; đủ → true", async () => {
+    for (const [f, want] of [
+      [{ upload: [2], delRows: 0 }, false],
+      [{ upload: [2], delRows: 2 }, false],
+      [{ upload: [2], removeDrops: "ANH1" }, false],
+      [{ upload: [2] }, true],
+    ]) {
+      const c = fakeClient(f);
+      if (f.removeDrops === "ANH1") {
+        // "quên" ảnh 1 (chắc chắn đã lên): đường dẫn ảnh 1 = đường dẫn đầu tiên được tải
+        const rm = c.storage.from;
+        c.storage.from = (b) => { const o = rm(b); const r0 = o.remove; o.remove = async (paths) => { const res = await r0(paths); return { ...res, data: res.data.slice(1) }; }; return o; };
+      }
+      const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+      assert.equal(r.cleaned, want, JSON.stringify(f));
+    }
   });
   test("insert nhom_anh lỗi (ảnh 2) → xóa CẢ 2 file đã tải + dòng sản phẩm; 23514 → limit", async () => {
     for (const [imageError, kind] of [[{ code: "23514" }, "limit"], [{ code: "42501" }, "db"]]) {
@@ -284,7 +368,7 @@ describe("saveNhomProduct", () => {
       const ups = c.log.filter((x) => x.op === "upload").map((x) => x.path);
       assert.equal(ups.length, 2);
       assert.deepEqual(c.log.find((x) => x.op === "remove").paths, ups);
-      assert.equal(c.log.at(-1).op, "delete");
+      assert.equal(c.log.at(-1).op, "deleteSelect");
     }
   });
   test("dọn lỗi (remove lỗi / delete lỗi / ném) → cleaned: false", async () => {
@@ -311,7 +395,27 @@ describe("saveNhomProduct", () => {
     const r2 = await saveNhomProduct({ client: c2, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c2.log), cancelled: () => ups >= 1, newId: ids });
     assert.deepEqual({ kind: r2.kind, cleaned: r2.cleaned }, { kind: "cancelled", cleaned: true });
     assert.equal(ups, 1);
-    assert.deepEqual(c2.log.slice(-2).map((x) => x.op), ["remove", "delete"]);
+    assert.deepEqual(c2.log.slice(-3).map((x) => x.op), ["remove", "delete", "deleteSelect"]);
+  });
+  test("vòng 8: hủy sau khi đã ghi mà dọn không xong (delete 0 dòng) → cancelled, cleaned: false (báo thật)", async () => {
+    let ups = 0;
+    const c = fakeClient({ delRows: 0 });
+    const up = c.storage.from;
+    c.storage.from = (b) => { const o = up(b); const u = o.upload; o.upload = async (...a) => { ups++; return u(...a); }; return o; };
+    const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }, { blob: jpeg() }], embed: fakeEmbed(c.log), cancelled: () => ups >= 1, newId: ids });
+    assert.deepEqual({ kind: r.kind, cleaned: r.cleaned }, { kind: "cancelled", cleaned: false });
+    assert.match(nhomSaveText(r), /lưu dở/);
+  });
+  test("vòng 8 (gợi ý 1): upload bị từ chối 403 (giới hạn 300 ảnh / quyền) → câu nhắc có thể đã đủ 300 ảnh", async () => {
+    for (const uploadError of [{ message: "new row violates row-level security policy", status: 400, statusCode: "403" }, { message: "x", status: 403, statusCode: "403" }]) {
+      const c = fakeClient({ upload: [1], uploadError });
+      const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+      assert.equal(r.kind, "upload");
+      assert.match(nhomSaveText(r), /có thể đã đủ 300 ảnh của bạn, hoặc thử lại sau\./);
+    }
+    const c = fakeClient({ upload: [1] }); // lỗi khác 403 → câu cũ
+    const r = await saveNhomProduct({ client: c, uid: UID, row: ROW, images: [{ blob: jpeg() }], embed: fakeEmbed(c.log), newId: ids });
+    assert.doesNotMatch(nhomSaveText(r), /300 ảnh/);
   });
 });
 
@@ -341,6 +445,10 @@ describe("encodeWithLimit / nhomSaveText", () => {
     assert.match(nhomSaveText({ ok: false, kind: "rate", retryAfter: 7, cleaned: true }), /7 giây/);
     assert.match(nhomSaveText({ ok: false, kind: "db", cleaned: false }), /lưu dở/);
     assert.doesNotMatch(nhomSaveText({ ok: false, kind: "db", cleaned: true }), /lưu dở/);
+    // vòng 8 (gợi ý 9): hết lượt ngày dùng chung câu với frontErrorText (một chỗ nói giờ đổi ngày), thêm "Chưa lưu gì."
+    assert.equal(nhomSaveText({ ok: false, kind: "daily", retryAfter: 3600, cleaned: true }),
+      frontErrorText({ ok: false, kind: "daily", retryAfter: 3600 }) + " Chưa lưu gì.");
+    assert.equal(nhomSaveText({ ok: false, kind: "daily", cleaned: true }), frontErrorText({ ok: false, kind: "daily" }) + " Chưa lưu gì.");
     for (const k of ["busy", "tooBig", "badType", "timeout", "network", "badImages", "upload", "cancelled", "other", "xyz"]) {
       assert.ok(nhomSaveText({ ok: false, kind: k, cleaned: true }).length > 10, k);
     }
