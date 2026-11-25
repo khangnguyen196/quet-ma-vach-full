@@ -525,6 +525,72 @@ def test_ocr_supabase_treo_qua_3_giay_van_tra(monkeypatch):
     a.state.nhom_store._lock.release()
 
 
+def test_song_song_cho_kho_truoc_khi_giu_khoa_ocr(monkeypatch):
+    """Vòng 5 (review NÊN SỬA 2): chế độ song song chờ nạp kho XONG rồi mới giữ khóa OCR (không giữ khóa trong lúc chờ
+    Supabase). Supabase giả chậm (chờ tối đa 1 giây, dưới hết giờ 3 giây); Slot.acquire được bọc để ghi lúc giữ khóa thì
+    nạp kho đã xong chưa, rồi thả Supabase giả ngay (thứ tự cũ: giữ khóa khi kho chưa xong -> ghi False, không phải chờ)."""
+    import ratelimit
+
+    seen = {}
+    may_tra = threading.Event()
+    xong = {"kho": False}
+    holder = {}
+
+    class SlowFetch:
+        calls = 0
+
+        def __call__(self, url, headers, timeout):
+            self.calls += 1
+            may_tra.wait(1.0)
+            seen["khoa_ocr_khi_nap_xong"] = holder["a"].state.gate._sem.locked()
+            xong["kho"] = True
+            return 200, []
+
+    orig = ratelimit.Slot.acquire
+
+    async def acquire(self):
+        seen.setdefault("kho_xong_khi_giu_khoa", xong["kho"])
+        may_tra.set()
+        await orig(self)
+
+    monkeypatch.setattr(ratelimit.Slot, "acquire", acquire)
+    a = make_nhom_app(fetch=SlowFetch(), parallel=True)
+    holder["a"] = a
+    r = req(a, "/ocr", token=es256())
+    assert r.status_code == 200 and r.json()["items"]
+    assert a.state.test_fetch.calls == 1
+    assert seen["kho_xong_khi_giu_khoa"] is True       # giữ khóa OCR SAU khi kho đã nạp xong
+    assert seen["khoa_ocr_khi_nap_xong"] is False      # suốt lúc chờ Supabase, khóa OCR chưa bị giữ
+    assert a.state.gate.inside == 0 and not a.state.gate._sem.locked()  # trả chỗ + khóa đúng 1 lần
+
+
+def test_noi_tiep_van_giu_khoa_ocr_trong_luc_nap_kho(monkeypatch):
+    """Nhánh nối tiếp giữ như cũ: nạp kho chạy song song với OCR (khóa OCR giữ trong lúc kho đang nạp)."""
+    import ratelimit
+
+    seen = {}
+    may_tra = threading.Event()
+    xong = {"kho": False}
+
+    def fetch(url, headers, timeout):
+        may_tra.wait(1.0)
+        xong["kho"] = True
+        return 200, []
+
+    orig = ratelimit.Slot.acquire
+
+    async def acquire(self):
+        seen.setdefault("kho_xong_khi_giu_khoa", xong["kho"])
+        await orig(self)
+        may_tra.set()
+
+    monkeypatch.setattr(ratelimit.Slot, "acquire", acquire)
+    a = make_nhom_app(fetch=fetch, parallel=False)
+    r = req(a, "/ocr", token=es256())
+    assert r.status_code == 200 and seen["kho_xong_khi_giu_khoa"] is False
+    assert a.state.gate.inside == 0 and not a.state.gate._sem.locked()
+
+
 @pytest.mark.parametrize("parallel", [False, True])
 def test_embed_roi_ocr_ra_ung_vien_nhom(parallel):
     """/embed ảnh đỏ -> lưu (giả lập app ghi vào Supabase) -> /ocr ảnh đỏ ra đúng món, điểm 1.0."""
