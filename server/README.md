@@ -191,7 +191,9 @@ app SẼ tải lên, dạng `<uid>/<uuid ảnh>.jpg|png` (≤ 128 ký tự; vòn
 
 **App phải** gửi `/embed` ĐÚNG các byte sẽ tải lên bucket (CÙNG một Blob cho `/embed` và cho lệnh tải lên), JPEG hoặc PNG
 ≤ 2 MB, `contentType` khớp đuôi (`image/jpeg` cho `.jpg`, `image/png` cho `.png`), tải lên với `upsert: false` (không
-ghi đè ảnh đã có ở cùng đường dẫn). Trả:
+ghi đè ảnh đã có ở cùng đường dẫn). App (vòng 7, `src/nhom-write.js`) gửi `/embed` cho MỌI ảnh của món TRƯỚC khi ghi
+gì vào Supabase; `404` (máy chủ cũ chưa có `/embed`) hoặc `503` "Kho nhóm chưa bật…" → báo "chưa bật", không ghi gì;
+`401` không tự làm mới phiên rồi gửi lại. Trả:
 
 ```json
 { "model": "clip-vit-b32-int8-cat", "vec": [0.0123456789, "… 512 số"], "ky": "<64 ký tự hex thường>" }
