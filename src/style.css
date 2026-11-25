@@ -530,6 +530,15 @@ table.cmp-table .empty { font-size: 13px; }
 .photo-none { scroll-margin: 12px; }
 .photo-none:focus { outline: none; }
 .photo-lines { margin: 4px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+/* Kho sản phẩm của nhóm (đợt kho-nhom vòng 6): khối món nhóm trong gợi ý khác / "Chưa tìm thấy…", trang món nhóm.
+   Nút món nhóm không có ảnh: cao ≥ 48 px (≥ 44 px chạm được), chữ xuống dòng được ở màn 360 px. */
+.nhom-hits { margin-top: 12px; }
+.nhom-hit { min-height: 48px; padding: 8px 10px; }
+.nhom-tag { justify-self: start; margin-top: 2px; padding: 0 6px; font-size: 13px; font-weight: 500; line-height: 20px;
+  border: 1px solid var(--warn); border-radius: 4px; color: var(--warn); background: var(--warn-bg); }
+.nhom-note { margin: 0 0 12px; padding: 8px 12px; border: 2px solid var(--warn); border-left-width: 6px; border-radius: 4px;
+  background: var(--warn-bg); color: var(--ink); font-weight: 700; }
+.nhom-error { border-top: 10px solid var(--rule-strong); padding-top: 12px; }
 /* Ô sửa chữ đóng sẵn (dưới kết quả, không bắt buộc) */
 .front-edit summary { min-height: 44px; padding: 11px 0; box-sizing: border-box; cursor: pointer; font-weight: 500; line-height: 22px; }
 .front-edit label { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; }

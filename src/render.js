@@ -1,6 +1,7 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
 import { NOVA_VI, NUTRIENT_ROWS, NO_NAME, ALLERGEN_VI, ALLERGEN_KEYS, matchAllergies } from "./off.js";
 import { compareRows } from "./compare.js";
+import { isNhomId, NHOM_LOAD_FAIL_TEXT } from "./front-nhom.js";
 import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 
 // Giới hạn năm của ô chọn ngày, khớp với kiểm tra ở storage.js (checkDateQty vẫn kiểm lại khi lưu).
@@ -64,9 +65,11 @@ export function renderAllergyOptions(selected = []) {
  * - noData → câu thiếu dữ liệu trong khung xám riêng (có thể đi cùng khung vàng);
  * - có dữ liệu, không đỏ, không vàng → dòng trung tính.
  */
-export function renderAllergyAlert(match, profileLength, { unconfirmed = false } = {}) {
+export function renderAllergyAlert(match, profileLength, { unconfirmed = false, nhom = false } = {}) {
   // Đợt tu-dong vòng 4: sản phẩm TỰ MỞ từ ảnh, chưa bấm "Đúng" → dòng nhắc đứng đầu khung (kể cả hồ sơ 0 nhóm: trang
   // sản phẩm vẫn có mục "Chất gây dị ứng"). main.js truyền cờ cả khi vẽ lại (đổi hồ sơ / đổi ở tab khác).
+  // Đợt kho-nhom vòng 6: nhom true = món của kho nhóm (dữ liệu nhóm nhập, không phải Open Food Facts): 2 câu "chưa có dữ
+  // liệu" / "không ghi nhóm nào" nói đúng nguồn. Không truyền → y hệt cũ.
   const note = unconfirmed === true ? `<p class="allergy-alert unconfirmed" role="note">${esc(ALLERGY_UNCONFIRMED)}</p>` : "";
   if (!profileLength) return note;
   const { danger = [], traces = [], noData = false } = match || {};
@@ -79,12 +82,18 @@ export function renderAllergyAlert(match, profileLength, { unconfirmed = false }
   }
   if (noData) {
     // Khung riêng (nền + viền, không đỏ / vàng): hàng Việt Nam hay thiếu dữ liệu dị ứng, câu này cần nổi hơn dòng trung tính.
-    html += `<p class="allergy-alert nodata">${esc(ALLERGY_NO_DATA)}</p>`;
+    html += `<p class="allergy-alert nodata">${esc(nhom === true ? NHOM_ALLERGY_NO_DATA : ALLERGY_NO_DATA)}</p>`;
   } else if (!danger.length && !traces.length) {
-    html += `<p class="allergy-note">${esc(ALLERGY_NEUTRAL)}</p>`;
+    html += `<p class="allergy-note">${esc(nhom === true ? NHOM_ALLERGY_NEUTRAL : ALLERGY_NEUTRAL)}</p>`;
   }
   return html;
 }
+
+/** Món kho nhóm (đợt kho-nhom vòng 6): nhóm chưa ghi dị ứng nào (không phân biệt "không có" với "chưa nhập"). */
+export const NHOM_ALLERGY_NO_DATA = "Nhóm chưa ghi chất gây dị ứng cho món này, hãy đọc nhãn trên bao bì.";
+/** Món kho nhóm: có ghi dị ứng nhưng không trùng nhóm nào trong hồ sơ. */
+export const NHOM_ALLERGY_NEUTRAL = "Thông tin nhóm nhập không ghi nhóm nào trong hồ sơ của bạn. "
+  + "Thông tin có thể thiếu hoặc nhập nhầm, hãy đọc nhãn trên bao bì.";
 
 /** Khung có id riêng chứa renderAllergyAlert(), đặt ngay đầu kết quả (trước <article>). opts: { unconfirmed }. */
 export function renderAllergyBox(match, profileLength, opts = {}) {
@@ -588,9 +597,14 @@ const emptyOr = (v) => (v ? esc(v) : '<span class="empty">chưa có dữ liệu<
  * top: mục gộp { code, name, brand, img }.
  */
 export function renderPhotoConfirm(top) {
+  return photoConfirmFrame(`${photoPic(top, 80)}<span class="front-info"><span class="front-name">${emptyOr(top?.name)}</span><span class="front-brand">${emptyOr(top?.brand)}</span><span class="front-code">Mã ${esc(top?.code)}</span></span>`);
+}
+
+/** Khung xác nhận dùng chung (sản phẩm OFF / món nhóm): itemHtml = phần trong .photo-item (đã escape). */
+function photoConfirmFrame(itemHtml) {
   return `<div id="${PHOTO_CONFIRM_ID}" class="photo-confirm" tabindex="-1">
 <div class="photo-ask"><p class="photo-ask-text">${esc(PHOTO_ASK_TEXT)}</p>
-<div class="photo-item">${photoPic(top, 80)}<span class="front-info"><span class="front-name">${emptyOr(top?.name)}</span><span class="front-brand">${emptyOr(top?.brand)}</span><span class="front-code">Mã ${esc(top?.code)}</span></span></div>
+<div class="photo-item">${itemHtml}</div>
 <div class="photo-actions"><button type="button" class="btn primary" data-photo-yes>Đúng</button>
 <button type="button" class="btn" data-photo-no aria-expanded="false" aria-controls="photoOthers">Không, xem gợi ý khác</button></div></div>
 <div id="photoOthers" class="photo-others" hidden></div>
@@ -612,26 +626,138 @@ export function renderPhotoDone(top) {
  * "Không, xem gợi ý khác": tối đa 4 mục còn lại (ảnh, tên, hãng, mã; nút data-front-code: bấm thì main.js tra mã như
  * người dùng tự chọn), rồi khối "Không chắc chắn…" + 3 nút cũ. Không còn mục nào → chỉ khối + 3 nút.
  */
-export function renderPhotoOthers(others) {
+export function renderPhotoOthers(others, nhom = []) {
   const list = (Array.isArray(others) ? others : []).filter((h) => isPlainCode(h?.code)).slice(0, 4);
   const items = list.map((h) => `<li><button type="button" class="front-hit" data-front-code="${h.code}">${photoPic(h, 64)}
 <span class="front-info"><span class="front-name">${emptyOr(h.name)}</span><span class="front-brand">${emptyOr(h.brand)}</span><span class="front-code">Mã ${h.code}</span></span></button></li>`).join("");
   const head = list.length ? `<p class="front-lead">Gợi ý khác, bấm để xem</p><ul class="front-list">${items}</ul>` : "";
-  return `${head}${renderFrontUnsure()}`;
+  // Đợt kho-nhom vòng 6: món nhóm (≤ 3) đứng sau các gợi ý cũ, trước khối "Không chắc chắn…"; không có món → y hệt cũ.
+  return `${head}${renderNhomHits(nhom)}${renderFrontUnsure()}`;
 }
 
 /**
  * 0 kết quả: câu "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts" + chữ đọc được (từng dòng, qua esc()) +
- * 3 nút cũ. Đặt vào #result.
+ * 3 nút cũ. Đặt vào #result. nhom (đợt kho-nhom vòng 6): món nhóm có ảnh giống, hiện ngay sau câu "Chưa tìm thấy…";
+ * không có món → y hệt cũ.
  */
-export function renderPhotoNone({ lines } = {}) {
+export function renderPhotoNone({ lines, nhom = [] } = {}) {
   const ls = (Array.isArray(lines) ? lines : []).map((s) => String(s ?? "").trim()).filter(Boolean);
   const read = ls.length
     ? `<p>Chữ đọc được trên ảnh:</p><ul class="photo-lines">${ls.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`
     : "<p>Không đọc được chữ nào trên ảnh.</p>";
   return `<div id="${PHOTO_NONE_ID}" class="notfound photo-none" tabindex="-1"><p class="big">${esc(PHOTO_NONE_TEXT)}</p>
-${read}
+${renderNhomHits(nhom)}${read}
 ${renderFrontActions()}</div>`;
+}
+
+// ---- Kho sản phẩm của nhóm (đợt kho-nhom vòng 6): khối gợi ý món nhóm + trang món nhóm ----
+// Mọi chữ từ máy chủ / Supabase qua esc(). KHÔNG hiện điểm độ giống cho người dùng (cos không phải xác suất): điểm chỉ ở
+// thuộc tính data-nhom-diem.
+
+/** Tiêu đề khối món nhóm trong gợi ý khác / trang "Chưa tìm thấy…". */
+export const NHOM_HITS_TEXT = "Món nhóm đã thêm có ảnh giống";
+/** Nhãn trên mỗi món nhóm. */
+export const NHOM_TAG_TEXT = "Do nhóm thêm";
+/** Dòng đầu trang món nhóm. */
+export const NHOM_NOTE_TEXT = "Do nhóm thêm, hãy kiểm nhãn";
+
+
+/**
+ * Khối "Món nhóm đã thêm có ảnh giống": ≤ 3 nút (tên, thương hiệu nếu có, nhãn "Do nhóm thêm"), data-nhom-id (main.js
+ * bấm thì tải món) + data-nhom-diem. nhom: danh sách nhomCandidates (src/front-nhom.js); mục thiếu id / tên bị bỏ.
+ * Không có món → "" (HTML nơi gọi y hệt cũ).
+ */
+export function renderNhomHits(nhom) {
+  const list = (Array.isArray(nhom) ? nhom : [])
+    .filter((m) => isNhomId(m?.san_pham_id) && typeof m.ten === "string" && m.ten.trim())
+    .slice(0, 3);
+  if (!list.length) return "";
+  const items = list.map((m) => {
+    const diem = typeof m.diem === "number" && Number.isFinite(m.diem) ? String(m.diem) : "";
+    const brand = typeof m.thuong_hieu === "string" && m.thuong_hieu.trim() ? `<span class="front-brand">${esc(m.thuong_hieu)}</span>` : "";
+    return `<li><button type="button" class="front-hit nhom-hit" data-nhom-id="${esc(m.san_pham_id)}" data-nhom-diem="${esc(diem)}">`
+      + `<span class="front-info"><span class="front-name">${esc(m.ten)}</span>${brand}<span class="nhom-tag">${esc(NHOM_TAG_TEXT)}</span></span></button></li>`;
+  }).join("");
+  return `<div class="nhom-hits"><p class="front-lead">${esc(NHOM_HITS_TEXT)}</p><ul class="front-list">${items}</ul></div>`;
+}
+
+/**
+ * URL ảnh món nhóm dùng được, hoặc "": chỉ https, đúng tên máy của Supabase URL đang dùng (supabaseUrl), không tên đăng
+ * nhập / cổng lạ. URL ký của Supabase Storage (nhomImageUrl của src/nhom-data.js) qua được; URL khác (http, máy lạ,
+ * "javascript:") bị bỏ.
+ */
+export function nhomImageOk(url, supabaseUrl) {
+  if (typeof url !== "string" || !url || typeof supabaseUrl !== "string" || !supabaseUrl) return "";
+  let u, s;
+  try { u = new URL(url); s = new URL(supabaseUrl); } catch { return ""; }
+  if (u.protocol !== "https:" || s.protocol !== "https:" || u.hostname !== s.hostname) return "";
+  if (u.username || u.password || u.port !== s.port) return "";
+  return u.href;
+}
+
+/** Khung xác nhận khi TỰ MỞ món nhóm (kind openNhom): như renderPhotoShell nhưng mục là món nhóm. */
+export function renderNhomShell(nhomTop) {
+  const code = typeof nhomTop?.ma_vach === "string" && /^\d{8,14}$/.test(nhomTop.ma_vach) ? `<span class="front-code">Mã ${esc(nhomTop.ma_vach)}</span>` : "";
+  const item = `<span class="noimg front-noimg">chưa có ảnh</span><span class="front-info"><span class="front-name">${emptyOr(nhomTop?.ten)}</span>`
+    + `<span class="front-brand">${emptyOr(nhomTop?.thuong_hieu)}</span>${code}<span class="nhom-tag">${esc(NHOM_TAG_TEXT)}</span></span>`;
+  return `${photoConfirmFrame(item)}<div class="photo-body">${renderNhomLoading()}</div>`;
+}
+
+/** Câu chờ khi đang tải món nhóm. */
+export function renderNhomLoading() {
+  return `<p class="photo-loading">Đang tải món của nhóm…</p>`;
+}
+
+/** Tải món nhóm lỗi: câu thường, không đỏ. */
+export function renderNhomError() {
+  return `<div class="nhom-error"><p>${esc(NHOM_LOAD_FAIL_TEXT)}</p></div>`;
+}
+
+/**
+ * Trang một món nhóm. view: nhomProductView (src/front-nhom.js). Dòng đầu nổi bật "Do nhóm thêm, hãy kiểm nhãn"
+ * (role="note", không đỏ), rồi khung dị ứng (renderAllergyBox: id allergyAlert để main.js vẽ lại khi đổi hồ sơ;
+ * unconfirmed true → dòng ALLERGY_UNCONFIRMED), rồi tên, thương hiệu, khối lượng, mã vạch, nguồn, dinh dưỡng / 100 g,
+ * thành phần, dị ứng. Trường trống → "chưa có dữ liệu". Ảnh chỉ khi imgUrl qua nhomImageOk (https, đúng host Supabase).
+ * opts: { imgUrl, unconfirmed, profile (hồ sơ dị ứng, mảng khóa), supabaseUrl }.
+ */
+export function renderNhomProduct(view, { imgUrl = "", unconfirmed = false, profile = [], supabaseUrl = "" } = {}) {
+  const v = view || {};
+  const prof = Array.isArray(profile) ? profile : [];
+  const img = nhomImageOk(imgUrl, supabaseUrl);
+  const alt = `Ảnh mặt trước ${v.name ? v.name : "món của nhóm"}`;
+  const pic = img
+    ? `<img src="${esc(img)}" alt="${esc(alt)}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="noimg" hidden>Chưa có ảnh</div>`
+    : '<div class="noimg">Chưa có ảnh</div>';
+  const nut = v.nutriments && typeof v.nutriments === "object" ? v.nutriments : {};
+  const rows = NUTRIENT_ROWS.map(([key, label, unit, cls]) => {
+    const n = nut[key];
+    const has = typeof n === "number" && Number.isFinite(n);
+    return `<tr class="${cls}"><td>${esc(label)}</td><td>${has ? fmt(n) + " " + unit : '<span class="empty">—</span>'}</td></tr>`;
+  }).join("");
+  const allergens = Array.isArray(v.allergens) ? v.allergens : [];
+  const chips = allergens.map((x) => `<span class="chip">${esc(x)}</span>`).join("");
+  const match = matchAllergies(v, prof);
+  return `<p class="nhom-note" role="note">${esc(NHOM_NOTE_TEXT)}</p>
+${renderAllergyBox(match, prof.length, { unconfirmed: unconfirmed === true, nhom: true })}
+<article class="label nhom-product">
+  <div class="label-head">
+    <div class="text">
+      <h2>${v.name ? esc(v.name) : '<span class="empty">chưa có dữ liệu</span>'}</h2>
+      ${metaRow("Thương hiệu", v.brand)}
+      ${metaRow("Khối lượng", v.quantity)}
+      ${metaRow("Mã vạch", v.code)}
+      ${metaRow("Nguồn thông tin", v.source)}
+      ${v.createdAt ? `<p class="src">Thêm vào kho nhóm ngày ${esc(v.createdAt)}</p>` : ""}
+    </div>
+    ${pic}
+  </div>
+  <table class="facts"><caption>Giá trị dinh dưỡng trên 100 g</caption><tbody>${rows}</tbody></table>
+  ${v.hasNutriments ? "" : '<p class="src">Nhóm chưa nhập bảng dinh dưỡng (chưa có dữ liệu).</p>'}
+  <section class="block"><h3>Thành phần</h3>${v.ingredients ? `<p>${esc(v.ingredients)}</p>` : '<p class="empty">chưa có dữ liệu</p>'}</section>
+  <section class="block"><h3>Chất gây dị ứng</h3>
+    ${v.hasAllergenData && chips ? `<div class="chips">${chips}</div>` : `<p class="empty">${esc(NHOM_ALLERGY_NO_DATA)}</p>`}
+  </section>
+</article>`;
 }
 
 /**
