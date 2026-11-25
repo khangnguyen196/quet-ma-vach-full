@@ -145,6 +145,8 @@ header p { color: var(--ink-2); margin-top: 4px; max-width: 34ch; }
    Tách 2 rule: trình duyệt cũ không hiểu :has() sẽ bỏ cả rule chứa nó, rule :disabled vẫn còn. */
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+/* "Đăng xuất" khi đang lưu vào kho nhóm (đợt kho-nhom vòng 8): mờ nhưng vẫn bấm được để hiện câu nhắc */
+.btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 /* Nút đèn pin / phóng to: chỉ hiện khi camera đang bật và máy hỗ trợ */
 .cam-tools[hidden], .cam-tools .btn[hidden] { display: none; }
 

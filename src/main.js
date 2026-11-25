@@ -833,6 +833,7 @@ function setAuth(patch) {
   authState = { ...authState, ...patch };
   const view = authView(authState);
   authBody.innerHTML = renderAuthBox(view);
+  syncLogoutLock(); // vẽ lại khối thì đặt lại trạng thái mờ của "Đăng xuất" (đang lưu kho nhóm)
   const msg = authMessage(view);
   if (authMsg.textContent !== msg) authMsg.textContent = msg; // chữ không đổi thì không đọc lại
   authBox.hidden = !authCfg;
@@ -891,10 +892,15 @@ async function initAuth() {
 // Số lần người dùng TỰ bấm "Đăng xuất" (đợt chup-mat-gon): "Chụp mặt trước" nhớ số này từ lúc chọn ảnh; gặp 401 mà
 // số đã đổi thì lượt đó bị bỏ (không câu lệch, không làm mới phiên). Thư viện tự đăng xuất thì số không đổi.
 let manualSignOuts = 0;
+// Đợt kho-nhom vòng 8: bấm "Đăng xuất" trong lúc đang lưu vào kho nhóm → KHÔNG đăng xuất (lượt lưu đang ghi Supabase,
+// đăng xuất giữa chừng dễ để lại món lưu dở), chỉ nhắc. Thư viện tự đăng xuất (hết phiên) vẫn đi đường "cancelled".
+const NHOM_LOGOUT_WAIT_TEXT = "Đang lưu vào kho nhóm, chờ lưu xong rồi đăng xuất.";
 
 authBox.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-auth]");
   if (!btn || !authClient || authState.busy) return;
+  // Luật (20) của tests/front-wiring.test.js: kiểm TRƯỚC manualSignOuts++ và TRƯỚC signOut(.
+  if (btn.dataset.auth === "logout" && nhomAdd.saving) { setAuth({ error: NHOM_LOGOUT_WAIT_TEXT }); return; }
   if (btn.dataset.auth === "logout") manualSignOuts++;
   setAuth({ busy: true, error: "" });
   try {
@@ -1493,6 +1499,29 @@ let nhomAddTurn = 0; // tăng khi đóng form / đăng xuất: lượt lưu / tr
 let nhomAddAbort = null; // AbortController của lượt /embed hoặc /ocr mặt sau đang chạy
 const NHOM_MAX_FILES = 3;
 
+/**
+ * Nút "Đăng xuất" của #authBox mờ (aria-disabled, vẫn nhận bấm để hiện câu nhắc) khi đang lưu vào kho nhóm; lưu xong
+ * (ok hay lỗi) trở lại bình thường và bỏ câu nhắc NHOM_LOGOUT_WAIT_TEXT nếu đang hiện. Gọi khi nhomAdd.saving đổi và
+ * khi setAuth vẽ lại khối tài khoản. (Vòng 8.)
+ */
+function syncLogoutLock() {
+  const b = authBody.querySelector('button[data-auth="logout"]');
+  if (!b) return;
+  if (nhomAdd.saving) {
+    b.setAttribute("aria-disabled", "true");
+    b.title = NHOM_LOGOUT_WAIT_TEXT;
+  } else {
+    b.removeAttribute("aria-disabled");
+    b.removeAttribute("title");
+  }
+}
+
+/** Lưu kho nhóm vừa xong / dừng: mở lại "Đăng xuất", bỏ câu nhắc chờ lưu (nếu đang hiện). */
+function endNhomSaving() {
+  if (authState.error === NHOM_LOGOUT_WAIT_TEXT) setAuth({ error: "" });
+  else syncLogoutLock();
+}
+
 /** Dòng trạng thái cố định #nhomAddMsg (tiến độ / kết quả lưu): chỉ đổi chữ. */
 function sayNhomAdd(text = "", warn = false) {
   say(nhomAddMsg, text, warn);
@@ -1504,10 +1533,12 @@ function closeNhomAdd() {
   nhomAddAbort?.abort();
   nhomAddAbort = null;
   for (const p of nhomAdd.previews) URL.revokeObjectURL(p.url);
+  const wasSaving = nhomAdd.saving;
   nhomAdd = { files: [], previews: [], saving: false };
   nhomAddBox.hidden = true;
   nhomAddBox.innerHTML = "";
   btnNhomAdd.setAttribute("aria-expanded", "false");
+  if (wasSaving) syncLogoutLock();
 }
 
 /** Giá trị form đang gõ → object cho nhomRowFromForm / renderNhomAddForm (ô dinh dưỡng tên "dd:<khóa>"). */
@@ -1601,10 +1632,12 @@ async function fillNhomFromOff() {
     data = await getProduct(code);
   } catch (e) {
     console.error(e);
-    if (turn === nhomAddTurn) nhomStatus(".nhom-add-status", "Không tra được Open Food Facts (mạng hoặc máy chủ lỗi). Thử lại hoặc tự gõ thông tin.", true);
+    if (turn === nhomAddTurn && !nhomAdd.saving) nhomStatus(".nhom-add-status", "Không tra được Open Food Facts (mạng hoặc máy chủ lỗi). Thử lại hoặc tự gõ thông tin.", true);
     return;
   }
-  if (turn !== nhomAddTurn || !nhomForm()) return;
+  // Vòng 8 (NÊN SỬA 5): người dùng bấm "Lưu" trong lúc chờ OFF → bỏ kết quả tra (không vẽ lại form đang khóa: vẽ lại sẽ
+  // thay form mà saveNhomAdd đang giữ, form mới kẹt nút mờ sau khi lưu lỗi).
+  if (turn !== nhomAddTurn || !nhomForm() || nhomAdd.saving) return;
   const now = readNhomForm(nhomForm()); // người dùng có thể đã gõ thêm trong lúc chờ
   if (!data) {
     nhomStatus(".nhom-add-status", NHOM_OFF_MISSING_TEXT, true);
@@ -1637,7 +1670,9 @@ async function readNhomBack(input) {
   input.value = "";
   if (!file || !authClient || nhomAdd.saving) return;
   const turn = nhomAddTurn;
-  const stale = () => turn !== nhomAddTurn || !nhomForm();
+  // Vòng 8 (gợi ý 3): bấm "Lưu" trong lúc đọc mặt sau → lượt đọc dừng lặng lẽ (Lưu đã hủy /ocr và xóa câu tiến độ), không
+  // ghi vào form đang khóa, không hủy nhầm lượt /embed của Lưu.
+  const stale = () => turn !== nhomAddTurn || !nhomForm() || nhomAdd.saving;
   nhomStatus(".nhom-back-msg", "Đang chuẩn bị ảnh mặt sau…");
   const prep = await prepareImage(file);
   if (stale()) return;
@@ -1663,17 +1698,29 @@ async function readNhomBack(input) {
   token = "";
   if (nhomAddAbort === ctrl) nhomAddAbort = null;
   if (stale()) return;
-  if (!r.ok) { nhomStatus(".nhom-back-msg", frontErrorText(r) || "Chưa đọc được chữ.", true); return; }
+  if (!r.ok) {
+    if (r.kind === "aborted") { nhomStatus(".nhom-back-msg", ""); return; } // bị hủy: không báo lỗi đỏ
+    nhomStatus(".nhom-back-msg", frontErrorText(r) || "Chưa đọc được chữ.", true);
+    return;
+  }
   const back = nhomFormFromBackText(r.items);
+  if (!back.thanh_phan) { nhomStatus(".nhom-back-msg", "Máy không đọc được chữ nào trên ảnh mặt sau.", true); return; }
   const area = nhomAddBox.querySelector('textarea[name="thanh_phan"]');
-  if (area) area.value = back.thanh_phan; // gán value: chữ máy chủ không bao giờ thành HTML
+  if (!area) return;
+  // Vòng 8 (gợi ý 2): ô thành phần trống → điền; đã có chữ (gõ tay / từ OFF) → hỏi trước khi thay.
+  if (area.value.trim() && !confirm("Ô thành phần đã có chữ. Thay bằng chữ máy vừa đọc từ ảnh mặt sau?")) {
+    nhomStatus(".nhom-back-msg", "Đã giữ chữ cũ trong ô thành phần.");
+    return;
+  }
+  area.value = back.thanh_phan; // gán value: chữ máy chủ không bao giờ thành HTML
+  // Đã thay chữ → nguồn là chữ đọc từ mặt sau.
   const src = nhomAddBox.querySelector('input[name="nguon"]');
-  if (src && src.value === "tay") {
+  if (src) {
     src.value = back.nguon;
     const line = nhomAddBox.querySelector(".nhom-source");
     if (line) line.textContent = `Nguồn: ${NHOM_SOURCE_VI[back.nguon]}`;
   }
-  nhomStatus(".nhom-back-msg", back.thanh_phan ? NHOM_BACK_CHECK_TEXT : "Máy không đọc được chữ nào trên ảnh mặt sau.", !back.thanh_phan);
+  nhomStatus(".nhom-back-msg", NHOM_BACK_CHECK_TEXT);
 }
 
 /** Khóa / mở các nút + ô chọn ảnh của form trong lúc lưu. */
@@ -1699,7 +1746,9 @@ async function saveNhomAdd(form) {
   const stopped = () => turn !== nhomAddTurn;
   nhomAdd.saving = true;
   lockNhomForm(form, true);
-  nhomAddAbort?.abort();
+  syncLogoutLock(); // "Đăng xuất" mờ trong lúc lưu (vòng 8)
+  nhomAddAbort?.abort(); // hủy lượt đọc mặt sau đang chạy (nếu có); lượt đó dừng lặng lẽ
+  nhomStatus(".nhom-back-msg", "");
   const ctrl = new AbortController();
   nhomAddAbort = ctrl;
   const cancelledText = (cleaned = true) => nhomSaveText({ ok: false, kind: "cancelled", cleaned });
@@ -1734,7 +1783,12 @@ async function saveNhomAdd(form) {
       }
     });
     token = "";
-    if (r.ok) { closeNhomAdd(); sayNhomAdd(nhomSaveText(r)); return; }
+    if (r.ok) {
+      closeNhomAdd();
+      sayNhomAdd(nhomSaveText(r));
+      btnNhomAdd.focus(); // form đã đóng: đưa focus về nút mở form (vòng 8, gợi ý 7)
+      return;
+    }
     if (stopped()) { sayNhomAdd(cancelledText(r.cleaned !== false), true); return; }
     sayNhomAdd(nhomSaveText(r), true);
   } catch (e) {
@@ -1744,8 +1798,11 @@ async function saveNhomAdd(form) {
     if (nhomAddAbort === ctrl) nhomAddAbort = null;
     if (!stopped()) {
       nhomAdd.saving = false;
-      lockNhomForm(form, false);
+      // Vòng 8 (NÊN SỬA 5): mở khóa form HIỆN TẠI (nếu còn), không phải tham chiếu form lúc bấm Lưu (form có thể đã được
+      // vẽ lại).
+      lockNhomForm(nhomForm(), false);
     }
+    endNhomSaving();
   }
 }
 
