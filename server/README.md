@@ -224,7 +224,13 @@ ghi đè ảnh đã có ở cùng đường dẫn). Trả:
   App coi "không có khóa" là "không có ứng viên nhóm".
 - ≤ 3 mục, mỗi sản phẩm lấy ảnh giống nhất; `diem` = tích vô hướng 2 vector chuẩn 1 (= cos), làm tròn 4 số, giảm dần
   (bằng điểm thì món xuất hiện trước trong kho trước). `thuong_hieu` / `ma_vach` có thể `null`. Máy chủ KHÔNG có ngưỡng:
-  `NHOM_THRESHOLD` ở app.
+  `NHOM_THRESHOLD` ở app (`src/front-nhom.js`, vòng 6: Infinity vì đo vòng 5 KHÔNG ĐẠT; app làm sạch khóa này bằng
+  `nhomCandidates`, món nhóm chỉ vào "gợi ý khác" / trang "Chưa tìm thấy…", app không hiện điểm cho người dùng).
+- Định dạng cột `dinh_duong` của `nhom_san_pham` (chốt ở vòng 6, app ghi theo dạng này từ vòng 7; máy chủ không đọc cột
+  này): object JSON, khóa = khóa dinh dưỡng / 100 g của `NUTRIENT_ROWS` trong `src/off.js` (`energy-kcal_100g`,
+  `fat_100g`, `saturated-fat_100g`, `carbohydrates_100g`, `sugars_100g`, `fiber_100g`, `proteins_100g`, `salt_100g`),
+  giá trị số hữu hạn ≥ 0 (kcal cho năng lượng, g cho phần còn lại, trên 100 g / 100 ml). Khóa thiếu = chưa có dữ liệu;
+  khóa lạ / giá trị sai bị app bỏ khi hiển thị (`nhomNutrition`). Ví dụ `{ "energy-kcal_100g": 450, "salt_100g": 0.9 }`.
 - Nạp kho:
   `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000`
   theo trang 1.000 dòng (vòng 5: trang sau thêm `&id=gt.<id cuối của trang trước>`, KHÔNG offset, nên thêm / xóa dòng
