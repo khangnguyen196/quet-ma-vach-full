@@ -6,7 +6,7 @@ import fs from "node:fs";
 import {
   RULE_SHA256, ruleBlockOf, sha256Of, pickThreshold, recallAt, applyNhom, gateAB, judge, productScores, topProduct,
   buildCases, quantileNR, T_GRID, MARGIN, P2_TRANSFORMS, REAL_CORRECT, MODEL_SHA256, ID_TABLE_SHA256,
-  RULE_COMMIT, RULE_FILE, VEC_CODE_BASE, VEC_CODE_FILES, NEN_SHA256, GATE_CELLS, GATE_NOTE, EXIT_RULE,
+  RULE_COMMIT, RULE_FILE, VEC_CODE_BASE, VEC_CODE_FILES, NEN_SHA256, NEN_FILE, GATE_CELLS, GATE_NOTE, EXIT_RULE,
   checkRuleAtCommit, checkVecMeta, checkNenSha, buildGateCells, dupAbOff,
 } from "../kho-nhom-do.mjs";
 
@@ -192,6 +192,9 @@ test("(a) checkVecMeta: mã tính vector, p2Transforms, gitHead", () => {
   assert.deepEqual(checkNenSha(NEN_SHA256), []);
   assert.match(checkNenSha("0".repeat(64)).join(), /khác NEN_SHA256/);
   assert.match(checkNenSha(null).join(), /không đọc được/);
+  // vòng 4: câu lỗi nêu đường dẫn nền thật được truyền vào; không truyền thì là NEN_FILE
+  assert.equal(checkNenSha(null, "E:\\khac\\nen-thu.json").join(), `sha256 E:\\khac\\nen-thu.json = không đọc được, khác NEN_SHA256 ${NEN_SHA256}`);
+  assert.ok(checkNenSha("0".repeat(64)).join().includes(NEN_FILE));
 });
 
 test("(b) khối luật ở commit luật thật (git show) trùng RULE_SHA256 và khối hiện tại", async (t) => {
@@ -408,8 +411,9 @@ test("v3 main --kiem: nền sai sha / thiếu ô / thiếu file nền → thoát
   assert.match(errText(io2), /134 ô, luật ghi 136/);
   const io3 = fakeIo({ files: { [P.nen]: undefined } });
   assert.equal(await main(KIEM, io3), EXIT_RULE);
-  assert.match(errText(io3), /NEN_SHA256.*|không đọc được/);
-  assert.match(errText(io3), /sha256 .*nen\.json = không đọc được/);
+  // câu lỗi nêu ĐÚNG đường dẫn nền đã đọc (--nen), không phải NEN_FILE mặc định (vòng 4)
+  assert.ok(errText(io3).includes(`sha256 ${P.nen} = không đọc được, khác NEN_SHA256 ${NEN_SHA256}`), errText(io3));
+  assert.ok(!errText(io3).includes(NEN_FILE), errText(io3));
   // --kiem không chạy git, không đòi mốc
   assert.deepEqual(io.cmds, []);
 });

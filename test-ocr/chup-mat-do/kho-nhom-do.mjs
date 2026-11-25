@@ -237,9 +237,9 @@ export function checkVecMeta(meta, { pinned, diffEmpty, headIsAncestor }) {
   return errors;
 }
 
-/** sha256 nền khau-gop: lỗi khi khác NEN_SHA256. */
-export function checkNenSha(sha) {
-  return sha === NEN_SHA256 ? [] : [`sha256 ${NEN_FILE} = ${sha ?? "không đọc được"}, khác NEN_SHA256 ${NEN_SHA256}`];
+/** sha256 nền khau-gop: lỗi khi khác NEN_SHA256. nenPath = đường dẫn nền THẬT đã đọc (--nen; mặc định NEN_FILE). */
+export function checkNenSha(sha, nenPath = NEN_FILE) {
+  return sha === NEN_SHA256 ? [] : [`sha256 ${nenPath} = ${sha ?? "không đọc được"}, khác NEN_SHA256 ${NEN_SHA256}`];
 }
 
 /** (c) Ô cổng A/B từ bảng định danh + nền khau-gop. Ô A/B không đọc được chữ (thiếu perCase / may[cond]) được ĐẾM vào
@@ -376,9 +376,9 @@ export function checkPrevVec(prevOut, vecSha256) {
 }
 
 /** (c) Kiểm nền khau-gop + đủ ô cổng A/B (chỉ đếm ô, không tính điểm): chạy ở cả --kiem và --do. */
-export function checkNenGate(nenSha, table, nen) {
+export function checkNenGate(nenSha, table, nen, nenPath = NEN_FILE) {
   const gate = buildGateCells(table, nen, () => null);
-  return { errors: [...checkNenSha(nenSha), ...gate.errors], cells: gate.cells.length, unreadable: gate.unreadable.length };
+  return { errors: [...checkNenSha(nenSha, nenPath), ...gate.errors], cells: gate.cells.length, unreadable: gate.unreadable.length };
 }
 
 // ---------------- chạy ----------------
@@ -418,7 +418,7 @@ export async function main(argv, io) {
   const nenBuf = readOrNull(nenPath);
   const nenSha = nenBuf === null ? null : sha256Of(nenBuf);
   const nen = jsonOrNull(nenBuf);
-  const ng = checkNenGate(nenSha, table, nen);
+  const ng = checkNenGate(nenSha, table, nen, nenPath);
   io.log(`Nền khau-gop ${nenPath}: sha256 ${nenSha} ${nenSha === NEN_SHA256 ? "TRÙNG" : "KHÁC"} NEN_SHA256; cổng A/B ${ng.cells} ô (${ng.unreadable} ô A/B không đọc được chữ), luật ghi ${GATE_CELLS}`);
   errors.push(...ng.errors);
 
