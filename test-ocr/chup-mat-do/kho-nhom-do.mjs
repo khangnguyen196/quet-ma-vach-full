@@ -334,77 +334,147 @@ export function buildCases(table, vec, p2 = {}) {
   } };
 }
 
+// ---------------- ghim chính khung đo (vòng 3, review vòng 2 NÊN SỬA 2 + GỢI Ý 4; NGOÀI khối luật) ----------------
+/** File mốc (riêng, trong git): { doCodeBase: sha đầy đủ của commit cuối của khung đo }. Mốc không thể nằm trong chính file
+ * này vì ghi sha vào file thì file đổi. --do đòi: file mốc có; git diff doCodeBase..HEAD của RULE_FILE trống; doCodeBase là
+ * tổ tiên của HEAD. */
+export const MOC_FILE = "test-ocr/chup-mat-do/kho-nhom-moc.json";
+
+/** Đọc nội dung file mốc: null (không có file) → null; JSON hỏng → {} (sẽ báo sai dạng). */
+export function parseMoc(text) {
+  if (text == null) return null;
+  try {
+    const o = JSON.parse(typeof text === "string" ? text : text.toString("utf8"));
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+/** sha hợp lệ để đưa vào lệnh git (40 hex thường). */
+export function isFullSha(x) {
+  return typeof x === "string" && /^[0-9a-f]{40}$/.test(x);
+}
+
+/** (a) Mốc khung đo: moc = parseMoc(…); diffEmpty = git diff --quiet <doCodeBase> HEAD -- RULE_FILE trống; isAncestor =
+ * doCodeBase là tổ tiên của HEAD. Trả danh sách lỗi (rỗng = đạt). */
+export function checkDoCodeBase(moc, { diffEmpty, isAncestor } = {}) {
+  if (moc == null) return [`thiếu file mốc ${MOC_FILE} (khóa doCodeBase = sha commit cuối của khung đo, tạo ở commit riêng ngay sau)`];
+  if (!isFullSha(moc.doCodeBase)) return [`${MOC_FILE}: doCodeBase sai dạng ${JSON.stringify(moc.doCodeBase ?? null)} (cần sha 40 hex)`];
+  const errors = [];
+  const base = moc.doCodeBase.slice(0, 7);
+  if (diffEmpty !== true) errors.push(`${RULE_FILE} đã đổi từ mốc doCodeBase ${base} (git diff ${base} HEAD không trống): khung đo phải đúng bản đã ghim`);
+  if (isAncestor !== true) errors.push(`doCodeBase ${base} không phải tổ tiên của HEAD`);
+  return errors;
+}
+
+/** (b) Chạy lại --do --ghi-de: vec.json đang đọc phải trùng sha256 đã ghi trong do.json cũ. prevOut null → không kiểm. */
+export function checkPrevVec(prevOut, vecSha256) {
+  if (prevOut == null) return [];
+  if (prevOut.vecSha256 === vecSha256) return [];
+  return [`vec.json đang đọc có sha256 ${vecSha256 ?? "không đọc được"}, khác vecSha256 đã ghi trong do.json cũ (${prevOut.vecSha256 ?? "thiếu"}): không ghi đè kết quả bằng vector khác`];
+}
+
+/** (c) Kiểm nền khau-gop + đủ ô cổng A/B (chỉ đếm ô, không tính điểm): chạy ở cả --kiem và --do. */
+export function checkNenGate(nenSha, table, nen) {
+  const gate = buildGateCells(table, nen, () => null);
+  return { errors: [...checkNenSha(nenSha), ...gate.errors], cells: gate.cells.length, unreadable: gate.unreadable.length };
+}
+
 // ---------------- chạy ----------------
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  const argv = process.argv.slice(2);
+/** Chạy khung đo; trả mã thoát (0 đạt kiểm / đo xong, 2 đã có do.json mà thiếu --ghi-de, 3 sai luật / mốc / dữ liệu).
+ * io (để test bằng dữ liệu giả): { root, selfText, git(lệnh) → Buffer | null (null = lệnh lỗi / thoát ≠ 0), exists(p),
+ * read(p) → Buffer, write(p, text), mkdir(p), log(s), error(s) }. Mọi kiểm chạy TRƯỚC khi tính bất kỳ điểm độ giống nào;
+ * kiểm gom đủ lỗi rồi mới dừng (một lần chạy báo hết các chỗ sai). */
+export async function main(argv, io) {
   const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
   const mode = argv.includes("--do") ? "do" : "kiem";
-  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
   const tableFile = arg("--bang", "D:\\tmp\\kho-nhom\\dinh-danh.json");
   const vecFile = arg("--vec", "D:\\tmp\\kho-nhom\\vec\\vec.json");
   const outDir = arg("--out", "D:\\tmp\\kho-nhom\\ket-qua");
-  const cp = await import("node:child_process");
-  const gitBuf = (c) => { try { return cp.execSync(c, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 }); } catch { return null; } };
-  const git = (c) => gitBuf(c)?.toString() ?? null;
-  const stop = (errors) => { for (const e of errors) console.error(`DỪNG (mã ${EXIT_RULE}): ${e}`); process.exit(EXIT_RULE); };
-  const selfText = fs.readFileSync(new URL(import.meta.url), "utf8");
-  const block = ruleBlockOf(selfText);
+  const nenPath = arg("--nen", NEN_FILE);
+  const gitText = (c) => io.git(c)?.toString() ?? null;
+  const readOrNull = (p) => { try { return io.exists(p) ? io.read(p) : null; } catch { return null; } };
+  const jsonOrNull = (buf) => { if (buf == null) return null; try { return JSON.parse(buf.toString("utf8")); } catch { return null; } };
+  const stop = (errors) => { for (const e of errors) io.error(`DỪNG (mã ${EXIT_RULE}): ${e}`); return EXIT_RULE; };
+  const errors = [];
+
+  const block = ruleBlockOf(io.selfText);
   const blockSha = block === null ? null : sha256Of(block);
-  const tableSha = fs.existsSync(tableFile) ? sha256Of(fs.readFileSync(tableFile)) : null;
-  console.log(`Khối luật sha256 ${blockSha} ${blockSha === RULE_SHA256 ? "TRÙNG" : "KHÁC"} RULE_SHA256`);
-  console.log(`Bảng định danh ${tableFile}: sha256 ${tableSha} ${tableSha === ID_TABLE_SHA256 ? "TRÙNG" : "KHÁC"} ID_TABLE_SHA256`);
-  if (blockSha !== RULE_SHA256 || tableSha !== ID_TABLE_SHA256) process.exit(EXIT_RULE);
+  const tableBuf = readOrNull(tableFile);
+  const tableSha = tableBuf === null ? null : sha256Of(tableBuf);
+  io.log(`Khối luật sha256 ${blockSha} ${blockSha === RULE_SHA256 ? "TRÙNG" : "KHÁC"} RULE_SHA256`);
+  io.log(`Bảng định danh ${tableFile}: sha256 ${tableSha} ${tableSha === ID_TABLE_SHA256 ? "TRÙNG" : "KHÁC"} ID_TABLE_SHA256`);
+  if (blockSha !== RULE_SHA256) errors.push(`khối luật sha256 ${blockSha} khác RULE_SHA256`);
+  if (tableSha !== ID_TABLE_SHA256) errors.push(`bảng định danh sha256 ${tableSha ?? "không đọc được"} khác ID_TABLE_SHA256`);
+  const table = jsonOrNull(tableBuf);
+  if (tableBuf !== null && table === null) errors.push("bảng định danh không phải JSON");
   // (d) ảnh A/B và ảnh OFF trùng file (sha256 trong bảng định danh) → P1 đếm 2 lần
-  const table = JSON.parse(fs.readFileSync(tableFile, "utf8"));
   const dup = dupAbOff(table);
-  console.log(`Cặp file trùng sha256 giữa ảnh A/B và ảnh OFF: ${dup.pairs.length}`);
-  if (dup.errors.length) stop(dup.errors);
-  if (dup.pairs.length > 0) stop([`${dup.pairs.length} cặp ảnh A/B trùng file ảnh OFF (mã A/B → mã OFF): ${dup.pairs.map((p) => `${p.ab} → ${p.off}`).join(", ")}`]);
-  if (mode === "kiem") { console.log("--kiem: không tính điểm. Đo bằng --do (cần vector của kho-nhom-vec.py)."); process.exit(0); }
+  io.log(`Cặp file trùng sha256 giữa ảnh A/B và ảnh OFF: ${dup.pairs.length}`);
+  errors.push(...dup.errors);
+  if (dup.pairs.length > 0) errors.push(`${dup.pairs.length} cặp ảnh A/B trùng file ảnh OFF (mã A/B → mã OFF): ${dup.pairs.map((p) => `${p.ab} → ${p.off}`).join(", ")}`);
+  // (c) nền khau-gop (sha256) + đủ 136 ô cổng A/B (chỉ đếm ô), ở cả --kiem và --do
+  const nenBuf = readOrNull(nenPath);
+  const nenSha = nenBuf === null ? null : sha256Of(nenBuf);
+  const nen = jsonOrNull(nenBuf);
+  const ng = checkNenGate(nenSha, table, nen);
+  io.log(`Nền khau-gop ${nenPath}: sha256 ${nenSha} ${nenSha === NEN_SHA256 ? "TRÙNG" : "KHÁC"} NEN_SHA256; cổng A/B ${ng.cells} ô (${ng.unreadable} ô A/B không đọc được chữ), luật ghi ${GATE_CELLS}`);
+  errors.push(...ng.errors);
+
+  if (mode === "kiem") {
+    if (errors.length) return stop(errors);
+    const moc = parseMoc(readOrNull(path.join(io.root, MOC_FILE)));
+    io.log(`Mốc khung đo ${MOC_FILE}: ${moc == null ? "chưa có (--do sẽ dừng)" : `doCodeBase ${isFullSha(moc.doCodeBase) ? moc.doCodeBase.slice(0, 7) : "sai dạng"}`}`);
+    io.log("--kiem: không tính điểm. Đo bằng --do (cần vector của kho-nhom-vec.py).");
+    return 0;
+  }
 
   // ----- --do: mọi kiểm dưới đây chạy TRƯỚC khi tính bất kỳ điểm độ giống nào -----
-  const porcelain = git("git status --porcelain");
-  if (porcelain === null || porcelain.trim() !== "") { console.error("Worktree chưa sạch: commit rồi chạy lại."); process.exit(EXIT_RULE); }
-  const head = git("git rev-parse HEAD")?.trim() ?? null;
-  // (b) khối luật ở commit luật (git show) == RULE_SHA256 == khối hiện tại
-  const committed = git(`git show ${RULE_COMMIT}:${RULE_FILE}`);
-  const ruleErrors = checkRuleAtCommit(committed, selfText);
-  if (ruleErrors.length) stop(ruleErrors);
-  console.log(`Khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)} trùng RULE_SHA256 và khối hiện tại.`);
+  const porcelain = gitText("git status --porcelain");
+  if (porcelain === null || porcelain.trim() !== "") errors.push("worktree chưa sạch: commit rồi chạy lại");
+  const head = gitText("git rev-parse HEAD")?.trim() ?? null;
+  // (b vòng 2) khối luật ở commit luật (git show) == RULE_SHA256 == khối hiện tại
+  errors.push(...checkRuleAtCommit(gitText(`git show ${RULE_COMMIT}:${RULE_FILE}`), io.selfText));
+  // (a vòng 3) khung đo đúng bản ghim ở file mốc
+  const moc = parseMoc(readOrNull(path.join(io.root, MOC_FILE)));
+  const base = isFullSha(moc?.doCodeBase) ? moc.doCodeBase : null;
+  const diffEmpty = base !== null && io.git(`git diff --quiet ${base} HEAD -- ${RULE_FILE}`) !== null;
+  const isAncestor = base !== null && io.git(`git merge-base --is-ancestor ${base} HEAD`) !== null;
+  errors.push(...checkDoCodeBase(moc, { diffEmpty, isAncestor }));
+  // vector + (b vòng 3) sha256 vec.json so do.json cũ
+  const vecBuf = readOrNull(vecFile);
+  const vecSha256 = vecBuf === null ? null : sha256Of(vecBuf);
+  const V = jsonOrNull(vecBuf);
+  if (V === null) errors.push(`không đọc được vector ${vecFile}`);
   const outFile = path.join(outDir, "do.json");
-  if (fs.existsSync(outFile) && !argv.includes("--ghi-de")) { console.error(`Đã có ${outFile}. Thêm --ghi-de nếu thật sự muốn ghi đè.`); process.exit(2); }
-  const V = JSON.parse(fs.readFileSync(vecFile, "utf8"));
-  if (V.meta?.modelSha256 !== MODEL_SHA256 || V.meta?.pre !== "cat" || V.meta?.idTableSha256 !== ID_TABLE_SHA256
-    || V.meta?.longEdge !== LONG_EDGE || V.meta?.jpegQuality !== JPEG_QUALITY || V.meta?.gitDirty !== false) {
-    console.error(`Vector khác luật (model / tiền xử lý / bảng định danh / bước như app / worktree sạch): ${JSON.stringify(V.meta)}`);
-    process.exit(EXIT_RULE);
+  const prevBuf = readOrNull(outFile);
+  if (prevBuf !== null && !argv.includes("--ghi-de")) { io.error(`Đã có ${outFile}. Thêm --ghi-de nếu thật sự muốn ghi đè.`); return 2; }
+  const prevOut = prevBuf === null ? null : (jsonOrNull(prevBuf) ?? {});
+  errors.push(...checkPrevVec(prevOut, vecSha256));
+  if (V?.meta?.modelSha256 !== MODEL_SHA256 || V?.meta?.pre !== "cat" || V?.meta?.idTableSha256 !== ID_TABLE_SHA256
+    || V?.meta?.longEdge !== LONG_EDGE || V?.meta?.jpegQuality !== JPEG_QUALITY || V?.meta?.gitDirty !== false) {
+    errors.push(`vector khác luật (model / tiền xử lý / bảng định danh / bước như app / worktree sạch): ${JSON.stringify(V?.meta ?? null)}`);
   }
-  // (a) mã tính vector ghim ở VEC_CODE_BASE; p2Transforms; gitHead là tổ tiên của HEAD; sha256 nền khau-gop
+  // (a vòng 2) mã tính vector ghim ở VEC_CODE_BASE; p2Transforms; gitHead là tổ tiên của HEAD
   const files = Object.values(VEC_CODE_FILES);
-  const diffEmpty = gitBuf(`git diff --quiet ${VEC_CODE_BASE} HEAD -- ${files.join(" ")}`) !== null;
+  const vecDiffEmpty = io.git(`git diff --quiet ${VEC_CODE_BASE} HEAD -- ${files.join(" ")}`) !== null;
   const pinned = Object.fromEntries(Object.entries(VEC_CODE_FILES).map(([k, f]) => {
-    const b = gitBuf(`git show ${VEC_CODE_BASE}:${f}`);
+    const b = io.git(`git show ${VEC_CODE_BASE}:${f}`);
     return [k, b === null ? null : sha256Of(b)];
   }));
-  const gh = typeof V.meta?.gitHead === "string" && /^[0-9a-f]{40}$/.test(V.meta.gitHead) ? V.meta.gitHead : null;
-  const headIsAncestor = gh !== null && gitBuf(`git merge-base --is-ancestor ${gh} HEAD`) !== null;
-  const nenPath = arg("--nen", NEN_FILE);
-  const nenSha = fs.existsSync(nenPath) ? sha256Of(fs.readFileSync(nenPath)) : null;
-  const preErrors = [...checkVecMeta(V.meta, { pinned, diffEmpty, headIsAncestor }), ...checkNenSha(nenSha)];
-  if (preErrors.length) stop(preErrors);
-  console.log(`Mã tính vector trùng mốc ${VEC_CODE_BASE.slice(0, 7)}; p2Transforms đúng; gitHead là tổ tiên của HEAD; nền khau-gop sha256 đúng.`);
-
-  // cổng A/B: nền đã lưu của khau-gop (mã gộp không đổi từ NEN_SHA) — kiểm nền TRƯỚC khi tính điểm
-  const sameCode = git(`git diff --quiet ${NEN_SHA} HEAD -- ${NEN_PATHS.join(" ")}`) !== null;
-  const nen = JSON.parse(fs.readFileSync(nenPath, "utf8"));
-  if (!sameCode || nen.allOk !== true || nen.sha !== NEN_SHA) { console.error(`Nền A/B không dùng được: mã gộp đổi ${!sameCode}, allOk ${nen.allOk}, sha ${nen.sha}`); process.exit(EXIT_RULE); }
+  const gh = isFullSha(V?.meta?.gitHead) ? V.meta.gitHead : null;
+  const headIsAncestor = gh !== null && io.git(`git merge-base --is-ancestor ${gh} HEAD`) !== null;
+  errors.push(...checkVecMeta(V?.meta, { pinned, diffEmpty: vecDiffEmpty, headIsAncestor }));
+  // cổng A/B: nền đã lưu của khau-gop (mã gộp không đổi từ NEN_SHA)
+  const sameCode = io.git(`git diff --quiet ${NEN_SHA} HEAD -- ${NEN_PATHS.join(" ")}`) !== null;
+  if (!sameCode || nen?.allOk !== true || nen?.sha !== NEN_SHA) errors.push(`nền A/B không dùng được: mã gộp đổi ${!sameCode}, allOk ${nen?.allOk}, sha ${nen?.sha}`);
   for (const n of REAL_CORRECT) {
-    const rb = nen.realBase?.[`anh-${n}`];
-    if (!(rb?.i?.pos === 1 && rb?.ii?.pos === 1)) { console.error(`Ảnh thật ${n} không đúng vị trí 1 ở nền khau-gop`); process.exit(EXIT_RULE); }
+    const rb = nen?.realBase?.[`anh-${n}`];
+    if (!(rb?.i?.pos === 1 && rb?.ii?.pos === 1)) errors.push(`ảnh thật ${n} không đúng vị trí 1 ở nền khau-gop`);
   }
-  const gateDry = buildGateCells(table, nen, () => null); // chỉ đếm ô, chưa tính điểm
-  console.log(`Cổng A/B: ${gateDry.cells.length} ô (${gateDry.unreadable.length} ô A/B không đọc được chữ)`);
-  if (gateDry.errors.length) stop(gateDry.errors);
+  if (errors.length) return stop(errors);
+  io.log(`Khối luật ở commit luật ${RULE_COMMIT.slice(0, 7)} trùng; khung đo trùng mốc ${base.slice(0, 7)}; mã tính vector trùng mốc ${VEC_CODE_BASE.slice(0, 7)}; vec.json sha256 ${vecSha256}; nền khau-gop đúng; cổng A/B ${ng.cells} ô.`);
 
   const cs = buildCases(table, V.vec, V.p2);
   const sNeg = cs.neg.map((x) => x.top?.score ?? -Infinity);
@@ -415,22 +485,40 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
   const p2 = recallAt(cs.p2, T);
 
   const gateBuilt = buildGateCells(table, nen, cs.nhomOf);
-  if (gateBuilt.errors.length) stop(gateBuilt.errors);
+  if (gateBuilt.errors.length) return stop(gateBuilt.errors);
   const gateCells = gateBuilt.cells;
   const gate = gateAB(gateCells, T ?? Infinity);
   const verdict = judge({ T, p1, p2, gate });
   const dist = (xs) => ({ n: xs.length, min: Math.min(...xs), p50: quantileNR(xs, 0.5), p90: quantileNR(xs, 0.9), max: Math.max(...xs) });
   const out = {
-    at: new Date().toISOString(), head, ruleSha256: RULE_SHA256, idTableSha256: ID_TABLE_SHA256, vecMeta: V.meta,
+    at: new Date().toISOString(), head, doCodeBase: base, vecSha256, ruleSha256: RULE_SHA256, idTableSha256: ID_TABLE_SHA256, vecMeta: V.meta,
     n: { neg: cs.neg.length, p1: cs.p1.length, p2: cs.p2.length, gateCells: gateCells.length, gateUnreadable: gateBuilt.unreadable.length }, note: SMALL_N_NOTE,
     maxNeg, worst, T, p1, p2, gate, gateNote: GATE_NOTE, verdict, NHOM_THRESHOLD: verdict.threshold === Infinity ? "Infinity" : verdict.threshold,
     sNegDist: dist(sNeg), p1Dist: dist(cs.p1.map((x) => x.top.score)), p2Dist: dist(cs.p2.map((x) => x.top.score)),
     neg: cs.neg, p1Cases: cs.p1, p2Cases: cs.p2,
   };
-  fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(outFile, JSON.stringify(out, null, 1), "utf8");
-  console.log(`N ${cs.neg.length}, P1 ${cs.p1.length}, P2 ${cs.p2.length} (${SMALL_N_NOTE})`);
-  console.log(`max s_neg ${maxNeg.toFixed(4)} (ảnh hỏi ${worst.id}, sản phẩm ${worst.top?.sp}); s_neg ${JSON.stringify(out.sNegDist)}`);
-  console.log(`T ${T}; recall P1 ${p1.hit}/${p1.n}, P2 ${p2.hit}/${p2.n} (chỉ ước lượng, lạc quan); cổng A/B ${gate.pass ? "ĐẠT" : "KHÔNG"} (${gate.lost.length}/${gate.cells} ô mất vị trí 1; ${GATE_NOTE})`);
-  console.log(`${verdict.pass ? "ĐẠT" : "KHÔNG ĐẠT"}: NHOM_THRESHOLD = ${out.NHOM_THRESHOLD}${verdict.fails.length ? ` (${verdict.fails.join("; ")})` : ""}. Ghi ${outFile}`);
+  io.mkdir(outDir);
+  io.write(outFile, JSON.stringify(out, null, 1));
+  io.log(`N ${cs.neg.length}, P1 ${cs.p1.length}, P2 ${cs.p2.length} (${SMALL_N_NOTE})`);
+  io.log(`max s_neg ${maxNeg.toFixed(4)} (ảnh hỏi ${worst.id}, sản phẩm ${worst.top?.sp}); s_neg ${JSON.stringify(out.sNegDist)}`);
+  io.log(`T ${T}; recall P1 ${p1.hit}/${p1.n}, P2 ${p2.hit}/${p2.n} (chỉ ước lượng, lạc quan); cổng A/B ${gate.pass ? "ĐẠT" : "KHÔNG"} (${gate.lost.length}/${gate.cells} ô mất vị trí 1; ${GATE_NOTE})`);
+  io.log(`${verdict.pass ? "ĐẠT" : "KHÔNG ĐẠT"}: NHOM_THRESHOLD = ${out.NHOM_THRESHOLD}${verdict.fails.length ? ` (${verdict.fails.join("; ")})` : ""}. Ghi ${outFile}`);
+  return 0;
+}
+
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const cp = await import("node:child_process");
+  const io = {
+    root: ROOT,
+    selfText: fs.readFileSync(new URL(import.meta.url), "utf8"),
+    git: (c) => { try { return cp.execSync(c, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 26 }); } catch { return null; } },
+    exists: (p) => fs.existsSync(p),
+    read: (p) => fs.readFileSync(p),
+    write: (p, text) => fs.writeFileSync(p, text, "utf8"),
+    mkdir: (p) => fs.mkdirSync(p, { recursive: true }),
+    log: (s) => console.log(s),
+    error: (s) => console.error(s),
+  };
+  process.exit(await main(process.argv.slice(2), io));
 }

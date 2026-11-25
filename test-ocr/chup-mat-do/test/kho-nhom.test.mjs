@@ -273,3 +273,143 @@ test("quantileNR", () => {
   assert.equal(quantileNR([3, 1, 2, 4], 0.9), 4);
   assert.equal(quantileNR([], 0.5), null);
 });
+
+// ---------------- vòng 3: ghim chính khung đo, sha256 vec.json, --kiem kiểm nền + 136 ô (dữ liệu giả) ----------------
+import path from "node:path";
+import { MOC_FILE, parseMoc, isFullSha, checkDoCodeBase, checkPrevVec, checkNenGate, main } from "../kho-nhom-do.mjs";
+
+const BASE = "a".repeat(40);
+const ROOT = path.resolve("/gia-repo");
+const MOC_PATH = path.join(ROOT, MOC_FILE);
+const P = { bang: path.resolve("/gia/bang.json"), vec: path.resolve("/gia/vec.json"), nen: path.resolve("/gia/nen.json"), out: path.resolve("/gia/ket-qua") };
+const OUT_FILE = path.join(P.out, "do.json");
+const VEC_TEXT = JSON.stringify({ meta: {}, vec: {} });
+
+/** Môi trường giả cho main(): files = { đường dẫn: chuỗi }, git = [[regex lệnh, chuỗi | null]] (null = lệnh lỗi). Ghi lại
+ * mọi lệnh git đã chạy, mọi dòng log / lỗi. */
+function fakeIo({ files = {}, git = [] } = {}) {
+  const { table, nen } = fakeGate();
+  const realBase = Object.fromEntries(REAL_CORRECT.map((n) => [`anh-${n}`, { i: { pos: 1 }, ii: { pos: 1 } }]));
+  const all = {
+    [P.bang]: JSON.stringify(table),
+    [P.nen]: JSON.stringify({ ...nen, allOk: true, sha: "89bb4a5f812ee77e891ea5849c7ea3afc477598b", realBase }),
+    [P.vec]: VEC_TEXT,
+    [MOC_PATH]: JSON.stringify({ doCodeBase: BASE }),
+    ...files,
+  };
+  for (const k of Object.keys(all)) if (all[k] === undefined) delete all[k];
+  const rules = [
+    ...git,
+    [/^git status --porcelain$/, ""],
+    [/^git rev-parse HEAD$/, "b".repeat(40)],
+    [new RegExp(`^git show ${RULE_COMMIT}:`), self],
+    [/^git diff --quiet /, ""],
+    [/^git merge-base --is-ancestor /, ""],
+    [/^git show /, "noi dung"],
+  ];
+  const io = {
+    root: ROOT, selfText: self, cmds: [], logs: [], errs: [], written: {},
+    git: (c) => { io.cmds.push(c); for (const [re, v] of rules) if (re.test(c)) return v === null ? null : Buffer.from(v); return null; },
+    exists: (p) => p in all,
+    read: (p) => Buffer.from(all[p]),
+    write: (p, s) => { io.written[p] = s; },
+    mkdir: () => {},
+    log: (s) => io.logs.push(s),
+    error: (s) => io.errs.push(s),
+  };
+  return io;
+}
+const DO = ["--do", "--bang", P.bang, "--vec", P.vec, "--nen", P.nen, "--out", P.out];
+const KIEM = ["--kiem", "--bang", P.bang, "--nen", P.nen];
+const errText = (io) => io.errs.join("\n");
+
+test("v3 parseMoc / isFullSha / checkDoCodeBase", () => {
+  assert.equal(parseMoc(null), null);
+  assert.deepEqual(parseMoc("{hỏng"), {});
+  assert.deepEqual(parseMoc("[1]"), {});
+  assert.deepEqual(parseMoc(Buffer.from(JSON.stringify({ doCodeBase: BASE }))), { doCodeBase: BASE });
+  assert.equal(isFullSha(BASE), true);
+  assert.equal(isFullSha("HEAD"), false);
+  assert.equal(isFullSha(BASE.toUpperCase()), false);
+  assert.deepEqual(checkDoCodeBase({ doCodeBase: BASE }, { diffEmpty: true, isAncestor: true }), []);
+  assert.match(checkDoCodeBase(null).join(), /thiếu file mốc test-ocr\/chup-mat-do\/kho-nhom-moc\.json/);
+  assert.match(checkDoCodeBase({}).join(), /doCodeBase sai dạng/);
+  assert.match(checkDoCodeBase({ doCodeBase: "HEAD; rm -rf" }, { diffEmpty: true, isAncestor: true }).join(), /sai dạng/);
+  assert.match(checkDoCodeBase({ doCodeBase: BASE }, { diffEmpty: false, isAncestor: true }).join(), /kho-nhom-do\.mjs đã đổi từ mốc doCodeBase aaaaaaa/);
+  assert.match(checkDoCodeBase({ doCodeBase: BASE }, { diffEmpty: true, isAncestor: false }).join(), /không phải tổ tiên của HEAD/);
+});
+
+test("v3 checkPrevVec / checkNenGate", () => {
+  assert.deepEqual(checkPrevVec(null, "x"), []);
+  assert.deepEqual(checkPrevVec({ vecSha256: "x" }, "x"), []);
+  assert.match(checkPrevVec({ vecSha256: "y" }, "x").join(), /sha256 x, khác vecSha256 đã ghi trong do\.json cũ \(y\)/);
+  assert.match(checkPrevVec({}, "x").join(), /\(thiếu\)/);
+  const { table, nen } = fakeGate();
+  assert.deepEqual(checkNenGate(NEN_SHA256, table, nen), { errors: [], cells: 136, unreadable: 0 });
+  assert.match(checkNenGate("0".repeat(64), table, nen).errors.join(), /khác NEN_SHA256/);
+  const nen2 = structuredClone(nen);
+  delete nen2.perCase["A|1001|anh"];
+  const r = checkNenGate(NEN_SHA256, table, nen2);
+  assert.equal(r.cells, 134);
+  assert.match(r.errors.join(), /134 ô, luật ghi 136/);
+});
+
+test("v3 main --do: mốc thiếu → thoát 3, câu rõ; không tính điểm, không ghi file", async () => {
+  const io = fakeIo({ files: { [MOC_PATH]: undefined } });
+  assert.equal(await main(DO, io), EXIT_RULE);
+  assert.match(errText(io), /DỪNG \(mã 3\): thiếu file mốc test-ocr\/chup-mat-do\/kho-nhom-moc\.json/);
+  assert.deepEqual(io.written, {});
+});
+
+test("v3 main --do: khung đo khác mốc (diff không trống) → thoát 3; diff trống thì không có lỗi này", async () => {
+  const diffCmd = `git diff --quiet ${BASE} HEAD -- ${RULE_FILE}`;
+  const bad = fakeIo({ git: [[new RegExp(`^${diffCmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), null]] });
+  assert.equal(await main(DO, bad), EXIT_RULE);
+  assert.match(errText(bad), /DỪNG \(mã 3\): test-ocr\/chup-mat-do\/kho-nhom-do\.mjs đã đổi từ mốc doCodeBase aaaaaaa/);
+  assert.ok(bad.cmds.includes(diffCmd), "phải chạy đúng lệnh git diff của khung đo");
+  const good = fakeIo();
+  await main(DO, good);
+  assert.ok(good.cmds.includes(diffCmd));
+  assert.doesNotMatch(errText(good), /đã đổi từ mốc doCodeBase|file mốc|không phải tổ tiên/);
+  assert.deepEqual(good.written, {}); // bảng định danh giả (sha khác) vẫn chặn trước khi tính điểm
+});
+
+test("v3 main --do: doCodeBase không phải tổ tiên / sai dạng → thoát 3, sha sai dạng không vào lệnh git", async () => {
+  const io = fakeIo({ git: [[new RegExp(`^git merge-base --is-ancestor ${BASE} HEAD$`), null]] });
+  assert.equal(await main(DO, io), EXIT_RULE);
+  assert.match(errText(io), /doCodeBase aaaaaaa không phải tổ tiên của HEAD/);
+  const io2 = fakeIo({ files: { [MOC_PATH]: JSON.stringify({ doCodeBase: "HEAD; echo x" }) } });
+  assert.equal(await main(DO, io2), EXIT_RULE);
+  assert.match(errText(io2), /doCodeBase sai dạng/);
+  assert.ok(!io2.cmds.some((c) => c.includes("echo x")));
+});
+
+test("v3 main --do --ghi-de: vec.json khác sha256 trong do.json cũ → thoát 3; trùng thì không lỗi này; thiếu --ghi-de → 2", async () => {
+  const bad = fakeIo({ files: { [OUT_FILE]: JSON.stringify({ vecSha256: "0".repeat(64) }) } });
+  assert.equal(await main([...DO, "--ghi-de"], bad), EXIT_RULE);
+  assert.match(errText(bad), new RegExp(`vec\\.json đang đọc có sha256 ${sha256Of(VEC_TEXT)}, khác vecSha256 đã ghi trong do\\.json cũ \\(${"0".repeat(64)}\\)`));
+  const same = fakeIo({ files: { [OUT_FILE]: JSON.stringify({ vecSha256: sha256Of(VEC_TEXT) }) } });
+  await main([...DO, "--ghi-de"], same);
+  assert.doesNotMatch(errText(same), /khác vecSha256/);
+  const noFlag = fakeIo({ files: { [OUT_FILE]: JSON.stringify({ vecSha256: sha256Of(VEC_TEXT) }) } });
+  assert.equal(await main(DO, noFlag), 2);
+});
+
+test("v3 main --kiem: nền sai sha / thiếu ô / thiếu file nền → thoát 3 (kiểm trước khi thoát 0)", async () => {
+  const io = fakeIo();
+  assert.equal(await main(KIEM, io), EXIT_RULE);
+  assert.match(errText(io), /khác NEN_SHA256/); // nền giả: sha256 khác
+  assert.doesNotMatch(errText(io), /luật ghi 136/); // đủ 136 ô
+  const { nen } = fakeGate();
+  delete nen.perCase["anh-7"];
+  const io2 = fakeIo({ files: { [P.nen]: JSON.stringify(nen) } });
+  assert.equal(await main(KIEM, io2), EXIT_RULE);
+  assert.match(errText(io2), /thiếu perCase ảnh thật anh-7/);
+  assert.match(errText(io2), /134 ô, luật ghi 136/);
+  const io3 = fakeIo({ files: { [P.nen]: undefined } });
+  assert.equal(await main(KIEM, io3), EXIT_RULE);
+  assert.match(errText(io3), /NEN_SHA256.*|không đọc được/);
+  assert.match(errText(io3), /sha256 .*nen\.json = không đọc được/);
+  // --kiem không chạy git, không đòi mốc
+  assert.deepEqual(io.cmds, []);
+});
