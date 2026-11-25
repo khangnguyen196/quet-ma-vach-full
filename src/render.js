@@ -683,15 +683,18 @@ export function renderNhomHits(nhom) {
 
 /**
  * URL ảnh món nhóm dùng được, hoặc "": chỉ https, đúng tên máy của Supabase URL đang dùng (supabaseUrl), không tên đăng
- * nhập / cổng lạ. URL ký của Supabase Storage (nhomImageUrl của src/nhom-data.js) qua được; URL khác (http, máy lạ,
- * "javascript:") bị bỏ.
+ * nhập / cổng lạ, và đường dẫn phải là URL ký của bucket nhom-anh ("/storage/v1/object/sign/nhom-anh/…", vòng 7 gợi ý 2
+ * vòng 6). URL ký của Supabase Storage (nhomImageUrl của src/nhom-data.js) qua được; URL khác (http, máy lạ,
+ * "javascript:", đúng máy nhưng sai đường dẫn) bị bỏ.
  */
+export const NHOM_SIGN_PATH = "/storage/v1/object/sign/nhom-anh/";
 export function nhomImageOk(url, supabaseUrl) {
   if (typeof url !== "string" || !url || typeof supabaseUrl !== "string" || !supabaseUrl) return "";
   let u, s;
   try { u = new URL(url); s = new URL(supabaseUrl); } catch { return ""; }
   if (u.protocol !== "https:" || s.protocol !== "https:" || u.hostname !== s.hostname) return "";
   if (u.username || u.password || u.port !== s.port) return "";
+  if (!u.pathname.startsWith(NHOM_SIGN_PATH)) return "";
   return u.href;
 }
 
@@ -725,8 +728,10 @@ export function renderNhomProduct(view, { imgUrl = "", unconfirmed = false, prof
   const prof = Array.isArray(profile) ? profile : [];
   const img = nhomImageOk(imgUrl, supabaseUrl);
   const alt = `Ảnh mặt trước ${v.name ? v.name : "món của nhóm"}`;
+  // Vòng 7 (gợi ý 1 vòng 6): KHÔNG loading="lazy": ảnh nằm ngay đầu trang món (trong màn hình), URL ký chỉ sống
+  // NHOM_SIGN_SECONDS giây nên tải ngay, không để trình duyệt hoãn tới lúc URL có thể đã hết hạn.
   const pic = img
-    ? `<img src="${esc(img)}" alt="${esc(alt)}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="noimg" hidden>Chưa có ảnh</div>`
+    ? `<img src="${esc(img)}" alt="${esc(alt)}" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="noimg" hidden>Chưa có ảnh</div>`
     : '<div class="noimg">Chưa có ảnh</div>';
   const nut = v.nutriments && typeof v.nutriments === "object" ? v.nutriments : {};
   const rows = NUTRIENT_ROWS.map(([key, label, unit, cls]) => {
@@ -737,6 +742,11 @@ export function renderNhomProduct(view, { imgUrl = "", unconfirmed = false, prof
   const allergens = Array.isArray(v.allergens) ? v.allergens : [];
   const chips = allergens.map((x) => `<span class="chip">${esc(x)}</span>`).join("");
   const match = matchAllergies(v, prof);
+  // Vòng 7 (gợi ý 4a vòng 6): món có mã vạch 8–14 số → nút tra mã đó trên Open Food Facts (main.js: lookup như người dùng
+  // tự nhập mã). Không có mã → không có nút.
+  const offBtn = typeof v.code === "string" && /^\d{8,14}$/.test(v.code)
+    ? `<div class="actions nhom-off"><button type="button" class="btn" data-nhom-lookup="${esc(v.code)}">${esc(NHOM_LOOKUP_TEXT)}</button></div>`
+    : "";
   return `<p class="nhom-note" role="note">${esc(NHOM_NOTE_TEXT)}</p>
 ${renderAllergyBox(match, prof.length, { unconfirmed: unconfirmed === true, nhom: true })}
 <article class="label nhom-product">
@@ -757,8 +767,12 @@ ${renderAllergyBox(match, prof.length, { unconfirmed: unconfirmed === true, nhom
   <section class="block"><h3>Chất gây dị ứng</h3>
     ${v.hasAllergenData && chips ? `<div class="chips">${chips}</div>` : `<p class="empty">${esc(NHOM_ALLERGY_NO_DATA)}</p>`}
   </section>
+  ${offBtn}
 </article>`;
 }
+
+/** Chữ nút tra mã của món nhóm trên Open Food Facts (vòng 7). */
+export const NHOM_LOOKUP_TEXT = "Tra mã này trên Open Food Facts";
 
 /**
  * Ô sửa chữ để phía dưới, không bắt buộc: <details> đóng sẵn "Sửa chữ đọc được" (textarea #frontText + "Tìm lại"),

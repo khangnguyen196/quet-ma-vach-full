@@ -145,6 +145,32 @@ describe("trang món nhóm", () => {
     assert.doesNotMatch(bad, /<img/);
     assert.match(bad, /<div class="noimg">Chưa có ảnh<\/div>/);
   });
+  test("vòng 7: nhomImageOk đòi đường dẫn URL ký của bucket nhom-anh (đúng máy nhưng sai đường dẫn → '')", () => {
+    for (const bad of [
+      `${SB}/storage/v1/object/public/nhom-anh/a/b.jpg`, `${SB}/storage/v1/object/sign/bucket-khac/a/b.jpg?token=t`,
+      `${SB}/x.jpg`, `${SB}/`, `${SB}/storage/v1/object/sign/nhom-anhx/a.jpg`, `${SB}/rest/v1/nhom_anh?select=*`,
+      `${SB}/storage/v1/object/sign/nhom-anh`,
+    ]) assert.equal(nhomImageOk(bad, SB), "", bad);
+    const ok = `${SB}/storage/v1/object/sign/nhom-anh/00000000-0000-4000-8000-000000000001/x.jpg?token=t`;
+    assert.equal(nhomImageOk(ok, SB), ok);
+  });
+  test("vòng 7: ảnh trang món nhóm KHÔNG có loading=\"lazy\" (URL ký sống ngắn, ảnh ở đầu trang)", () => {
+    const ok = `${SB}/storage/v1/object/sign/nhom-anh/a/b.jpg?token=t`;
+    const html = renderNhomProduct(nhomProductView(ROW), { imgUrl: ok, supabaseUrl: SB });
+    assert.match(html, /<img src="/);
+    assert.doesNotMatch(html, /loading=/);
+  });
+  test("vòng 7: có mã vạch 8–14 số → nút 'Tra mã này trên Open Food Facts' (data-nhom-lookup); không mã → không nút", () => {
+    const html = renderNhomProduct(nhomProductView(ROW), {});
+    assert.match(html, /<button type="button" class="btn" data-nhom-lookup="8934563163150">Tra mã này trên Open Food Facts<\/button>/);
+    assert.equal((html.match(/data-nhom-lookup=/g) || []).length, 1);
+    for (const ma of [null, "", "1234567", "123456789012345", "12345678a", '1"><b>']) {
+      const h = renderNhomProduct(nhomProductView({ ...ROW, ma_vach: ma }), {});
+      assert.doesNotMatch(h, /data-nhom-lookup|Tra mã này trên Open Food Facts/, String(ma));
+    }
+    assert.doesNotMatch(renderNhomProduct({ code: '1"><b>' }, {}), /data-nhom-lookup/);
+    assert.match(renderNhomProduct({ code: "12345678" }, {}), /data-nhom-lookup="12345678"/);
+  });
   test("khung tự mở món nhóm + câu chờ / lỗi", () => {
     const sh = renderNhomShell(M(1, { ten: "<b>x</b>", ma_vach: "8934563163150" }));
     assert.match(sh, /id="photoConfirm"/);

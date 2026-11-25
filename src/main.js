@@ -986,10 +986,12 @@ function updateFrontButton() {
 
 /**
  * Xóa kết quả "Chụp mặt trước" đang ở #result (sản phẩm tự mở CHƯA xác nhận, hoặc khối "Chưa tìm thấy…") và hủy lượt
- * tra đang chạy của nó. Sản phẩm đã bấm "Đúng" / tra bình thường thì giữ. Gọi khi chọn ảnh mới và khi đăng xuất.
+ * tra đang chạy của nó. Sản phẩm Open Food Facts đã bấm "Đúng" / tra bình thường thì giữ. Gọi khi chọn ảnh mới và khi
+ * đăng xuất.
+ * Riêng trang MÓN NHÓM (nhomPage khác 0: đang tải hoặc đang hiện) thì LUÔN bị xóa, kể cả món đã bấm "Đúng" hay người
+ * dùng tự bấm chọn trong gợi ý: dữ liệu kho nhóm chỉ dành cho người đã đăng nhập (vòng 7, NÊN SỬA 1 vòng 6).
  */
 function clearPhotoResult() {
-  // Đợt kho-nhom vòng 6: cả trang món nhóm (đang tải hoặc đang hiện; dữ liệu nhóm chỉ cho người đã đăng nhập).
   if (!photoPending && !nhomPage && !document.getElementById(PHOTO_NONE_ID)) return;
   ++current; // lượt lookup tự mở / lượt tải món nhóm đang chờ mạng (nếu có) về muộn thì bỏ
   photoPending = null;
@@ -1285,7 +1287,9 @@ function showPhotoOthers(btn) {
   bindFrontImages(box);
   btn.setAttribute("aria-expanded", "true");
   // Danh sách mở ra ngay dưới 2 nút, thường ở mép dưới màn hình: cuộn ít nhất để mục đầu (hoặc khối) hiện trọn.
-  const first = box.querySelector("button[data-front-code]") || box.querySelector(".front-unsure");
+  // Vòng 7 (NÊN SỬA 2 vòng 6): chỉ có món nhóm (0 mục Open Food Facts khác) thì cuộn tới món nhóm đầu, không bỏ qua nó.
+  const first = box.querySelector("button[data-front-code]") || box.querySelector("button[data-nhom-id]")
+    || box.querySelector(".front-unsure");
   if (first) scrollToEl(first, "nearest");
 }
 
@@ -1302,6 +1306,9 @@ function onFrontClick(ev) {
   // Đợt kho-nhom vòng 6: bấm một món nhóm (khối "Món nhóm đã thêm có ảnh giống") → tải + vẽ món đó.
   const nhomBtn = ev.target.closest("button[data-nhom-id]");
   if (nhomBtn) { showNhom(nhomBtn.dataset.nhomId); return; }
+  // Vòng 7 (gợi ý 4a vòng 6): trang món nhóm có mã vạch → "Tra mã này trên Open Food Facts" = như người dùng tự nhập mã.
+  const nhomLookup = ev.target.closest("button[data-nhom-lookup]");
+  if (nhomLookup) { lookup(nhomLookup.dataset.nhomLookup); return; }
   const act = ev.target.closest("button[data-front-action]");
   if (act) {
     if (act.dataset.frontAction === "scan") {

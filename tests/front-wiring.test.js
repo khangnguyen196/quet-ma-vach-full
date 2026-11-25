@@ -472,7 +472,15 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
       ["main.js ghép HTML có chữ Do nhóm thêm", { ...good, "main.js": main("el.innerHTML = '<b>' + 'Do nhóm thêm' + '</b>';") }],
       ["showNhom gán innerHTML không qua renderNhom*", { ...good, "main.js": main().replace("out.innerHTML = renderNhomError();", "out.innerHTML = \"<p>\" + esc(view.name) + \"</p>\";") }],
       ["không có showNhom", { ...good, "main.js": main().replace("async function showNhom", "async function moMon") }],
+      // vòng 7 (gợi ý 3 vòng 6): import "as" / tên dùng làm tham chiếu
+      ["import nhomOutcome as", { ...good, "main.js": 'import { nhomOutcome as pick } from "./front-nhom.js";\n' + main("", "const outcome = pick(photoOutcome(merged), nhom, 0.8);\nnhomOutcome(a, b);") }],
+      ["import x as nhomOutcome", { ...good, "main.js": 'import { other as nhomOutcome } from "./front-nhom.js";\n' + main() }],
+      ["gán tên vào biến", { ...good, "main.js": main("const f = nhomOutcome;") }],
+      ["truyền làm tham chiếu", { ...good, "main.js": main("const xs = list.map(nhomOutcome);") }],
+      ["gọi qua .call", { ...good, "main.js": main("const o = nhomOutcome.call(null, a, b, 0.8);") }],
     ]) assert.notDeepEqual(rule18(files), [], label);
+    // import thường (không "as") vẫn qua
+    assert.deepEqual(rule18({ ...good, "main.js": 'import { nhomOutcome, nhomProductView } from "./front-nhom.js";\n' + main() }), []);
   });
 
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
@@ -680,6 +688,19 @@ function rule18(files) {
   const main = files["main.js"] || "";
   if (/\bNHOM_THRESHOLD\b/.test(main)) out.push("main.js nhắc NHOM_THRESHOLD");
   if (/threshold/i.test(main)) out.push("main.js có chữ threshold (không được truyền / chứa ngưỡng)");
+  // Vòng 7 (gợi ý 3 vòng 6): không import nhomOutcome kiểu "as" (đổi tên thì luật đếm lời gọi bị lách); mọi lần xuất hiện
+  // tên nhomOutcome ngoài comment / câu import phải là lời gọi "nhomOutcome(" (không truyền làm tham chiếu như luật 15).
+  const imports = [...main.matchAll(/\bimport\s*\{[^}]*\}\s*from\s*["'][^"']*["']/g)].map((m) => [m.index, m.index + m[0].length]);
+  for (const [s, e] of imports) {
+    const imp = main.slice(s, e);
+    if (/\bnhomOutcome\s+as\b|\bas\s+nhomOutcome\b/.test(imp)) out.push(`main.js dòng ${lineOf(main, s)}: import nhomOutcome kiểu "as"`);
+  }
+  for (const m of main.matchAll(/\bnhomOutcome\b/g)) {
+    if (imports.some(([s, e]) => m.index >= s && m.index < e)) continue;
+    if (!/^\s*\(/.test(main.slice(m.index + m[0].length))) {
+      out.push(`main.js dòng ${lineOf(main, m.index)}: nhomOutcome dùng làm tham chiếu, không phải lời gọi nhomOutcome(`);
+    }
+  }
   const calls = [...main.matchAll(/\bnhomOutcome\s*\(/g)];
   if (!calls.length) out.push("main.js phải gọi nhomOutcome(");
   for (const c of calls) {
