@@ -37,6 +37,14 @@ RUN echo "370a9ab314b3f6fc88ad7cf1fdd67011ab0a8cd57e9557d5362f8136a7bcd164  /tmp
  && rm -rf /tmp/catalog-src \
  && chmod -R a+rX /app/catalog-index
 
+# Model CLIP ViT-B/32 int8 cho kho nhóm (đợt kho-nhom vòng 4; MIT, LICENSES.md): tải LÚC BUILD từ nguồn ghim theo revision
+# (= MODEL_URL của clip_engine.py), kiểm sha256 (= MODEL_SHA256 của clip_engine.py; test_dockerfile.py kiểm trùng) bằng
+# sha256sum -c: sai thì build hỏng. Lớp này đứng TRƯỚC COPY mã máy chủ (sửa app.py không tải lại 89 MB). Lúc chạy không tải.
+RUN mkdir -p /app/models/clip \
+ && python -c "import urllib.request; urllib.request.urlretrieve('https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/6b7c523703ae26e39be4b03774966f8571c7f523/onnx/vision_model_quantized.onnx', '/app/models/clip/vision_model_quantized.onnx')" \
+ && echo "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299  /app/models/clip/vision_model_quantized.onnx" | sha256sum -c - \
+ && chmod -R a+rX /app/models
+
 COPY app.py settings.py ocr_engine.py imaging.py upload.py ratelimit.py auth.py clip_engine.py kho_nhom.py LICENSES.md ./
 
 # Model lúc build: wheel rapidocr==3.10.0 đã kèm PP-OCRv6_det_small.onnx + PP-OCRv6_rec_small.onnx trong
@@ -51,8 +59,11 @@ RUN python -c "import ocr_engine as e; p = e.model_problems(e.models_dir()); ass
 # Ca nặng nhất được nhận: JPEG nhiều lượt quét 40 MP, đo bằng CMYK progressive peak_wset 629 / riêng 822 MB (MiB, Windows 10;
 # server/README.md mục "RAM ảnh lớn"), dưới 2 GiB của Container App. RAM thật trên Linux: workflow ghi memory.peak.
 # CATALOG_PATH: thư mục chỉ mục dựng ở trên (đặt rỗng "-e CATALOG_PATH=" để tắt ứng viên: /ocr y hệt trước).
+# CLIP_MODEL_PATH: model CLIP tải ở trên (luôn nạp, ~120 MiB RAM; "-e CLIP_MODEL_PATH=" để tắt). Kho nhóm chỉ BẬT khi có
+# thêm KHO_NHOM_HMAC_KEY (64 hex, đặt bằng Secrets của Container App, KHÔNG bao giờ ghi ở đây) + AUTH_MODE=supabase.
 ENV PORT=8080 \
     CATALOG_PATH=/app/catalog-index \
+    CLIP_MODEL_PATH=/app/models/clip/vision_model_quantized.onnx \
     OCR_OFFLINE=1 \
     CORS_ALLOW_LOCALHOST=0 \
     AUTH_MODE=supabase \
@@ -70,6 +81,8 @@ USER ocr
 RUN python -c "import ocr_engine as e; o = e.OcrEngine(1, True); print('nạp thử OK', round(o.load_seconds, 2), 'giây')"
 # Người dùng ocr nạp được chỉ mục (mmap) và tìm được: thiếu quyền đọc thì build hỏng.
 RUN python -c "import catalog_search as c; x = c.CatalogIndex.load_dir('/app/catalog-index'); assert x.N > 0 and x.search_text('soda chanh 7up'), x.N; print('chỉ mục OK', x.N, 'sản phẩm')"
+# Người dùng ocr nạp được model CLIP (kiểm lại sha256 khi nạp) và tính được vector 512 số chuẩn 1: hỏng thì build hỏng.
+RUN python -c "import os, numpy as n, clip_engine as c; e = c.ClipEngine(os.environ['CLIP_MODEL_PATH']); v = e.embed_array(n.full((300, 400, 3), 128, n.uint8)); assert v.shape == (512,) and abs(float(n.linalg.norm(v)) - 1) < 1e-4; print('CLIP OK', c.MODEL_ID)"
 
 # Mã commit của ảnh (7 ký tự, workflow truyền --build-arg GIT_SHA=${GITHUB_SHA::7}); /health trả ở trường "commit"
 # (sai dạng / không truyền -> "unknown"). Đặt SAU mọi RUN / COPY nặng: mỗi commit một giá trị, không làm mất cache các lớp trên.

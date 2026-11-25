@@ -243,3 +243,45 @@ def test_requirements_chi_chu_ascii():
     for name in ("requirements.txt", "requirements-dev.txt"):
         data = (SERVER / name).read_bytes()
         assert max(data) < 128, f"{name} có byte > 127 (pip trên Windows đọc cp1252)"
+
+
+# --- kho nhóm (đợt kho-nhom vòng 4) ---------------------------------------------------------------------------------
+def test_clip_tai_luc_build_dung_nguon_va_sha256_cua_clip_engine():
+    """Dockerfile tải model CLIP từ ĐÚNG MODEL_URL, kiểm ĐÚNG MODEL_SHA256 của clip_engine.py bằng sha256sum -c (nối &&,
+    trước chmod), ENV CLIP_MODEL_PATH trỏ đúng file đó; lớp tải đứng sau pip install và trước COPY mã máy chủ."""
+    import clip_engine
+
+    src = _dockerfile()
+    flat = re.sub(r"\\\n", " ", src).splitlines()
+    run = [ln for ln in flat if ln.startswith("RUN ") and "vision_model_quantized.onnx" in ln and "urlretrieve" in ln]
+    assert len(run) == 1, run
+    run = run[0]
+    dest = _env(src)["CLIP_MODEL_PATH"]
+    assert dest == "/app/models/clip/vision_model_quantized.onnx"
+    assert f"urlretrieve('{clip_engine.MODEL_URL}', '{dest}')" in run
+    i_get, i_sum = run.find("urlretrieve"), run.find(f'echo "{clip_engine.MODEL_SHA256}  {dest}" | sha256sum -c -')
+    i_chmod = run.find("chmod -R a+rX /app/models")
+    assert 0 <= i_get < i_sum < i_chmod, (i_get, i_sum, i_chmod)
+    assert "&&" in run[i_get:i_sum] and "&&" in run[i_sum:i_chmod]
+    assert clip_engine.MODEL_URL.startswith("https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/")
+    assert clip_engine.MODEL_INFO["revision"] in clip_engine.MODEL_URL
+    idx = lambda pred: next(i for i, ln in enumerate(flat) if pred(ln))  # noqa: E731
+    pip = idx(lambda ln: ln.startswith("RUN ") and "pip install" in ln)
+    clip = flat.index(run)
+    app = idx(lambda ln: ln.startswith("COPY ") and "app.py" in ln.split())
+    assert pip < clip < app
+    lines = src.splitlines()
+    user = next(i for i, ln in enumerate(lines) if ln.strip() == "USER ocr")
+    assert any("ClipEngine(os.environ['CLIP_MODEL_PATH'])" in ln for ln in lines[user:]), "người dùng ocr phải nạp thử CLIP"
+
+
+def test_khoa_ky_kho_nhom_khong_bao_gio_o_dockerfile():
+    src = _dockerfile()
+    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
+    assert "KHO_NHOM_HMAC_KEY" not in code and "KHO_NHOM_HMAC_KEY" not in _env(src)
+    assert "NHOM_SONG_SONG" not in _env(src)  # mặc định nối tiếp (settings), không ghi đè trong ảnh
+
+
+def test_dockerignore_bo_khung_do_kho_nhom():
+    pats = [ln.strip() for ln in (SERVER / ".dockerignore").read_text(encoding="utf-8").splitlines()]
+    assert "do_kho_nhom.py" in pats

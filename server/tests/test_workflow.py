@@ -219,3 +219,48 @@ def test_summary_co_catalog_n_va_day_chi_tren_main():
         if "docker push" in s.get("run", "") or "docker/login-action" in str(s.get("uses", "")):
             assert s.get("if") == "github.ref == 'refs/heads/main'", s.get("name")
     assert "secrets." not in WORKFLOW.read_text(encoding="utf-8").replace("secrets.GITHUB_TOKEN", "")
+
+
+# --- kho nhóm (đợt kho-nhom vòng 4) ---------------------------------------------------------------------------------
+def test_clip_nap_nhom_tat_khi_khong_khoa_truoc_khi_day():
+    i, step = _step(lambda s: "nhom" in s.get("run", "") and "clip" in s.get("run", "") and ":8080/embed" in s.get("run", ""))
+    run = step["run"]
+    assert '"True clip-vit-b32-int8-cat False"' in run and '[ "$code" = "503" ]' in run and "exit 1" in run
+    assert '"nhom" in j' in run, "/ocr khi tắt không được có khóa nhom"
+    assert "if" not in step
+    steps = _steps()
+    chu = next(k for k, s in enumerate(steps) if "chu.png" in s.get("run", "") and "/ocr" in s.get("run", ""))
+    push = next(k for k, s in enumerate(steps) if "docker push" in s.get("run", ""))
+    assert chu < i < push
+
+
+def test_kho_nhom_bat_dung_luat_khoa_thu_khong_lo():
+    i, step = _step(lambda s: "openssl rand -hex 32" in s.get("run", ""))
+    run = step["run"]
+    lines = _command_lines(run)
+    assert "if" not in step
+    assert 'key=$(openssl rand -hex 32)' in lines and 'echo "::add-mask::$key"' in lines
+    assert 'export KHO_NHOM_HMAC_KEY="$key"' in lines
+    # khóa thật / khóa thử không bao giờ nằm trên dòng lệnh docker: chỉ "-e KHO_NHOM_HMAC_KEY" (lấy từ môi trường)
+    for ln in lines:
+        if "KHO_NHOM_HMAC_KEY" in ln and ln.startswith("chay "):
+            assert re.search(r"-e KHO_NHOM_HMAC_KEY(?:\s|$)", ln) or "KHO_NHOM_HMAC_KEY=khong-phai-64-hex" in ln, ln
+            assert "$key" not in ln, ln
+    runs = [ln for ln in lines if ln.startswith("docker run -d")]
+    assert runs, "phải chạy container kho nhóm"
+    for ln in runs:
+        for flag in ("--memory=2g", "--memory-swap=2g", "--cpus=1"):
+            assert re.search(rf"(?<!\S){re.escape(flag)}(?!\S)", ln), f"thiếu {flag}: {ln}"
+    want = {ln.split()[1]: ln.split('"')[1] for ln in lines if ln.startswith("chay ")}
+    assert want == {"nhom-bat": "True True", "nhom-sai-khoa": "True False", "nhom-auth-off": "True False",
+                    "nhom-khong-clip": "False False"}, want
+    assert '[ "$code" = "401" ] || { echo "::error::/embed không token phải 401"; exit 1; }' in lines
+    assert 'grep -qF -- "$key"' in run, "kiểm log container không chứa khóa"
+    assert "https://kho-nhom-ci.invalid" in run, "Supabase giả ở tên miền .invalid, không gọi Supabase thật"
+    steps = _steps()
+    macdinh = next(k for k, s in enumerate(steps) if "ocr-macdinh" in s.get("run", "") and "timeout 120" in s.get("run", ""))
+    push = next(k for k, s in enumerate(steps) if "docker push" in s.get("run", ""))
+    assert macdinh < i < push
+    clean = next(s for s in steps if s.get("if") == "always()")
+    for name in want:
+        assert name in clean["run"], name

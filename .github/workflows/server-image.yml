@@ -137,6 +137,22 @@ jobs:
           echo "xoay6.heic: HTTP $code"; cat heic.json; echo
           [ "$code" = "200" ] || { echo "::error::xoay6.heic không trả 200"; exit 1; }
 
+      # Đợt kho-nhom vòng 4: ảnh có model CLIP (CLIP_MODEL_PATH mặc định) -> /health clip.loaded true; container này KHÔNG có
+      # khóa ký (và AUTH_MODE=off) -> nhom.enabled false, /embed 503, /ocr không có khóa "nhom" (y hệt trước).
+      - name: CLIP đã nạp, kho nhóm tắt khi không có khóa (/embed 503, /ocr không có "nhom")
+        run: |
+          got=$(curl -sf http://127.0.0.1:8080/health | python3 -c 'import json, sys; j = json.load(sys.stdin); print(j["clip"]["loaded"], j["clip"]["model"], j["nhom"]["enabled"])')
+          echo "/health clip / nhom: $got (cần: True clip-vit-b32-int8-cat False)"
+          if [ "$got" != "True clip-vit-b32-int8-cat False" ]; then
+            echo "::error::/health clip / nhom \"$got\""
+            exit 1
+          fi
+          python3 -c 'import json, sys; j = json.load(open("png.json", encoding="utf-8")); sys.exit("chu.png có khóa nhom khi kho nhóm tắt" if "nhom" in j else 0)'
+          code=$(curl -s -o embed.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png -F duong_dan=0d0d0d0d-1111-4000-8000-0000000000aa/0a1b2c3d-0000-4000-8000-00000000c0de.png http://127.0.0.1:8080/embed)
+          echo "/embed khi tắt: HTTP $code"; cat embed.json; echo
+          [ "$code" = "503" ] || { echo "::error::/embed khi kho nhóm tắt phải 503"; exit 1; }
+          echo "- Kho nhóm: CLIP đã nạp, không khóa -> nhom.enabled false, /embed 503, /ocr không có \"nhom\": đúng" >> "$GITHUB_STEP_SUMMARY"
+
       # Ảnh nặng nhất được nhận (JPEG nhiều lượt quét CMYK 40 MP, orientation 6, như server/do-anh-lon.py): sinh bằng Pillow
       # có sẵn trong ảnh, ở MỘT container riêng (không tính vào RAM của container ocr), không thêm file lớn vào repo.
       # Gửi trước bước đo RAM để memory.peak gồm ca nặng nhất.
@@ -187,6 +203,60 @@ jobs:
           grep -q "SUPABASE_URL" macdinh.log || { echo "::error::container thoát (mã $rc) nhưng không phải vì thiếu biến Supabase"; exit 1; }
           echo "- Không đặt AUTH_MODE: không khởi động vì thiếu biến Supabase (mã thoát $rc), đúng" >> "$GITHUB_STEP_SUMMARY"
 
+      # Đợt kho-nhom vòng 4: luật bật = AUTH_MODE=supabase + khóa 64 hex + CLIP đã nạp. Khóa THỬ sinh trong job bằng openssl
+      # (không phải secret GitHub, không phải khóa thật), che trong log (add-mask), truyền vào container bằng "-e TÊN" (giá
+      # trị lấy từ biến môi trường, không nằm trên dòng lệnh), và kiểm log container KHÔNG chứa khóa. Supabase giả ở tên miền
+      # .invalid (không bao giờ phân giải): máy chủ vẫn khởi động (JWKS tải lỗi chỉ ghi cảnh báo), không gọi Supabase thật.
+      # Mỗi lần chạy giữ giới hạn 1 CPU / 2 GiB như Container App.
+      - name: Kho nhóm bật đúng luật (khóa thử sinh trong job; /embed, /ocr không token 401)
+        run: |
+          key=$(openssl rand -hex 32)
+          echo "::add-mask::$key"
+          export KHO_NHOM_HMAC_KEY="$key"
+          sb=(-e AUTH_MODE=supabase -e SUPABASE_URL=https://kho-nhom-ci.invalid -e SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_gia)
+          # chay <tên> <cần "clip nhom"> <tham số -e …>: chạy container, chờ /health 200, so clip.loaded + nhom.enabled
+          chay() {
+            name=$1; want=$2; shift 2
+            docker run -d --name "$name" --memory=2g --memory-swap=2g --cpus=1 -e PORT=8080 -p 127.0.0.1:8081:8080 "$@" "$LOCAL" > /dev/null
+            for i in $(seq 1 90); do
+              if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != "true" ]; then
+                echo "::error::container $name đã dừng trước khi /health trả 200"
+                docker logs --tail 40 "$name"
+                return 1
+              fi
+              if [ "$(curl -s -o h.json -w '%{http_code}' http://127.0.0.1:8081/health)" = "200" ]; then
+                got=$(python3 -c 'import json; j = json.load(open("h.json")); print(j["clip"]["loaded"], j["nhom"]["enabled"])')
+                echo "$name: /health clip / nhom = $got (cần: $want)"
+                [ "$got" = "$want" ] || { echo "::error::$name: clip / nhom \"$got\", cần \"$want\""; return 1; }
+                return 0
+              fi
+              sleep 1
+            done
+            echo "::error::$name: /health không trả 200 sau 90 giây"
+            return 1
+          }
+          khong_lo_khoa() {
+            docker logs "$1" > "$1.log" 2>&1
+            if grep -qF -- "$key" "$1.log"; then echo "::error::log của $1 có khóa ký"; return 1; fi
+            docker rm -f "$1" > /dev/null
+          }
+          chay nhom-bat "True True" "${sb[@]}" -e KHO_NHOM_HMAC_KEY
+          code=$(curl -s -o embed.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png -F duong_dan=0d0d0d0d-1111-4000-8000-0000000000aa/0a1b2c3d-0000-4000-8000-00000000c0de.png http://127.0.0.1:8081/embed)
+          echo "/embed không token: HTTP $code"; cat embed.json; echo
+          [ "$code" = "401" ] || { echo "::error::/embed không token phải 401"; exit 1; }
+          code=$(curl -s -o ocr401.json -w '%{http_code}' -F image=@server/tests/fixtures/chu.png http://127.0.0.1:8081/ocr)
+          [ "$code" = "401" ] || { echo "::error::/ocr không token phải 401 (HTTP $code)"; exit 1; }
+          grep -q "kho nhóm BẬT" <(docker logs nhom-bat 2>&1) || { echo "::error::log nhom-bat thiếu dòng \"kho nhóm BẬT\""; exit 1; }
+          khong_lo_khoa nhom-bat
+          chay nhom-sai-khoa "True False" "${sb[@]}" -e KHO_NHOM_HMAC_KEY=khong-phai-64-hex
+          grep -q "KHO_NHOM_HMAC_KEY sai dạng" <(docker logs nhom-sai-khoa 2>&1) || { echo "::error::thiếu log khóa sai dạng"; exit 1; }
+          docker rm -f nhom-sai-khoa > /dev/null
+          chay nhom-auth-off "True False" -e AUTH_MODE=off -e KHO_NHOM_HMAC_KEY
+          khong_lo_khoa nhom-auth-off
+          chay nhom-khong-clip "False False" "${sb[@]}" -e KHO_NHOM_HMAC_KEY -e CLIP_MODEL_PATH=
+          khong_lo_khoa nhom-khong-clip
+          echo "- Kho nhóm (khóa thử sinh trong job): supabase + khóa + CLIP -> bật, /embed và /ocr không token 401; khóa sai dạng / AUTH_MODE=off / không CLIP -> tắt; log không có khóa: đúng" >> "$GITHUB_STEP_SUMMARY"
+
       # Từ đây CHỈ trên main (các bước trên đã đạt): đăng nhập ghcr.io bằng GITHUB_TOKEN rồi đẩy 2 tag.
       - name: Đăng nhập ghcr.io
         if: github.ref == 'refs/heads/main'
@@ -221,4 +291,4 @@ jobs:
 
       - name: Dọn container
         if: always()
-        run: docker rm -f ocr ocr-macdinh >/dev/null 2>&1 || true
+        run: docker rm -f ocr ocr-macdinh nhom-bat nhom-sai-khoa nhom-auth-off nhom-khong-clip >/dev/null 2>&1 || true
