@@ -268,6 +268,10 @@ def test_l_k8_va_khoi_go_vong_3():
     text = sql_text()
     kiem = text[text.index("-- KIỂM SAU KHI CHẠY"):text.index("-- GỠ")]
     assert "(K8) Hàm của kho nhóm. Mong đợi đúng 5 dòng" in kiem
+    # vòng 4: SQL Editor in proconfig là {"search_path=\"\""} (hoặc dạng JSON), không phải {search_path=""}
+    assert "cột cau_hinh chứa search_path rỗng" in kiem
+    assert '(thường hiện {"search_path=\\"\\""} hoặc ["search_path=\\"\\""])' in kiem
+    assert 'cột cau_hinh = {search_path=""}' not in kiem
     k8code = " ".join(code_only(kiem[kiem.index("(K8)"):]).split())
     for f in ("nhom_vec_hop_le", "nhom_san_pham_truoc_sua", "nhom_san_pham_gioi_han", "nhom_anh_gioi_han", "nhom_anh_so_file"):
         assert f"'{f}'" in k8code, f

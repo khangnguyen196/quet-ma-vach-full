@@ -11,6 +11,8 @@ __pycache__/
 !web-ocr/package-lock.json
 !chup-mat-do/package.json
 !chup-mat-do/package-lock.json
+# mốc khung đo kho-nhom (doCodeBase), phải nằm trong git (đợt kho-nhom vòng 4)
+!chup-mat-do/kho-nhom-moc.json
 # model OCR tải về (ONNX, VietOCR…) để ở D:\cache, không bao giờ commit
 *.onnx
 *.pth

@@ -358,7 +358,8 @@ where o.bucket_id = 'nhom-anh'
   and not exists (select 1 from public.nhom_anh a where a.duong_dan = o.name)
 order by o.name;
 
--- (K8) Hàm của kho nhóm. Mong đợi đúng 5 dòng, cột security_definer = false, cột cau_hinh = {search_path=""}:
+-- (K8) Hàm của kho nhóm. Mong đợi đúng 5 dòng, cột security_definer = false, cột cau_hinh chứa search_path rỗng
+--      (thường hiện {"search_path=\"\""} hoặc ["search_path=\"\""]):
 --      nhom_anh_gioi_han ; nhom_anh_so_file ; nhom_san_pham_gioi_han ; nhom_san_pham_truoc_sua ; nhom_vec_hop_le
 select p.proname, p.prosecdef as security_definer, p.proconfig as cau_hinh
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
