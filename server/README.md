@@ -85,7 +85,7 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `CATALOG_PATH` | (trống; ảnh Docker `/app/catalog-index`) | (đợt `kho-lon`) THƯ MỤC chỉ mục dựng sẵn (`python catalog_search.py build <danh mục .jsonl.gz> <thư mục>`: mảng `.npy` + `meta.json` + `lines.jsonl`; nạp bằng mmap, (c) 0,04 giây) HOẶC file danh mục .jsonl / .jsonl.gz (`{code, name, brand, img, text, grp}` mỗi dòng; dựng trong RAM lúc khởi động, (c) ~17 giây: chỉ để test / thử). Trống = không nạp, `/ocr` trả **y hệt** trước (không có khóa `candidates`). Có giá trị: nạp MỘT lần trong lifespan TRƯỚC khi nhận yêu cầu (máy chủ scale về 0: lượt đầu sau khi thức đã có ứng viên), `/ocr` thêm `candidates` (mục "Hợp đồng API ứng viên"), `/health` báo `catalog`; nạp lỗi -> 1 dòng log tên lỗi, OCR vẫn chạy, không có `candidates`. Ảnh Docker dựng chỉ mục mức (c) LÚC BUILD và đặt sẵn biến; `-e CATALOG_PATH=` để tắt |
 | `CLIP_MODEL_PATH` | (trống; ảnh Docker `/app/models/clip/vision_model_quantized.onnx`) | (đợt `kho-nhom`) file model CLIP ViT-B/32 int8 (`clip_engine.py`; sha256 kiểm lúc nạp). Có thì nạp MỘT lần trong lifespan (~4 giây, ~120 MiB), `/health` báo `clip`; nạp lỗi -> 1 dòng log tên lỗi, kho nhóm tắt, OCR vẫn chạy. Trống = không nạp |
 | `KHO_NHOM_HMAC_KEY` | (trống) | (đợt `kho-nhom`) khóa ký vector kho nhóm: ĐÚNG 64 ký tự hex (32 byte, `bytes.fromhex`). BÍ MẬT: chỉ ở `server/.env` và Secrets của Container App (cùng một khóa), không bao giờ ở repo / log. Thiếu / sai dạng -> kho nhóm TẮT (1 dòng log chỉ nêu tên biến), máy chủ vẫn khởi động. Kho nhóm BẬT chỉ khi: `AUTH_MODE=supabase` + khóa hợp lệ + CLIP đã nạp |
-| `NHOM_SONG_SONG` | 0 | (đợt `kho-nhom`) 1 = tính vector CLIP trong luồng riêng CÙNG LÚC với OCR; 0 = sau OCR. Số đo: mục "Hợp đồng API kho nhóm" |
+| `NHOM_SONG_SONG` | 0 | (đợt `kho-nhom`) 1 = tính vector CLIP trong luồng riêng CÙNG LÚC với OCR (chờ nạp kho xong rồi mới giữ khóa OCR, vòng 5); 0 = sau OCR (nạp kho song song với OCR). Số đo: mục "Hợp đồng API kho nhóm" |
 | `PORT` | 8080 | cổng máy chủ nghe TRONG Docker (`CMD` của Dockerfile đọc `${PORT:-8080}`, `HEALTHCHECK` cũng đọc). `chay-thu.ps1` không đọc biến này (dùng tham số `-Port`, mặc định 8765) |
 
 ## API
@@ -228,7 +228,8 @@ ghi đè ảnh đã có ở cùng đường dẫn). Trả:
 - Nạp kho: `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000`
   theo trang 1.000 dòng (vòng 5: trang sau thêm `&id=gt.<id cuối của trang trước>`, KHÔNG offset, nên thêm / xóa dòng
   giữa 2 trang không làm sót dòng; id cuối trang sai dạng uuid -> dừng phân trang, dùng phần đã nạp), tối đa 10 trang, header `apikey` = publishable key, `Authorization` = token của CHÍNH request
-  (RLS; không service_role). Bắt đầu ngay sau khi token đã kiểm hợp lệ, song song với đọc ảnh + OCR. Cache DÙNG CHUNG 60
+  (RLS; không service_role). Bắt đầu ngay sau khi token đã kiểm hợp lệ, song song với đọc ảnh (+ OCR ở chế độ nối tiếp; chế độ song song chờ kho
+xong rồi mới giữ khóa OCR, vòng 5). Cache DÙNG CHUNG 60
   giây (RLS cho mọi người đăng nhập thấy cùng dữ liệu); lỗi nhớ 2 giây. Bỏ dòng: `model` khác `MODEL_ID`, `vec` không
   đúng 512 số hữu hạn / chuẩn lệch 1 quá 1e-3, `ky` sai dạng / HMAC sai, `duong_dan` sai dạng, thiếu món. Log chỉ số dòng
   nạp / bỏ theo lý do (không token, khóa, tên món, đường dẫn).
@@ -256,8 +257,12 @@ commit). Máy không có Docker nên giới hạn 1 vCPU = ghim tiến trình m�
 - Song song không giảm việc CPU phải làm trên 1 vCPU (2 luồng chia 1 nhân); số "song" nhanh hơn "tat" nằm trong độ dao
   động, không coi là lợi. Mặc định giữ NỐI TIẾP (`NHOM_SONG_SONG=0`): đơn giản hơn, RAM đỉnh thấp hơn 6 MiB.
 - RAM đỉnh (max peak_wset / peak_pagefile, gồm cả ảnh 40 MP): CLIP thêm ~94 MiB (goc 635,5 -> tat 729,4), kho 300 vector
-  + tính vector thêm ~10–16 MiB; cao nhất 745,8 MiB < trần 1.536 MiB. Số Linux trong Docker (memory.peak) xem Summary
-  của workflow.
+  + tính vector thêm ~10–16 MiB; cao nhất 745,8 MiB < trần 1.536 MiB. memory.peak trong CI gồm nạp CLIP, KHÔNG gồm kho
+  nhóm bật (CI không có token Supabase); RAM đỉnh khi bật 745,8 MiB chỉ đo trên Windows. CI run 45707768628 (764347a):
+  memory.peak 805,8 MB, ảnh 301,7 MB, /health 200 sau 4,7 giây (main 96499ab trước đợt, run 43728924624: 682,0 MB,
+  235,8 MB, 3,8 giây).
+- Giới hạn kho: nạp tối đa 10 trang × 1.000 dòng (10.000 ảnh), mới đo với 300 dòng; kho > 1.000 dòng thì đo lại RAM
+  (`do_kho_nhom.py` với `N_KHO` lớn hơn) trước khi coi là an toàn.
 
 ### Lỗi
 

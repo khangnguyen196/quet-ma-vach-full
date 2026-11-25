@@ -14,8 +14,15 @@ Cách đo (ghi kèm số):
 - RAM đỉnh = số lớn hơn giữa peak_wset và peak_pagefile (do_rss.PeakTracker, Windows, gồm tiến trình con), đọc sau
   ảnh nặng. Trần 1.536 MiB.
 
+- Phép đo riêng `clip` (số "thêm" của kho nhóm, vì thời gian /ocr cả lượt dao động ±1 giây): MỘT tiến trình (không
+  máy chủ), ghim 1 nhân (trừ --khong-mot-nhan), CLIP 1 luồng ORT; 30 ảnh bộ B giải mã sẵn như /ocr (imaging.decode),
+  kho 300 vector ngẫu nhiên đã ký bằng khóa thử sinh lúc đo; mỗi ảnh đo vector CLIP + so kho + chọn ≤ 3 món (không gồm
+  giải mã, không gồm nạp kho); lượt đầu làm nóng không tính. Ghi <out>\\do-clip-them.json (trung vị / p95 / max ms, thời
+  gian kiểm ký + dựng kho). Lần đo vòng 4 (26/11/2026, n = 30): trung vị 205 ms, p95 221 ms, max 266 ms.
+
     python do_kho_nhom.py do --cau-hinh goc|tat|noi|song [--out D:\\tmp\\kho-nhom\\do] [--ghi-de] [--khong-mot-nhan]
     python do_kho_nhom.py bang [--out D:\\tmp\\kho-nhom\\do]
+    python do_kho_nhom.py clip [--out D:\\tmp\\kho-nhom\\do] [--khong-mot-nhan]
 """
 from __future__ import annotations
 

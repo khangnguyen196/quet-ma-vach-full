@@ -237,7 +237,7 @@ jobs:
           }
           khong_lo_khoa() {
             docker logs "$1" > "$1.log" 2>&1
-            if grep -qF -- "$key" "$1.log"; then echo "::error::log của $1 có khóa ký"; return 1; fi
+            if grep -qiF -- "$key" "$1.log"; then echo "::error::log của $1 có khóa ký"; return 1; fi
             docker rm -f "$1" > /dev/null
           }
           chay nhom-bat "True True" "${sb[@]}" -e KHO_NHOM_HMAC_KEY

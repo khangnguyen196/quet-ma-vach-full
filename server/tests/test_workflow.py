@@ -255,7 +255,7 @@ def test_kho_nhom_bat_dung_luat_khoa_thu_khong_lo():
     assert want == {"nhom-bat": "True True", "nhom-sai-khoa": "True False", "nhom-auth-off": "True False",
                     "nhom-khong-clip": "False False"}, want
     assert '[ "$code" = "401" ] || { echo "::error::/embed không token phải 401"; exit 1; }' in lines
-    assert 'grep -qF -- "$key"' in run, "kiểm log container không chứa khóa"
+    assert 'grep -qiF -- "$key"' in run, "kiểm log container không chứa khóa (không phân biệt hoa thường, vòng 5)"
     assert "https://kho-nhom-ci.invalid" in run, "Supabase giả ở tên miền .invalid, không gọi Supabase thật"
     steps = _steps()
     macdinh = next(k for k, s in enumerate(steps) if "ocr-macdinh" in s.get("run", "") and "timeout 120" in s.get("run", ""))
