@@ -525,6 +525,28 @@ def test_ocr_supabase_treo_qua_3_giay_van_tra(monkeypatch):
     a.state.nhom_store._lock.release()
 
 
+@pytest.mark.parametrize("parallel", [False, True])
+def test_kho_bat_chi_lap_cache_sau_khi_token_hop_le(parallel):
+    """Vòng 5 (review NÊN SỬA 3): kho BẬT (khóa thử, CLIP giả, Supabase giả có 1 dòng): /ocr không token / token sai -> 401,
+    bị giới hạn IP -> 429; không ca nào gọi Supabase (nạp kho) hay tính vector."""
+    rng = np.random.default_rng(29)
+    a = make_nhom_app(rows=[row(rand_vec(rng))], parallel=parallel, rate_limit_per_min=2)
+    assert health(a)["nhom"] == {"enabled": True}
+    r = req(a, "/ocr")  # không token (lượt IP 1)
+    assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
+    r = req(a, "/ocr", token="khong.phai.token")  # token sai (lượt IP 2)
+    assert r.status_code == 401
+    r = req(a, "/ocr", token=es256())  # token đúng nhưng IP hết lượt -> 429 trước khi kiểm token
+    assert r.status_code == 429 and "Retry-After" in r.headers
+    assert a.state.test_fetch.calls == 0 and a.state.clip.calls == 0
+    assert a.state.nhom_store.fetches == 0 and a.state.nhom_store._cache is None
+    # đối chứng: app mới, token đúng -> nạp kho 1 lần, có nhom
+    b = make_nhom_app(rows=[row(rand_vec(rng))], parallel=parallel)
+    r = req(b, "/ocr", token=es256())
+    assert r.status_code == 200 and "nhom" in r.json()
+    assert b.state.test_fetch.calls == 1 and b.state.clip.calls == 1
+
+
 def test_song_song_cho_kho_truoc_khi_giu_khoa_ocr(monkeypatch):
     """Vòng 5 (review NÊN SỬA 2): chế độ song song chờ nạp kho XONG rồi mới giữ khóa OCR (không giữ khóa trong lúc chờ
     Supabase). Supabase giả chậm (chờ tối đa 1 giây, dưới hết giờ 3 giây); Slot.acquire được bọc để ghi lúc giữ khóa thì
