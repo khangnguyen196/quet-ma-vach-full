@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   renderPhotoOthers, renderPhotoNone, renderPhotoConfirm, renderPhotoShell, renderAllergyAlert, renderNhomHits,
-  renderNhomProduct, renderNhomShell, renderNhomError, renderNhomLoading, nhomImageOk, ALLERGY_UNCONFIRMED,
+  renderNhomProduct, renderNhomShell, renderNhomError, renderNhomLoading, nhomImageOk, ALLERGY_UNCONFIRMED, renderNhomAddForm,
   NHOM_NOTE_TEXT, NHOM_HITS_TEXT, NHOM_ALLERGY_NO_DATA, ALLERGY_NO_DATA, ALLERGY_NEUTRAL, NHOM_ALLERGY_NEUTRAL
 } from "../src/render.js";
 import { nhomProductView } from "../src/front-nhom.js";
@@ -170,6 +170,45 @@ describe("trang món nhóm", () => {
     }
     assert.doesNotMatch(renderNhomProduct({ code: '1"><b>' }, {}), /data-nhom-lookup/);
     assert.match(renderNhomProduct({ code: "12345678" }, {}), /data-nhom-lookup="12345678"/);
+  });
+  test("vòng 7: renderNhomAddForm: giá trị điền sẵn qua esc(), maxlength khớp SQL, 8 ô dinh dưỡng, 14 ô dị ứng, lỗi cạnh ô", () => {
+    const vals = {
+      ten: 'Bánh <img src=x onerror="window.__xss=1">', thuong_hieu: "Hãng 'B' & \"C\"", khoi_luong: "75 g", ma_vach: "8934563163150",
+      thanh_phan: "</textarea><script>window.__xss=1</script>", dinh_duong: { fat_100g: "1,5", "energy-kcal_100g": 450, la: "9" },
+      di_ung: ["milk", "gluten", "constructor"], nguon: "off"
+    };
+    const html = renderNhomAddForm(vals, { ten: "Cần nhập <b>tên</b>.", fat_100g: "Sai" }, { previews: [{ url: "blob:https://x/1", name: "a<b>.jpg" }, { url: "javascript:alert(1)" }] });
+    assert.ok(!html.includes("<img src=x") && !html.includes("<script>") && !html.includes("</textarea><script"));
+    assert.match(html, /name="ten" maxlength="200" value="Bánh &lt;img src=x onerror=&quot;window.__xss=1&quot;&gt;" required/);
+    assert.match(html, /value="Hãng &#39;B&#39; &amp; &quot;C&quot;"/);
+    assert.match(html, /<textarea id="nhomAdd-thanh_phan" name="thanh_phan" rows="4" maxlength="5000">&lt;\/textarea&gt;&lt;script&gt;/);
+    assert.match(html, /name="thuong_hieu" maxlength="200"/);
+    assert.match(html, /name="khoi_luong" maxlength="200"/);
+    assert.match(html, /name="ma_vach" maxlength="14" value="8934563163150" inputmode="numeric"/);
+    assert.equal((html.match(/name="dd:/g) || []).length, 8);
+    assert.match(html, /name="dd:fat_100g" inputmode="decimal" maxlength="20" value="1,5" autocomplete="off" aria-invalid="true"/);
+    assert.match(html, /name="dd:energy-kcal_100g" inputmode="decimal" maxlength="20" value="450"/);
+    assert.equal((html.match(/name="di_ung"/g) || []).length, 14);
+    assert.equal((html.match(/name="di_ung" value="[^"]+" checked/g) || []).length, 2);
+    assert.match(html, /<input type="hidden" name="nguon" value="off">/);
+    assert.match(html, /Nguồn: Lấy từ Open Food Facts lúc thêm/);
+    assert.match(html, /<p class="field-err" id="nhomAddErr-ten">Cần nhập &lt;b&gt;tên&lt;\/b&gt;\.<\/p>/);
+    assert.match(html, /aria-invalid="true" aria-describedby="nhomAddErr-ten"/);
+    // ảnh xem trước: chỉ URL blob:, có alt, tên file esc
+    assert.equal((html.match(/<img /g) || []).length, 1);
+    assert.match(html, /<img src="blob:https:\/\/x\/1" width="72" height="72" alt="Ảnh mặt trước 1: a&lt;b&gt;\.jpg">/);
+    assert.match(html, /<input id="nhomAddFiles" type="file" accept="image\/\*" multiple>/);
+    assert.match(html, /Lấy thông tin từ Open Food Facts/);
+    assert.match(html, /Chụp ảnh mã vạch/);
+    assert.match(html, /Chụp mặt sau để máy đọc chữ/);
+    assert.match(html, /data-nhom-add="save">Lưu vào kho nhóm/);
+    assert.match(html, /data-nhom-add="cancel">Hủy/);
+    // mặc định: form trống, nguồn tay; saving khóa nút Lưu
+    const empty = renderNhomAddForm();
+    assert.match(empty, /name="nguon" value="tay"/);
+    assert.doesNotMatch(empty, /checked|field-err|aria-invalid/);
+    assert.match(renderNhomAddForm({}, {}, { saving: true }), /data-nhom-add="save" disabled/);
+    assert.match(renderNhomAddForm({ nguon: "xyz" }), /name="nguon" value="tay"/);
   });
   test("khung tự mở món nhóm + câu chờ / lỗi", () => {
     const sh = renderNhomShell(M(1, { ten: "<b>x</b>", ma_vach: "8934563163150" }));

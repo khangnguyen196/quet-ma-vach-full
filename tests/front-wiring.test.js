@@ -483,6 +483,38 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     assert.deepEqual(rule18({ ...good, "main.js": 'import { nhomOutcome, nhomProductView } from "./front-nhom.js";\n' + main() }), []);
   });
 
+  // Đợt kho-nhom vòng 7: phần GHI kho nhóm
+  test("(19) ghi kho nhóm: .upload( chỉ ở nhom-write.js kèm upsert: false; không upsert / update trên nhom_*; \"/embed\" chỉ ở nhom-write.js; main.js không .from(\"nhom_…\"), không ghép HTML form; nhomFormFromBackText không có di_ung", () => {
+    assert.deepEqual(rule19(SRC_ALL), []);
+  });
+  test("(19) luật bắt được chuỗi mẫu sai", () => {
+    const nw = (up = 'await client.storage.from(NHOM_BUCKET).upload(paths[i], list[i].blob, { contentType: "image/jpeg", upsert: false });') =>
+      `export async function sendEmbed() { const u = base + "/embed"; }\nexport async function saveNhomProduct() {\n${up}\nawait client.from("nhom_san_pham").insert(row).select("id").single();\n}`;
+    const na = (body = 'return { thanh_phan: lines.join("\\n"), nguon: "ocr-mat-sau" };') => `export function nhomFormFromBackText(items) {\n${body}\n}`;
+    const mj = (extra = "") => `function redrawNhomAdd(v, e) {\n  nhomAddBox.innerHTML = renderNhomAddForm(v, e);\n}\nfunction closeNhomAdd() { nhomAddBox.innerHTML = ""; }\n${extra}`;
+    const good = { "nhom-write.js": nw(), "nhom-add.js": na(), "main.js": mj(), "nhom-data.js": 'await client.from("nhom_san_pham").select(NHOM_COLUMNS).eq("id", id).maybeSingle();' };
+    assert.deepEqual(rule19(good), []);
+    for (const [label, files] of [
+      ["upload upsert: true (chèn tạm)", { ...good, "nhom-write.js": nw('await client.storage.from(NHOM_BUCKET).upload(p, b, { contentType: "image/jpeg", upsert: true });') }],
+      ["upload thiếu upsert", { ...good, "nhom-write.js": nw('await client.storage.from(NHOM_BUCKET).upload(p, b, { contentType: "image/jpeg" });') }],
+      ["upload truyền tùy chọn qua biến", { ...good, "nhom-write.js": nw("await client.storage.from(NHOM_BUCKET).upload(p, b, opts);") }],
+      ["upload ngoài nhom-write.js", { ...good, "main.js": mj('await authClient.storage.from("nhom-anh").upload(p, b, { upsert: false });') }],
+      ["không có upload", { ...good, "nhom-write.js": nw("") }],
+      [".upsert( trên bảng", { ...good, "nhom-write.js": nw() + '\nawait client.from("nhom_anh").upsert(row);' }],
+      [".update( trên nhom_san_pham", { ...good, "nhom-data.js": 'await client.from("nhom_san_pham").update({ ten: "x" }).eq("id", id);' }],
+      [".update( trong nhom-write.js", { ...good, "nhom-write.js": nw() + "\nawait q.update({ a: 1 });" }],
+      ["upsert: true ở file khác", { ...good, "front-extra.js": "const o = { upsert: true };" }],
+      ["\"/embed\" ngoài nhom-write.js", { ...good, "main.js": mj('const u = ocrPick.url + "/embed";') }],
+      ["main.js .from(\"nhom_\"", { ...good, "main.js": mj('const { data } = await authClient.from("nhom_san_pham").select("id");') }],
+      ["main.js .from('nhom-anh')", { ...good, "main.js": mj("await authClient.storage.from('nhom-anh').remove([p]);") }],
+      ["main.js ghép HTML form (chuỗi <input)", { ...good, "main.js": mj('el.innerHTML = `<input name="ten" value="${esc(v)}">`;') }],
+      ["main.js gán innerHTML form không qua render", { ...good, "main.js": mj('nhomAddBox.innerHTML = "<p>" + x + "</p>";') }],
+      ["main.js không gọi renderNhomAddForm", { ...good, "main.js": "function closeNhomAdd() { nhomAddBox.innerHTML = \"\"; }" }],
+      ["nhomFormFromBackText có di_ung", { ...good, "nhom-add.js": na('return { thanh_phan: t, nguon: "ocr-mat-sau", di_ung: [] };') }],
+      ["không có nhomFormFromBackText", { ...good, "nhom-add.js": "export function docMatSau(items) { return {}; }" }],
+    ]) assert.notDeepEqual(rule19(files), [], label);
+  });
+
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
     const body = lookupBody(CODE);
     assert.match(body, /\bphotoFollowMessage\s*\(\s*["']openFailed["']\s*\)/, "lookup: lượt tự mở lỗi → photoFollowMessage(\"openFailed\")");
@@ -719,6 +751,52 @@ function rule18(files) {
       if (!/^renderNhom\w*\s*\(/.test(rhs)) out.push(`showNhom gán innerHTML không qua renderNhom…( (${rhs.slice(0, 40)})`);
     }
   }
+  return out;
+}
+
+/** Luật (19) (đợt kho-nhom vòng 7, phần GHI kho nhóm): files = { tên file: mã đã bỏ comment } (mọi src/*.js).
+ *  - ".upload(" chỉ ở nhom-write.js (≥ 1 lần), tham số luôn có chữ "upsert: false" (không truyền qua biến).
+ *  - Không file nào có "upsert: true" hay ".upsert("; nhom-write.js không có ".update("; câu lệnh nào có
+ *    .from("nhom_…") / .from("nhom-anh") cũng không có ".update(".
+ *  - Chuỗi chứa "/embed" chỉ ở nhom-write.js.
+ *  - main.js không gọi .from("nhom_…") / .from("nhom-anh") (đọc qua nhom-data.js, ghi qua nhom-write.js).
+ *  - main.js không ghép HTML form: không chuỗi nào có thẻ <form / <input / <textarea / <select / <label / <fieldset; có gọi
+ *    renderNhomAddForm(; mọi phép gán X.innerHTML với X có chữ "nhomAdd" là renderNhomAddForm(…) hoặc "".
+ *  - Thân nhomFormFromBackText (nhom-add.js) không có chữ "di_ung". */
+function rule19(files) {
+  const out = [];
+  let uploads = 0;
+  for (const [name, code] of Object.entries(files)) {
+    for (const m of code.matchAll(/\.upload\s*\(/g)) {
+      if (name !== "nhom-write.js") { out.push(`${name} dòng ${lineOf(code, m.index)}: .upload( ngoài nhom-write.js`); continue; }
+      uploads++;
+      const args = topArgs(code, m.index + m[0].length - 1).join(",");
+      if (!/\bupsert\s*:\s*false\b/.test(args)) out.push(`${name} dòng ${lineOf(code, m.index)}: .upload( thiếu "upsert: false"`);
+    }
+    if (/\bupsert\s*:\s*true\b/.test(code)) out.push(`${name}: có "upsert: true"`);
+    if (/\.upsert\s*\(/.test(code)) out.push(`${name}: có ".upsert("`);
+    if (name === "nhom-write.js" && /\.update\s*\(/.test(code)) out.push("nhom-write.js: có \".update(\"");
+    for (const m of code.matchAll(/\.from\s*\(\s*["'`](nhom_[a-z_]*|nhom-anh)["'`]\s*\)/g)) {
+      const end = code.indexOf(";", m.index);
+      const stmt = code.slice(m.index, end < 0 ? code.length : end);
+      if (/\.update\s*\(/.test(stmt)) out.push(`${name} dòng ${lineOf(code, m.index)}: .update( trên ${m[1]}`);
+      if (name === "main.js") out.push(`main.js dòng ${lineOf(code, m.index)}: gọi .from("${m[1]}") trực tiếp`);
+    }
+    for (const s of stringLiterals(code)) if (s.includes("/embed") && name !== "nhom-write.js") out.push(`${name}: chuỗi "/embed" ngoài nhom-write.js`);
+  }
+  if (!uploads) out.push("nhom-write.js phải tải ảnh lên bằng .upload(");
+  const main = files["main.js"] || "";
+  for (const s of stringLiterals(main)) {
+    if (/<\s*(form|input|textarea|select|label|fieldset)\b/i.test(s)) out.push(`main.js ghép HTML form: ${s.slice(0, 60)}`);
+  }
+  if (!/\brenderNhomAddForm\s*\(/.test(main)) out.push("main.js phải vẽ form qua renderNhomAddForm(");
+  for (const m of main.matchAll(/([\w.$]*nhomAdd[\w.$]*)\.innerHTML\s*=(?!=)\s*/gi)) {
+    const rhs = main.slice(m.index + m[0].length);
+    if (!/^renderNhomAddForm\s*\(/.test(rhs) && !/^(""|''|``)\s*;/.test(rhs)) out.push(`main.js gán ${m[1]}.innerHTML không qua renderNhomAddForm( (${rhs.slice(0, 40)})`);
+  }
+  const back = bodyAfterParams(files["nhom-add.js"] || "", "nhomFormFromBackText");
+  if (!back) out.push("nhom-add.js phải có function nhomFormFromBackText(…)");
+  else if (/di_ung/.test(back)) out.push("nhomFormFromBackText có chữ di_ung (chữ mặt sau không được tự tích dị ứng)");
   return out;
 }
 

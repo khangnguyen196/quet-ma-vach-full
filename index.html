@@ -48,6 +48,8 @@
            capture để điện thoại cho chọn chụp mới hoặc lấy ảnh trong thư viện. -->
       <label id="frontLabel" class="btn front-btn" hidden>Chụp mặt trước<input id="frontFile" type="file" accept="image/*"></label>
       <button id="btnFrontLogin" class="btn front-btn" type="button" aria-describedby="frontHint" hidden>Đăng nhập để dùng</button>
+      <!-- Thêm vào kho nhóm (đợt kho-nhom vòng 7): chỉ hiện khi đã đăng nhập (frontButtonState "ready"); mở form #nhomAddBox -->
+      <button id="btnNhomAdd" class="btn front-btn" type="button" aria-controls="nhomAddBox" aria-expanded="false" hidden>Thêm vào kho nhóm</button>
     </div>
     <!-- Đèn pin / phóng to: main.js chỉ hiện khi camera đang bật và máy báo hỗ trợ (track.getCapabilities) -->
     <div id="camTools" class="actions cam-tools" hidden>
@@ -90,6 +92,10 @@
   <section id="result" aria-live="polite"></section>
   <!-- Ô sửa chữ đọc được từ ảnh mặt trước (render.js renderFrontEdit): dưới kết quả, đóng sẵn, không bắt buộc -->
   <section id="frontBox" class="front-box" aria-label="Sửa chữ đọc được từ ảnh mặt trước" hidden></section>
+  <!-- Form "Thêm vào kho nhóm" (render.js renderNhomAddForm); #nhomAddMsg là dòng trạng thái CỐ ĐỊNH (tiến độ / kết quả
+       lưu, chỉ đổi chữ), nằm ngoài form để vẫn thấy "Đã thêm vào kho nhóm." sau khi form đóng. -->
+  <section id="nhomAddBox" class="nhom-add-box" aria-label="Thêm vào kho nhóm" hidden></section>
+  <p id="nhomAddMsg" class="msg nhom-add-msg" role="status" aria-live="polite"></p>
 
   <section id="history" aria-label="Đã quét gần đây">
     <h2>Đã quét gần đây</h2>

@@ -6,12 +6,15 @@ import {
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
   FRONT_TEXT_ID, renderPhotoShell, renderPhotoDone, renderPhotoOthers, renderPhotoNone, renderFrontEdit,
-  PHOTO_CONFIRM_ID, PHOTO_NONE_ID, renderNhomProduct, renderNhomShell, renderNhomLoading, renderNhomError
+  PHOTO_CONFIRM_ID, PHOTO_NONE_ID, renderNhomProduct, renderNhomShell, renderNhomLoading, renderNhomError,
+  renderNhomAddForm, NHOM_BACK_CHECK_TEXT, NHOM_OFF_MISSING_TEXT
 } from "./render.js";
-import { nhomOutcome, nhomProductView, NHOM_CONFIRM_STATUS } from "./front-nhom.js";
+import { nhomOutcome, nhomProductView, NHOM_CONFIRM_STATUS, NHOM_SOURCE_VI } from "./front-nhom.js";
 import { fetchNhomProduct, nhomImageUrl } from "./nhom-data.js";
+import { nhomFormFromOff, nhomFormFromBackText, nhomRowFromForm } from "./nhom-add.js";
+import { prepareNhomImage, sendEmbed, saveNhomProduct, nhomSaveText } from "./nhom-write.js";
 import {
-  ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
+  ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, frontErrorText, afterResultScroll, frontPickBlock,
   photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, confirmAction, OFF_WAIT_TEXT,
   extraWaitMessage
 } from "./front-photo.js";
@@ -969,6 +972,10 @@ function updateFrontButton() {
   btnFrontLogin.disabled = st === "loading";
   btnFrontLogin.textContent = st === "loading" ? "Đang kiểm đăng nhập…" : "Đăng nhập để dùng";
   frontHint.hidden = st !== "login";
+  // Đợt kho-nhom vòng 7: nút "Thêm vào kho nhóm" CHỈ khi đã đăng nhập; đăng xuất / hết phiên → đóng + dọn form, lượt lưu
+  // đang chạy dừng ở bước kế (closeNhomAdd).
+  btnNhomAdd.hidden = st !== "ready";
+  if (st === "hidden" || st === "login") closeNhomAdd();
   // Không ẩn "Tới phần đăng nhập" khi st === "ready" (đợt chup-mat-gon): TOKEN_REFRESHED gọi lại hàm này trong lúc câu
   // lỗi 401 còn hiện. Nút ẩn khi chọn ảnh mới, khi câu bị xóa / thay (sayFront) hoặc khi thành login / hidden (dưới).
   // Đăng xuất / hết phiên / không có đăng nhập: dọn như lúc ẩn (hủy lượt đang gửi, xóa gợi ý của người trước).
@@ -1474,6 +1481,297 @@ frontFile.addEventListener("change", async (ev) => {
     if (id === frontTurn) sayFront("Có lỗi khi tìm sản phẩm. Chọn ảnh lại.", true);
   }
 });
+
+// ---- Thêm vào kho nhóm (đợt kho-nhom vòng 7) ----
+// Nút #btnNhomAdd (chỉ khi đã đăng nhập) mở form #nhomAddBox (HTML: renderNhomAddForm của render.js). Phần thuần:
+// src/nhom-add.js (điền sẵn, kiểm form theo CHECK của SQL), src/nhom-write.js (ảnh, /embed, ghi Supabase theo thứ tự chốt).
+// Dị ứng chỉ từ Open Food Facts (không lấy "có thể lẫn vết") hoặc người dùng tự tích; chữ mặt sau chỉ điền ô thành phần.
+// Gặp 401 KHÔNG tự làm mới phiên rồi gửi lại (báo mời đăng nhập lại). "Chụp mặt trước" không đụng form này.
+const btnNhomAdd = $("#btnNhomAdd"), nhomAddBox = $("#nhomAddBox"), nhomAddMsg = $("#nhomAddMsg");
+let nhomAdd = { files: [], previews: [], saving: false }; // ảnh đã chọn (File) + URL xem trước (blob:)
+let nhomAddTurn = 0; // tăng khi đóng form / đăng xuất: lượt lưu / tra / đọc chữ đang chạy thấy số đổi thì dừng
+let nhomAddAbort = null; // AbortController của lượt /embed hoặc /ocr mặt sau đang chạy
+const NHOM_MAX_FILES = 3;
+
+/** Dòng trạng thái cố định #nhomAddMsg (tiến độ / kết quả lưu): chỉ đổi chữ. */
+function sayNhomAdd(text = "", warn = false) {
+  say(nhomAddMsg, text, warn);
+}
+
+/** Đóng + dọn form (Hủy, lưu xong, đăng xuất / hết phiên). Lượt đang chạy thấy nhomAddTurn đổi thì dừng ở bước kế. */
+function closeNhomAdd() {
+  ++nhomAddTurn;
+  nhomAddAbort?.abort();
+  nhomAddAbort = null;
+  for (const p of nhomAdd.previews) URL.revokeObjectURL(p.url);
+  nhomAdd = { files: [], previews: [], saving: false };
+  nhomAddBox.hidden = true;
+  nhomAddBox.innerHTML = "";
+  btnNhomAdd.setAttribute("aria-expanded", "false");
+}
+
+/** Giá trị form đang gõ → object cho nhomRowFromForm / renderNhomAddForm (ô dinh dưỡng tên "dd:<khóa>"). */
+function readNhomForm(form) {
+  const fd = new FormData(form);
+  const s = (k) => String(fd.get(k) ?? "");
+  const dinh_duong = {};
+  for (const [k, v] of fd.entries()) if (k.startsWith("dd:")) dinh_duong[k.slice(3)] = String(v);
+  return {
+    ten: s("ten"), thuong_hieu: s("thuong_hieu"), khoi_luong: s("khoi_luong"), ma_vach: s("ma_vach"), thanh_phan: s("thanh_phan"),
+    dinh_duong, di_ung: fd.getAll("di_ung").map(String), nguon: s("nguon") || "tay"
+  };
+}
+
+/** Vẽ lại form với giá trị + lỗi (ảnh đã chọn giữ ở biến nhomAdd nên không mất khi vẽ lại). */
+function redrawNhomAdd(values, errors = {}) {
+  nhomAddBox.innerHTML = renderNhomAddForm(values, errors, { previews: nhomAdd.previews, saving: nhomAdd.saving });
+}
+
+const nhomForm = () => nhomAddBox.querySelector("#nhomAddForm");
+const nhomStatus = (sel, text, warn = false) => say(nhomAddBox.querySelector(sel), text, warn);
+
+/** Bấm "Thêm vào kho nhóm": mở form trống (đang mở thì giữ chữ đang gõ), cuộn tới form. */
+function openNhomAdd() {
+  if (frontButtonState(authState) !== "ready") return;
+  if (nhomAddBox.hidden) {
+    closeNhomAdd(); // dọn sạch lượt cũ (nếu có)
+    redrawNhomAdd({}, {});
+    nhomAddBox.hidden = false;
+    btnNhomAdd.setAttribute("aria-expanded", "true");
+    sayNhomAdd();
+  }
+  scrollToEl(nhomAddBox, "start");
+  nhomAddBox.querySelector("#nhomAddTitle")?.focus({ preventScroll: true });
+}
+
+/** Chọn ảnh mặt trước: tối đa 3 (chọn nhiều hơn thì lấy 3 ảnh đầu + nhắc), thay bộ ảnh cũ. */
+function pickNhomFiles(input) {
+  const form = nhomForm();
+  const all = [...(input.files || [])];
+  input.value = "";
+  if (!form || !all.length || nhomAdd.saving) return;
+  const values = readNhomForm(form);
+  for (const p of nhomAdd.previews) URL.revokeObjectURL(p.url);
+  nhomAdd.files = all.slice(0, NHOM_MAX_FILES);
+  nhomAdd.previews = nhomAdd.files.map((f) => ({ url: URL.createObjectURL(f), name: f.name || "" }));
+  redrawNhomAdd(values, all.length > NHOM_MAX_FILES ? { anh: `Chỉ lấy ${NHOM_MAX_FILES} ảnh đầu (tối đa ${NHOM_MAX_FILES} ảnh mỗi món).` } : {});
+}
+
+/** "Chụp ảnh mã vạch": đọc mã trong ảnh (như nút "Chụp ảnh mã") rồi điền ô mã vạch. */
+async function scanNhomCode(input) {
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (busy) { nhomStatus(".nhom-add-status", "Đợi mở camera hoặc đọc ảnh xong rồi chụp mã lại.", true); return; }
+  const turn = nhomAddTurn;
+  if (scanner.running) await stopCam();
+  setBusy(true);
+  nhomStatus(".nhom-add-status", "Đang đọc mã trong ảnh…");
+  try {
+    const text = await scanner.scanImage(file);
+    if (turn !== nhomAddTurn) return;
+    const code = cleanCode(text);
+    const box = nhomAddBox.querySelector('input[name="ma_vach"]');
+    if (code && box) {
+      box.value = code;
+      nhomStatus(".nhom-add-status", `Đã đọc mã ${code}. Bấm “Lấy thông tin từ Open Food Facts” để điền sẵn.`);
+    } else {
+      nhomStatus(".nhom-add-status", "Mã đọc được không phải 8–14 chữ số. Gõ số dưới mã vạch.", true);
+    }
+  } catch (e) {
+    console.error(e);
+    if (turn === nhomAddTurn) nhomStatus(".nhom-add-status", "Không đọc được mã vạch trong ảnh. Chụp lại hoặc gõ số dưới mã vạch.", true);
+  } finally {
+    placeholder();
+    setBusy(false);
+  }
+}
+
+/** "Lấy thông tin từ Open Food Facts": có → điền sẵn (nhomFormFromOff, sửa được); không có → nhắc gõ tên + mặt sau. */
+async function fillNhomFromOff() {
+  const form = nhomForm();
+  if (!form || nhomAdd.saving) return;
+  const values = readNhomForm(form);
+  const code = cleanCode(values.ma_vach);
+  if (!code) { redrawNhomAdd(values, { ma_vach: "Mã vạch cần 8–14 chữ số." }); return; }
+  const turn = nhomAddTurn;
+  nhomStatus(".nhom-add-status", `Đang tra mã ${code} trên Open Food Facts…`);
+  let data;
+  try {
+    data = await getProduct(code);
+  } catch (e) {
+    console.error(e);
+    if (turn === nhomAddTurn) nhomStatus(".nhom-add-status", "Không tra được Open Food Facts (mạng hoặc máy chủ lỗi). Thử lại hoặc tự gõ thông tin.", true);
+    return;
+  }
+  if (turn !== nhomAddTurn || !nhomForm()) return;
+  const now = readNhomForm(nhomForm()); // người dùng có thể đã gõ thêm trong lúc chờ
+  if (!data) {
+    nhomStatus(".nhom-add-status", NHOM_OFF_MISSING_TEXT, true);
+    // phần "Chụp mặt sau để máy đọc chữ" ngay dưới: cuộn ít nhất để thấy
+    const back = nhomAddBox.querySelector(".nhom-back");
+    if (back) scrollToEl(back, "nearest");
+    return;
+  }
+  let product;
+  try {
+    product = normalize(data, code);
+  } catch (e) {
+    console.error(e);
+    nhomStatus(".nhom-add-status", "Dữ liệu Open Food Facts của mã này lạ, hãy tự gõ thông tin.", true);
+    return;
+  }
+  const off = nhomFormFromOff(product, code);
+  const merged = { ...now, ma_vach: off.ma_vach || now.ma_vach, nguon: "off" };
+  for (const k of ["ten", "thuong_hieu", "khoi_luong", "thanh_phan"]) if (off[k]) merged[k] = off[k];
+  if (Object.keys(off.dinh_duong).length) merged.dinh_duong = off.dinh_duong;
+  // Dị ứng CHẮC CHẮN của OFF (không "có thể lẫn vết"); OFF chưa có dữ liệu dị ứng thì giữ ô người dùng đã tích.
+  if (product.hasAllergenData) merged.di_ung = off.di_ung;
+  redrawNhomAdd(merged, {});
+  nhomStatus(".nhom-add-status", "Đã điền sẵn từ Open Food Facts. Kiểm lại và sửa nếu cần trước khi lưu.");
+}
+
+/** "Chụp mặt sau": ảnh → máy chủ đọc chữ (lượt riêng, bỏ qua candidates / nhom) → CHỈ điền ô thành phần. */
+async function readNhomBack(input) {
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || !authClient || nhomAdd.saving) return;
+  const turn = nhomAddTurn;
+  const stale = () => turn !== nhomAddTurn || !nhomForm();
+  nhomStatus(".nhom-back-msg", "Đang chuẩn bị ảnh mặt sau…");
+  const prep = await prepareImage(file);
+  if (stale()) return;
+  if (!prep.ok) { nhomStatus(".nhom-back-msg", prep.message, true); return; }
+  if (prep.reencoded === false
+    && !confirm("Không thu nhỏ được ảnh này trên máy, ảnh sẽ được gửi nguyên bản và có thể kèm thông tin vị trí chụp. Vẫn gửi?")) {
+    nhomStatus(".nhom-back-msg", "Chưa gửi ảnh mặt sau.");
+    return;
+  }
+  let token = "";
+  try {
+    const { data } = await authClient.auth.getSession();
+    token = data?.session?.access_token || "";
+  } catch (e) {
+    console.warn("Thêm vào kho nhóm: không lấy được phiên đăng nhập", e?.name || "");
+  }
+  if (stale()) return;
+  nhomAddAbort?.abort();
+  const ctrl = new AbortController();
+  nhomAddAbort = ctrl;
+  nhomStatus(".nhom-back-msg", "Đang gửi ảnh mặt sau tới máy chủ đọc chữ…");
+  const r = await sendOcr({ base: ocrPick.url, token, blob: prep.blob, signal: ctrl.signal });
+  token = "";
+  if (nhomAddAbort === ctrl) nhomAddAbort = null;
+  if (stale()) return;
+  if (!r.ok) { nhomStatus(".nhom-back-msg", frontErrorText(r) || "Chưa đọc được chữ.", true); return; }
+  const back = nhomFormFromBackText(r.items);
+  const area = nhomAddBox.querySelector('textarea[name="thanh_phan"]');
+  if (area) area.value = back.thanh_phan; // gán value: chữ máy chủ không bao giờ thành HTML
+  const src = nhomAddBox.querySelector('input[name="nguon"]');
+  if (src && src.value === "tay") {
+    src.value = back.nguon;
+    const line = nhomAddBox.querySelector(".nhom-source");
+    if (line) line.textContent = `Nguồn: ${NHOM_SOURCE_VI[back.nguon]}`;
+  }
+  nhomStatus(".nhom-back-msg", back.thanh_phan ? NHOM_BACK_CHECK_TEXT : "Máy không đọc được chữ nào trên ảnh mặt sau.", !back.thanh_phan);
+}
+
+/** Khóa / mở các nút + ô chọn ảnh của form trong lúc lưu. */
+function lockNhomForm(form, on) {
+  form?.querySelectorAll('button[data-nhom-add], input[type="file"]').forEach((b) => { b.disabled = on; });
+}
+
+/** "Lưu vào kho nhóm": kiểm form (lỗi → hiện cạnh ô, không gửi) → ảnh → /embed MỌI ảnh → ghi Supabase (saveNhomProduct). */
+async function saveNhomAdd(form) {
+  if (nhomAdd.saving) return;
+  const values = readNhomForm(form);
+  const v = nhomRowFromForm(values);
+  const errors = v.ok ? {} : { ...v.errors };
+  if (!nhomAdd.files.length) errors.anh = "Cần ít nhất 1 ảnh mặt trước.";
+  if (Object.keys(errors).length) {
+    redrawNhomAdd(values, errors);
+    sayNhomAdd("Chưa lưu: kiểm lại các ô có lỗi (ghi ngay dưới ô).", true);
+    nhomAddBox.querySelector('[aria-invalid="true"]')?.focus();
+    return;
+  }
+  if (!authClient || frontButtonState(authState) !== "ready") { sayNhomAdd(nhomSaveText({ kind: "auth" }), true); return; }
+  const turn = nhomAddTurn;
+  const stopped = () => turn !== nhomAddTurn;
+  nhomAdd.saving = true;
+  lockNhomForm(form, true);
+  nhomAddAbort?.abort();
+  const ctrl = new AbortController();
+  nhomAddAbort = ctrl;
+  const cancelledText = (cleaned = true) => nhomSaveText({ ok: false, kind: "cancelled", cleaned });
+  try {
+    sayNhomAdd("Đang chuẩn bị ảnh…");
+    const images = [];
+    for (const f of nhomAdd.files) {
+      const p = await prepareNhomImage(f);
+      if (stopped()) { sayNhomAdd(cancelledText(), true); return; }
+      if (!p.ok) { sayNhomAdd(p.message, true); return; }
+      images.push({ blob: p.blob });
+    }
+    let token = "", uid = "";
+    try {
+      const { data } = await authClient.auth.getSession();
+      token = data?.session?.access_token || "";
+      uid = data?.session?.user?.id || "";
+    } catch (e) {
+      console.warn("Thêm vào kho nhóm: không lấy được phiên đăng nhập", e?.name || "");
+    }
+    if (stopped()) { sayNhomAdd(cancelledText(), true); return; }
+    if (!token || !uid) { sayNhomAdd(nhomSaveText({ ok: false, kind: "auth" }), true); return; }
+    let n = 0;
+    const r = await saveNhomProduct({
+      client: authClient, uid, row: v.row, images, cancelled: stopped,
+      embed: async ({ blob, path }) => {
+        n++;
+        if (!stopped()) sayNhomAdd(`Đang gửi ảnh ${n}/${images.length} tới máy chủ…`);
+        const e = await sendEmbed({ baseUrl: ocrPick.url, token, blob, path, signal: ctrl.signal });
+        if (e.ok && n === images.length && !stopped()) sayNhomAdd("Đang lưu vào kho nhóm…");
+        return e;
+      }
+    });
+    token = "";
+    if (r.ok) { closeNhomAdd(); sayNhomAdd(nhomSaveText(r)); return; }
+    if (stopped()) { sayNhomAdd(cancelledText(r.cleaned !== false), true); return; }
+    sayNhomAdd(nhomSaveText(r), true);
+  } catch (e) {
+    console.error(e);
+    sayNhomAdd("Có lỗi bất thường khi lưu, món có thể chưa lưu hoặc lưu dở. Thử lại sau.", true);
+  } finally {
+    if (nhomAddAbort === ctrl) nhomAddAbort = null;
+    if (!stopped()) {
+      nhomAdd.saving = false;
+      lockNhomForm(form, false);
+    }
+  }
+}
+
+// Chỉ nối khi bản build có biến Supabase (loadSupabase là hằng lúc build): thiếu biến thì Rollup bỏ hẳn khối này và các
+// hàm chỉ nó dùng (form, /embed, ghi Supabase), bản build không mang theo phần ghi kho nhóm.
+if (loadSupabase) {
+  btnNhomAdd.addEventListener("click", openNhomAdd);
+  nhomAddBox.addEventListener("change", (ev) => {
+    const id = ev.target.id;
+    if (id === "nhomAddFiles") pickNhomFiles(ev.target);
+    else if (id === "nhomAddCodeFile") scanNhomCode(ev.target);
+    else if (id === "nhomAddBack") readNhomBack(ev.target);
+  });
+  nhomAddBox.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-nhom-add]");
+    if (!btn || nhomAdd.saving) return;
+    if (btn.dataset.nhomAdd === "off") fillNhomFromOff();
+    else if (btn.dataset.nhomAdd === "cancel") { closeNhomAdd(); sayNhomAdd(); btnNhomAdd.focus(); }
+  });
+  nhomAddBox.addEventListener("submit", (ev) => {
+    const form = ev.target.closest("#nhomAddForm");
+    if (!form) return;
+    ev.preventDefault();
+    saveNhomAdd(form);
+  });
+}
 
 // Ủy quyền sự kiện: #result (khung xác nhận, gợi ý khác, "Chưa tìm thấy…") và #frontBox (ô sửa chữ + "Tìm lại").
 result.addEventListener("click", onFrontClick);

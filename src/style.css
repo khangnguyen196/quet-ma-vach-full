@@ -539,6 +539,34 @@ table.cmp-table .empty { font-size: 13px; }
 .nhom-note { margin: 0 0 12px; padding: 8px 12px; border: 2px solid var(--warn); border-left-width: 6px; border-radius: 4px;
   background: var(--warn-bg); color: var(--ink); font-weight: 700; }
 .nhom-error { border-top: 10px solid var(--rule-strong); padding-top: 12px; }
+.nhom-off { margin-top: 16px; }
+/* Form "Thêm vào kho nhóm" (vòng 7): ô nhập / nút cao ≥ 44 px, dùng được ở màn 360 px (không cuộn ngang) */
+.nhom-add-box { margin-top: 14px; padding: 12px 14px; border: 2px solid var(--rule-strong); border-radius: 6px; }
+.nhom-add-box[hidden] { display: none; }
+.nhom-add { display: grid; gap: 12px; min-width: 0; }
+.nhom-add h2 { font-size: 19px; }
+.nhom-add h2:focus { outline: none; }
+.nhom-add-note, .nhom-add-hint { font-size: 13px; color: var(--ink-2); }
+.nhom-group { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 8px; }
+.nhom-group legend { padding: 0; margin-bottom: 6px; font-weight: 700; font-size: 15px; }
+.nhom-group .actions { margin-top: 0; flex-wrap: wrap; }
+.nhom-code-actions .btn { flex: 1 1 140px; }
+.nhom-field { display: grid; gap: 4px; min-width: 0; }
+.nhom-field label { font-size: 14px; font-weight: 500; }
+.nhom-field input, .nhom-field textarea {
+  min-height: 44px; padding: 0 10px; width: 100%; min-width: 0; box-sizing: border-box;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--well); color: var(--ink); font: inherit; font-weight: 400;
+}
+.nhom-field textarea { padding: 8px 10px; resize: vertical; line-height: 1.4; }
+.nhom-field [aria-invalid="true"] { border: 2px solid var(--warn); }
+.field-err { font-size: 14px; color: var(--warn); }
+.nhom-nut { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 12px; }
+.nhom-previews { display: flex; flex-wrap: wrap; gap: 8px; }
+.nhom-previews:empty { display: none; }
+.nhom-previews img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; border: 1px solid var(--rule); }
+.nhom-add-status, .nhom-back-msg { font-size: 14px; color: var(--ink-2); }
+.nhom-add-status.warn, .nhom-back-msg.warn, .nhom-add-msg.warn { color: var(--warn); }
+.nhom-add-msg:empty { min-height: 0; margin-top: 0; }
 /* Ô sửa chữ đóng sẵn (dưới kết quả, không bắt buộc) */
 .front-edit summary { min-height: 44px; padding: 11px 0; box-sizing: border-box; cursor: pointer; font-weight: 500; line-height: 22px; }
 .front-edit label { display: block; margin-top: 4px; font-size: 14px; font-weight: 500; }

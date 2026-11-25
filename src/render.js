@@ -1,7 +1,8 @@
 // Tạo HTML cho phần kết quả. Mọi dữ liệu từ API đều qua esc().
 import { NOVA_VI, NUTRIENT_ROWS, NO_NAME, ALLERGEN_VI, ALLERGEN_KEYS, matchAllergies } from "./off.js";
 import { compareRows } from "./compare.js";
-import { isNhomId, NHOM_LOAD_FAIL_TEXT } from "./front-nhom.js";
+import { isNhomId, NHOM_LOAD_FAIL_TEXT, NHOM_SOURCE_VI } from "./front-nhom.js";
+import { NHOM_NAME_MAX, NHOM_INGREDIENTS_MAX } from "./nhom-add.js";
 import { daysLeft, expiryStatus, expiryText, formatDate, sortPantry, QTY_MAX, YEAR_MIN, YEAR_MAX } from "./pantry.js";
 
 // Giới hạn năm của ô chọn ngày, khớp với kiểm tra ở storage.js (checkDateQty vẫn kiểm lại khi lưu).
@@ -773,6 +774,89 @@ ${renderAllergyBox(match, prof.length, { unconfirmed: unconfirmed === true, nhom
 
 /** Chữ nút tra mã của món nhóm trên Open Food Facts (vòng 7). */
 export const NHOM_LOOKUP_TEXT = "Tra mã này trên Open Food Facts";
+
+// ---- "Thêm vào kho nhóm" (đợt kho-nhom vòng 7): form #nhomAddForm trong #nhomAddBox ----
+// main.js không ghép HTML form (luật (19) của tests/front-wiring.test.js): mọi lần vẽ form đi qua renderNhomAddForm.
+// Mọi giá trị điền sẵn (có thể từ Open Food Facts: có thể chứa mã độc) qua esc() trong value / textarea.
+
+/** Câu nhắc khi máy đọc chữ mặt sau xong. */
+export const NHOM_BACK_CHECK_TEXT = "Máy đọc chữ có thể sai, hãy kiểm lại trước khi lưu.";
+/** Câu khi Open Food Facts chưa có mã. */
+export const NHOM_OFF_MISSING_TEXT = "Open Food Facts chưa có mã này, hãy gõ tên.";
+
+/** Ô lỗi cạnh một ô nhập (id nhomAddErr-<tên>), rỗng → "". */
+function fieldErr(name, errors) {
+  const m = errors && typeof errors[name] === "string" ? errors[name] : "";
+  return m ? `<p class="field-err" id="nhomAddErr-${esc(name)}">${esc(m)}</p>` : "";
+}
+/** Thuộc tính lỗi của ô nhập (aria-invalid + aria-describedby tới ô lỗi). */
+function errAttr(name, errors) {
+  return errors && typeof errors[name] === "string" && errors[name] ? ` aria-invalid="true" aria-describedby="nhomAddErr-${esc(name)}"` : "";
+}
+
+/**
+ * Form "Thêm vào kho nhóm". values: { ten, thuong_hieu, khoi_luong, ma_vach, thanh_phan, dinh_duong: { khóa: chuỗi },
+ * di_ung: [mã], nguon } (nhomFormFromOff / giá trị người dùng đang gõ); errors: nhomRowFromForm(…).errors (+ "anh" cho
+ * ảnh). opts.previews: [{ url, name }] ảnh đã chọn (URL blob: của main.js); opts.saving: khóa nút Lưu.
+ * maxlength khớp CHECK của SQL (đếm theo đơn vị UTF-16 nên chặt hơn cho emoji; nhomRowFromForm kiểm lại).
+ */
+export function renderNhomAddForm(values = {}, errors = {}, { previews = [], saving = false } = {}) {
+  const v = values && typeof values === "object" ? values : {};
+  const e = errors && typeof errors === "object" ? errors : {};
+  const val = (k) => (typeof v[k] === "string" ? v[k] : "");
+  const dd = v.dinh_duong && typeof v.dinh_duong === "object" ? v.dinh_duong : {};
+  const di = new Set(Array.isArray(v.di_ung) ? v.di_ung : []);
+  const nguon = Object.hasOwn(NHOM_SOURCE_VI, v.nguon) ? v.nguon : "tay";
+  const pics = (Array.isArray(previews) ? previews : []).filter((p) => typeof p?.url === "string" && p.url.startsWith("blob:"))
+    .map((p, i) => `<img src="${esc(p.url)}" width="72" height="72" alt="Ảnh mặt trước ${i + 1}${p.name ? `: ${esc(p.name)}` : ""}">`).join("");
+  const text = (name, label, { max = NHOM_NAME_MAX, mode = "", req = false } = {}) => `<div class="nhom-field">
+<label for="nhomAdd-${name}">${esc(label)}</label>
+<input id="nhomAdd-${name}" name="${name}" maxlength="${max}" value="${esc(val(name))}"${mode ? ` inputmode="${mode}"` : ""}${req ? " required" : ""} autocomplete="off"${errAttr(name, e)}>
+${fieldErr(name, e)}</div>`;
+  const nut = NUTRIENT_ROWS.map(([key, label, unit]) => {
+    const raw = dd[key];
+    const s = typeof raw === "string" ? raw : typeof raw === "number" && Number.isFinite(raw) ? String(raw).replace(".", ",") : "";
+    return `<div class="nhom-field"><label for="nhomAdd-${key}">${esc(label)} (${esc(unit)})</label>
+<input id="nhomAdd-${key}" name="dd:${key}" inputmode="decimal" maxlength="20" value="${esc(s)}" autocomplete="off"${errAttr(key, e)}>
+${fieldErr(key, e)}</div>`;
+  }).join("");
+  const allergy = ALLERGEN_KEYS.map((k) =>
+    `<label class="allergy-option"><input type="checkbox" name="di_ung" value="${esc(k)}"${di.has(k) ? " checked" : ""}> ${esc(ALLERGEN_VI[k])}</label>`
+  ).join("");
+  const dis = saving ? " disabled" : "";
+  return `<form id="nhomAddForm" class="nhom-add" novalidate>
+<h2 id="nhomAddTitle" tabindex="-1">Thêm vào kho nhóm</h2>
+<p class="nhom-add-note">Món bạn thêm hiện cho mọi người đã đăng nhập app. Ảnh được gửi lên máy chủ để tính đặc trưng ảnh rồi lưu trong kho nhóm. Dị ứng chỉ lấy từ Open Food Facts hoặc do bạn tự tích, không đoán từ ảnh.</p>
+<fieldset class="nhom-group"><legend>Ảnh mặt trước (1–3 ảnh)</legend>
+<div class="actions"><label class="btn">Chọn ảnh mặt trước<input id="nhomAddFiles" type="file" accept="image/*" multiple${errAttr("anh", e)}></label></div>
+<div class="nhom-previews">${pics}</div>
+${fieldErr("anh", e)}</fieldset>
+<fieldset class="nhom-group"><legend>Mã vạch (nếu có)</legend>
+${text("ma_vach", "Số mã vạch", { max: 14, mode: "numeric" })}
+<div class="actions nhom-code-actions"><label class="btn">Chụp ảnh mã vạch<input id="nhomAddCodeFile" type="file" accept="image/*" capture="environment"></label>
+<button type="button" class="btn" data-nhom-add="off">Lấy thông tin từ Open Food Facts</button></div>
+<p class="nhom-add-status" role="status" aria-live="polite"></p></fieldset>
+<fieldset class="nhom-group nhom-back"><legend>Chụp mặt sau để máy đọc chữ</legend>
+<p class="nhom-add-hint">Máy chỉ điền ô Thành phần, không tự tích dị ứng.</p>
+<div class="actions"><label class="btn">Chụp / chọn ảnh mặt sau<input id="nhomAddBack" type="file" accept="image/*"></label></div>
+<p class="nhom-back-msg" role="status" aria-live="polite"></p></fieldset>
+<fieldset class="nhom-group"><legend>Thông tin</legend>
+${text("ten", "Tên sản phẩm (bắt buộc)", { req: true })}
+${text("thuong_hieu", "Thương hiệu")}
+${text("khoi_luong", "Khối lượng (vd 75 g)")}
+<div class="nhom-field"><label for="nhomAdd-thanh_phan">Thành phần</label>
+<textarea id="nhomAdd-thanh_phan" name="thanh_phan" rows="4" maxlength="${NHOM_INGREDIENTS_MAX}"${errAttr("thanh_phan", e)}>${esc(val("thanh_phan"))}</textarea>
+${fieldErr("thanh_phan", e)}</div></fieldset>
+<fieldset class="nhom-group"><legend>Dinh dưỡng trên 100 g (để trống nếu không có)</legend>
+<div class="nhom-nut">${nut}</div></fieldset>
+<fieldset class="nhom-group"><legend>Chất gây dị ứng (tích theo nhãn)</legend>
+<div class="allergy-grid">${allergy}</div></fieldset>
+<input type="hidden" name="nguon" value="${esc(nguon)}">
+<p class="src nhom-source">Nguồn: ${esc(NHOM_SOURCE_VI[nguon])}</p>
+<div class="actions"><button type="submit" class="btn primary" data-nhom-add="save"${dis}>Lưu vào kho nhóm</button>
+<button type="button" class="btn" data-nhom-add="cancel">Hủy</button></div>
+</form>`;
+}
 
 /**
  * Ô sửa chữ để phía dưới, không bắt buộc: <details> đóng sẵn "Sửa chữ đọc được" (textarea #frontText + "Tìm lại"),
