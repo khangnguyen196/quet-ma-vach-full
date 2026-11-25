@@ -24,8 +24,14 @@ function cleanAllergens(list) {
   return ALLERGEN_KEYS.filter((k) => set.has(k));
 }
 
-/** Số dinh dưỡng → chuỗi hiển thị trong ô (dấu phẩy thập phân kiểu Việt Nam). */
-const numText = (n) => String(n).replace(".", ",");
+/**
+ * Số dinh dưỡng → chuỗi hiển thị trong ô (dấu phẩy thập phân kiểu Việt Nam). Số rất nhỏ / rất lớn mà JS viết dạng mũ
+ * ("1e-7", "1e+21") → "" (bỏ ô: ô dinh dưỡng chỉ nhận số viết thường; vòng 8, gợi ý 5).
+ */
+const numText = (n) => {
+  const s = String(n);
+  return /e/i.test(s) ? "" : s.replace(".", ",");
+};
 
 /**
  * Sản phẩm Open Food Facts ĐÃ normalize (src/off.js) + mã đã tra → giá trị điền sẵn của form (người dùng sửa được):
@@ -44,7 +50,8 @@ export function nhomFormFromOff(product, code) {
   const dinh_duong = {};
   for (const k of NHOM_NUTRIENT_KEYS) {
     const v = nut[k];
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) dinh_duong[k] = numText(v);
+    const t = typeof v === "number" && Number.isFinite(v) && v >= 0 ? numText(v) : "";
+    if (t) dinh_duong[k] = t;
   }
   return {
     ten: name === NO_NAME ? "" : cut(name, NHOM_NAME_MAX),
@@ -112,7 +119,8 @@ export function nhomRowFromForm(form) {
   const thuong_hieu = short("thuong_hieu", "Thương hiệu");
   const khoi_luong = short("khoi_luong", "Khối lượng");
 
-  let ma_vach = str(f.ma_vach).trim() || null;
+  // vòng 8 (gợi ý 4): bỏ MỌI khoảng trắng (người dùng gõ / dán "8 934563 163150" như in dưới mã vạch)
+  let ma_vach = str(f.ma_vach).replace(/\s+/g, "") || null;
   if (ma_vach && !CODE_RE.test(ma_vach)) errors.ma_vach = "Mã vạch cần 8–14 chữ số (hoặc để trống).";
 
   let thanh_phan = str(f.thanh_phan).trim() || null;

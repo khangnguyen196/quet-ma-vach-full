@@ -111,7 +111,7 @@ describe("nhomRowFromForm (khớp CHECK của server/kho-nhom.sql)", () => {
     const f = nhomFormFromOff({ nutriments: { fat_100g: 1e-7, sugars_100g: 1e21, proteins_100g: 0.000001, salt_100g: 2.5 } }, "");
     for (const v of Object.values(f.dinh_duong)) assert.doesNotMatch(v, /e/i, v);
     assert.deepEqual(f.dinh_duong, { proteins_100g: "0,000001", salt_100g: "2,5" });
-    assert.equal(nhomRowFromForm({ ten: "A", ...f }).ok, true);
+    assert.equal(nhomRowFromForm({ ...f, ten: "A" }).ok, true);
   });
   test("thành phần: 5.000 qua, 5.001 lỗi, rỗng → null", () => {
     assert.equal(nhomRowFromForm({ ten: "A", thanh_phan: "z".repeat(5000) }).ok, true);

@@ -7,7 +7,7 @@
 //   insert nhom_anh (vec, model, ky máy chủ trả).
 // - Lỗi giữa chừng → dọn: xóa các file đã tải rồi xóa dòng sản phẩm (nhom_anh xóa theo cascade).
 // - KHÔNG dùng update / upsert ở đâu cả (không ghi đè dữ liệu / ảnh đã có).
-import { fitSize, DAILY_RETRY_MIN_S } from "./front-photo.js";
+import { fitSize, DAILY_RETRY_MIN_S, frontErrorText } from "./front-photo.js";
 import { nhomImagePath, newUuid } from "./nhom-add.js";
 
 /** Cỡ tối đa một ảnh (byte) = giới hạn bucket nhom-anh của server/kho-nhom.sql = giới hạn /embed. */
@@ -61,6 +61,8 @@ export async function prepareNhomImage(file) {
     const img = new Image();
     img.src = url;
     await img.decode();
+    // vòng 8 (gợi ý 6): một số trình duyệt "giải mã" xong mà cỡ 0 (vd SVG không có cỡ, ảnh hỏng) → coi như không đọc được
+    if (!(img.naturalWidth > 0 && img.naturalHeight > 0)) return { ok: false, message: NOT_DECODED };
     const { width, height } = fitSize(img.naturalWidth, img.naturalHeight);
     canvas = document.createElement("canvas");
     canvas.width = width;
@@ -108,7 +110,8 @@ const fail = (kind, extra = {}) => ({ ok: false, kind, ...extra });
 /**
  * Gửi MỘT ảnh tới <baseUrl>/embed (multipart: image = blob, duong_dan = path) kèm Bearer token, hết giờ 45 giây.
  * Trả { ok: true, model, vec, ky } hoặc { ok: false, kind, retryAfter? }. kind:
- * notReady (404: máy chủ cũ chưa có /embed; 503 "Kho nhóm chưa bật"), busy (503 khác: hàng đợi đầy / Supabase lỗi),
+ * notReady (404: máy chủ cũ chưa có /embed; 503 KHÔNG có Retry-After hoặc câu "chưa bật": kho nhóm tắt), busy (503 CÓ
+ * Retry-After và câu khác: hàng đợi đầy / Supabase lỗi),
  * auth (401 hoặc token rỗng: không gọi mạng), rate / daily (429 theo Retry-After như sendOcr), tooBig (413),
  * badType (415), bad (400 / 403), timeout, aborted (signal của người gọi), network, other (phản hồi sai dạng, mã lạ,
  * tham số sai: không gọi mạng).
@@ -147,8 +150,10 @@ export async function sendEmbed({
     const retryAfter = retryAfterOf(res);
     if (st === 404) return fail("notReady", { status: st });
     if (st === 503) {
+      // Vòng 8: máy chủ báo "bận" (hàng đợi đầy / Supabase lỗi) luôn kèm Retry-After; /embed TẮT thì không có Retry-After.
+      // Nhận "chưa bật" bằng THIẾU Retry-After hoặc câu "chưa bật" (không chỉ dựa vào câu chữ máy chủ).
       const msg = body && typeof body.error === "string" ? body.error : "";
-      return fail(/chưa bật/i.test(msg) ? "notReady" : "busy", { status: st, retryAfter });
+      return fail(retryAfter == null || /chưa bật/i.test(msg) ? "notReady" : "busy", { status: st, retryAfter });
     }
     if (st === 401) return fail("auth", { status: st });
     if (st === 429) return fail(retryAfter != null && retryAfter > DAILY_RETRY_MIN_S ? "daily" : "rate", { status: st, retryAfter });
@@ -169,6 +174,47 @@ export async function sendEmbed({
 /** Lỗi Postgres của trigger giới hạn (300 món / 3 ảnh / 300 ảnh mỗi người): mã 23514 (check_violation), không đọc câu lỗi. */
 const isLimitError = (e) => !!e && typeof e === "object" && (e.code === "23514" || e.code === "check_violation");
 
+/** Lỗi postgrest có mã Postgres / PostgREST (máy chủ đã trả lời rõ); mã rỗng / thiếu = mất phản hồi (mạng). */
+const hasDbCode = (e) => !!e && typeof e === "object" && typeof e.code === "string" && e.code.trim() !== "";
+
+/** Mã HTTP của lỗi storage-js (status số, hoặc statusCode chuỗi trong thân lỗi; Supabase trả RLS bằng statusCode "403"). */
+function storageStatus(e) {
+  if (!e || typeof e !== "object") return null;
+  if (String(e.statusCode ?? "") === "403" || e.status === 403) return 403;
+  return Number.isInteger(e.status) ? e.status : null;
+}
+
+/**
+ * Dọn sau lỗi giữa chừng (vòng 8: kiểm KẾT QUẢ THẬT, không chỉ "không có error"). Trả true khi chắc chắn không còn gì:
+ * - Ảnh: remove(sure + maybe) một lần; error → false; mọi đường dẫn của sure phải có trong data (trường name) → thiếu
+ *   là false (maybe không bắt buộc có: file có thể chưa từng lên).
+ * - Dòng sản phẩm: delete().eq("id", id).select("id") phải trả ĐÚNG 1 dòng (0 dòng = không xóa được, vd RLS / đã mất).
+ *   nhom_anh xóa theo cascade.
+ */
+async function cleanupWrites(client, id, sure, maybe) {
+  let cleaned = true;
+  const all = [...sure, ...maybe];
+  if (all.length) {
+    try {
+      const { data, error } = await client.storage.from(NHOM_BUCKET).remove(all);
+      if (error || !Array.isArray(data)) cleaned = false;
+      else {
+        const gone = new Set(data.map((o) => (o && typeof o.name === "string" ? o.name : "")));
+        if (!sure.every((p) => gone.has(p))) cleaned = false;
+      }
+    } catch {
+      cleaned = false;
+    }
+  }
+  try {
+    const { data, error } = await client.from("nhom_san_pham").delete().eq("id", id).select("id");
+    if (error || !Array.isArray(data) || data.length !== 1) cleaned = false;
+  } catch {
+    cleaned = false;
+  }
+  return cleaned;
+}
+
 /** Ảnh hợp lệ để lưu: Blob image/jpeg, 1 byte – 2 MB. */
 const imageOk = (im) => !!im && typeof Blob !== "undefined" && im.blob instanceof Blob && im.blob.type === "image/jpeg"
   && im.blob.size > 0 && im.blob.size <= NHOM_IMAGE_MAX_BYTES;
@@ -179,10 +225,12 @@ const imageOk = (im) => !!im && typeof Blob !== "undefined" && im.blob instanceo
  * cancelled(): người gọi đã hủy (vd đăng xuất) → dừng ở bước kế (đã ghi thì dọn). newId: chỉ test truyền.
  * Thứ tự CHỐT: (1) kiểm ảnh (sai → không gọi gì); (2) /embed MỌI ảnh, nối tiếp (lỗi → dừng, không ghi gì);
  * (3) insert nhom_san_pham → id; (4) mỗi ảnh: tải lên bucket (CÙNG Blob, upsert: false) rồi insert nhom_anh;
- * (5) lỗi ở (3)–(4) → xóa file đã tải + xóa dòng sản phẩm.
- * Trả { ok: true, id } hoặc { ok: false, kind, step, cleaned }: kind = kind của /embed (notReady, auth…) | limit (trigger
- * giới hạn, mã 23514) | db | upload | badImages | badInput | cancelled; step = "check" | "embed" | "product" | "upload" |
- * "image"; cleaned = true khi KHÔNG còn gì dở trên Supabase (chưa ghi gì, hoặc dọn xong), false khi dọn lỗi.
+ * (5) lỗi ở (3)–(4) → xóa file đã tải (kể cả file upload báo lỗi: có thể đã lên) + xóa dòng sản phẩm, kiểm kết quả thật
+ * (cleanupWrites).
+ * Trả { ok: true, id } hoặc { ok: false, kind, step, cleaned, status? }: kind = kind của /embed (notReady, auth…) | limit
+ * (trigger giới hạn, mã 23514) | db | upload | badImages | badInput | cancelled; step = "check" | "embed" | "product" |
+ * "upload" | "image"; cleaned = true khi CHẮC CHẮN không còn gì dở trên Supabase (chưa ghi gì, hoặc dọn xong đã kiểm),
+ * false khi dọn lỗi / không kiểm được / insert sản phẩm mất phản hồi; status: mã HTTP khi tải ảnh lên bị từ chối.
  */
 export async function saveNhomProduct({ client, uid, row, images, embed, cancelled = () => false, newId = newUuid } = {}) {
   const list = Array.isArray(images) ? images : [];
@@ -210,45 +258,45 @@ export async function saveNhomProduct({ client, uid, row, images, embed, cancell
   }
   if (cancelled()) return fail("cancelled", { step: "embed", cleaned: true });
 
-  // (3) dòng sản phẩm
+  // (3) dòng sản phẩm. Vòng 8: lỗi CÓ mã Postgres (vd 23514, 42501) = máy chủ đã từ chối, chưa ghi gì → cleaned: true.
+  // Lỗi KHÔNG có mã (supabase-js trả code "" khi mất mạng / mất phản hồi) hoặc bị ném = không biết dòng đã ghi chưa, và
+  // không có id để xóa (app không tự đặt id) → cleaned: false (báo "có thể lưu dở").
   let id = null;
   try {
     const { data, error } = await client.from("nhom_san_pham").insert(row).select("id").single();
-    if (error || !data || typeof data.id !== "string") return fail(isLimitError(error) ? "limit" : "db", { step: "product", cleaned: true });
+    if (error) return fail(isLimitError(error) ? "limit" : "db", { step: "product", cleaned: hasDbCode(error) });
+    if (!data || typeof data.id !== "string") return fail("db", { step: "product", cleaned: false });
     id = data.id;
   } catch {
-    return fail("db", { step: "product", cleaned: true });
+    return fail("db", { step: "product", cleaned: false });
   }
 
-  // (4) ảnh: tải lên rồi ghi dòng nhom_anh; lỗi → (5) dọn
-  const uploaded = [];
+  // (4) ảnh: tải lên rồi ghi dòng nhom_anh; lỗi → (5) dọn.
+  // Vòng 8: hai danh sách. sure = upload trả ok (chắc chắn đã lên); maybe = upload trả lỗi / ném lỗi (mất phản hồi: file
+  // CÓ THỂ đã lên). Dọn xóa cả hai trong MỘT lần remove: storage-js 2.119.0 remove() = DELETE /object/<bucket> với
+  // { prefixes }, trả data = mảng đối tượng ĐÃ XÓA (trường name = đường dẫn trong bucket); đường dẫn không có trên bucket
+  // chỉ không có trong data, KHÔNG làm remove báo lỗi.
+  const sure = [];
+  const maybe = [];
+  let uploadStatus = null; // mã lỗi của lần tải lên hỏng (403 → câu "có thể đã đủ 300 ảnh")
   const cleanup = async (kind, step) => {
-    let cleaned = true;
-    try {
-      if (uploaded.length) {
-        const { error } = await client.storage.from(NHOM_BUCKET).remove(uploaded);
-        if (error) cleaned = false;
-      }
-    } catch {
-      cleaned = false;
-    }
-    try {
-      const { error } = await client.from("nhom_san_pham").delete().eq("id", id);
-      if (error) cleaned = false;
-    } catch {
-      cleaned = false;
-    }
-    return fail(kind, { step, cleaned });
+    const ok = await cleanupWrites(client, id, sure, maybe);
+    return fail(kind, { step, cleaned: ok, ...(uploadStatus != null ? { status: uploadStatus } : {}) });
   };
   for (let i = 0; i < list.length; i++) {
     if (cancelled()) return cleanup("cancelled", "upload");
     try {
       const { error } = await client.storage.from(NHOM_BUCKET).upload(paths[i], list[i].blob, { contentType: "image/jpeg", upsert: false });
-      if (error) return cleanup("upload", "upload");
+      if (error) {
+        maybe.push(paths[i]);
+        uploadStatus = storageStatus(error);
+        return cleanup("upload", "upload");
+      }
     } catch {
+      maybe.push(paths[i]);
       return cleanup("upload", "upload");
     }
-    uploaded.push(paths[i]);
+    sure.push(paths[i]);
     try {
       const e = embeds[i];
       const { error } = await client.from("nhom_anh").insert({ san_pham_id: id, duong_dan: paths[i], vec: e.vec, model: e.model, ky: e.ky });
@@ -274,14 +322,18 @@ export function nhomSaveText(r) {
     case "auth": return "Phiên đăng nhập đã hết hạn hoặc máy chủ không nhận, chưa lưu gì. Hãy đăng nhập lại rồi lưu lại.";
     case "cancelled": return "Đã dừng lưu vì bạn đã đăng xuất." + (r?.cleaned === false ? dirty : " Chưa lưu gì.");
     case "rate": return `Gửi nhanh quá, chờ ${retry != null ? `${retry} giây` : "ít giây"} rồi lưu lại. Chưa lưu gì.`;
-    case "daily": return "Bạn đã dùng hết lượt máy chủ hôm nay (đổi ngày lúc 7 giờ sáng). Chưa lưu gì.";
+    // vòng 8: dùng chung câu với "Chụp mặt trước" (một chỗ nói giờ đổi ngày), /embed tính chung lượt với /ocr
+    case "daily": return frontErrorText({ ok: false, kind: "daily", retryAfter: retry }) + " Chưa lưu gì.";
     case "busy": return "Máy chủ đang bận, chưa lưu gì. Thử lại sau ít giây.";
     case "tooBig": return "Ảnh quá lớn (tối đa 2 MB), chưa lưu gì. Chọn ảnh khác.";
     case "badType": return "Máy chủ chỉ nhận ảnh JPEG hoặc PNG, chưa lưu gì. Chọn ảnh khác.";
     case "timeout": return "Máy chủ không trả lời kịp, chưa lưu gì. Thử lại.";
     case "network": return "Không kết nối được máy chủ, chưa lưu gì. Kiểm tra mạng rồi thử lại.";
     case "badImages": return "Cần 1–3 ảnh mặt trước (JPEG ≤ 2 MB).";
-    case "upload": return "Không tải được ảnh lên kho nhóm." + (dirty || " Chưa lưu gì, thử lại sau.");
+    case "upload":
+      // 403 = bucket từ chối (policy: tối đa 300 ảnh mỗi người, hoặc quyền) — vòng 8, gợi ý 1
+      if (r?.status === 403) return "Không tải được ảnh lên kho nhóm: có thể đã đủ 300 ảnh của bạn, hoặc thử lại sau." + dirty;
+      return "Không tải được ảnh lên kho nhóm." + (dirty || " Chưa lưu gì, thử lại sau.");
     case "db": return "Không ghi được vào kho nhóm." + (dirty || " Chưa lưu gì, thử lại sau.");
     default: return "Chưa lưu được vào kho nhóm. Thử lại sau." + dirty;
   }
