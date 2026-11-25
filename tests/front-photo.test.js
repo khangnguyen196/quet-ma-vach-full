@@ -51,6 +51,16 @@ const CAND_BODIES = {
   ma15: { candidates: [CAND("893458875211700"), CAND("8934588022111")] },
 };
 
+// ---- kho-nhom vòng 6: thân /ocr có "nhom" (món nhóm có ảnh giống) ----
+const NID = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const NHOM = (n, extra = {}) => ({ san_pham_id: NID(n), ten: `Món ${n}`, thuong_hieu: "Hãng A", ma_vach: "8934563163150", diem: 0.9 - n / 100, ...extra });
+const NHOM_BODIES = {
+  hople: { candidates: [CAND("8934588752117")], nhom: [NHOM(1), NHOM(2, { thuong_hieu: null, ma_vach: null })] },
+  thieu: { candidates: [CAND("8934588752117")] },
+  khongmang: { nhom: { san_pham_id: NID(1) } },
+  xau: { nhom: [NHOM(1, { san_pham_id: "khong-phai-uuid" }), NHOM(2, { diem: "0.9" }), NHOM(3, { ten: "  " })] },
+};
+
 // ---- máy chủ giả ----
 let server;
 let base;
@@ -88,6 +98,8 @@ before(async () => {
       if (path === "/hang") return setTimeout(() => { if (!res.destroyed) sendJson(res, 200, { items: ITEMS }); }, 3000);
       // kho-lon vòng 4: /ocr có "candidates" (ứng viên máy chủ)
       if (path.startsWith("/cand-")) return sendJson(res, 200, { items: ITEMS, ms: 900, ...CAND_BODIES[path.slice(6)] });
+      // kho-nhom vòng 6: /ocr có "nhom"
+      if (path.startsWith("/nhom-")) return sendJson(res, 200, { items: ITEMS, ms: 900, ...NHOM_BODIES[path.slice(6)] });
       return sendJson(res, 404, { error: "Không có đường dẫn này." });
     });
   });
@@ -291,6 +303,39 @@ describe("sendOcr: candidates của máy chủ (kho-lon vòng 4, máy chủ gi�
       const r = await send(p);
       assert.equal(r.ok, false, p);
       assert.ok(!("candidates" in r), p);
+    }
+  });
+});
+
+describe("sendOcr: nhom của máy chủ (kho-nhom vòng 6, máy chủ giả)", () => {
+  test("nhom hợp lệ → mảng đã làm sạch; items / candidates không đổi", async () => {
+    const r = await send("/nhom-hople");
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.items, ITEMS);
+    assert.deepEqual(r.candidates.map((c) => c.code), ["8934588752117"]);
+    assert.deepEqual(r.nhom, [
+      { san_pham_id: NID(1), ten: "Món 1", thuong_hieu: "Hãng A", ma_vach: "8934563163150", diem: 0.89 },
+      { san_pham_id: NID(2), ten: "Món 2", thuong_hieu: null, ma_vach: null, diem: 0.88 },
+    ]);
+  });
+  test("không có khóa nhom (kho tắt / kho rỗng / máy chủ cũ) → []; candidates như cũ", async () => {
+    for (const p of ["/nhom-thieu", "/ok", "/cand-hople"]) {
+      const r = await send(p);
+      assert.equal(r.ok, true, p);
+      assert.deepEqual(r.nhom, [], p);
+    }
+    assert.deepEqual((await send("/nhom-thieu")).candidates.map((c) => c.code), ["8934588752117"]);
+    assert.equal((await send("/cand-hople")).candidates.length, 2);
+  });
+  test("nhom không phải mảng / mục xấu → []", async () => {
+    assert.deepEqual((await send("/nhom-khongmang")).nhom, []);
+    assert.deepEqual((await send("/nhom-xau")).nhom, []);
+  });
+  test("lỗi (401 / 503 / body sai) không có khóa nhom", async () => {
+    for (const p of ["/r401", "/r503", "/noitems"]) {
+      const r = await send(p);
+      assert.equal(r.ok, false, p);
+      assert.ok(!("nhom" in r), p);
     }
   });
 });

@@ -7,7 +7,9 @@
 // - sendOcr: POST <máy chủ>/ocr kèm token đăng nhập, hết giờ 45 giây, báo "chậm" sau 5 giây, đổi mã HTTP thành
 //   { kind, message } tiếng Việt. Chữ từ máy chủ (serverMessage, items) giao diện phải đặt bằng textContent.
 //   Đợt kho-lon vòng 4: kết quả ok có thêm candidates (serverCandidates của front-server.js, module thuần trong app).
+//   Đợt kho-nhom vòng 6: và nhom (nhomCandidates của front-nhom.js: ≤ 3 món nhóm có ảnh giống, luôn là mảng).
 import { serverCandidates } from "./front-server.js";
+import { nhomCandidates } from "./front-nhom.js";
 
 /** Địa chỉ máy chủ OCR mặc định (công khai, không phải bí mật). Đổi bằng VITE_OCR_SERVER_URL. */
 export const OCR_DEFAULT_URL = "https://quet-ma-vach-ocr.jollyground-aaecba36.malaysiawest.azurecontainerapps.io";
@@ -208,7 +210,8 @@ export function afterResultScroll({ hits, kind, fromRetry = false } = {}) {
   if (fromRetry) return null;
   // Đợt tu-dong vòng 4 (luồng tự mở): kind của photoOutcome → "confirm" (khung "Nhận ra tự động…") | "none" (câu
   // "Chưa tìm thấy…"). Không có kind thì giữ luật cũ theo hits.
-  if (kind === "open") return "confirm";
+  // kho-nhom vòng 6: "openNhom" (tự mở món nhóm, nhomOutcome của front-nhom.js) cũng có khung xác nhận.
+  if (kind === "open" || kind === "openNhom") return "confirm";
   if (kind === "none") return "none";
   if (!Array.isArray(hits)) return null;
   return hits.length > 0 ? "hit" : "unsure";
@@ -257,7 +260,8 @@ export function photoMessage({ kind, offFailed = false } = {}) {
   if (offFailed === true) return { text: OFF_FAIL_TEXT, warn: false };
   // Vòng 5 (NÊN SỬA 1 vòng 4): câu trung tính, không khẳng định trang đang hiện (trang có thể lỗi, người dùng có thể đã
   // tra mã khác hoặc đã bấm "Đúng"). Câu cũ: "Đã mở sản phẩm khớp nhất bên dưới. Hãy kiểm tra có đúng sản phẩm không."
-  if (kind === "open") return { text: "Đã tìm xong, xem kết quả bên dưới.", warn: false };
+  // kho-nhom vòng 6: "openNhom" (tự mở món nhóm) dùng cùng câu trung tính.
+  if (kind === "open" || kind === "openNhom") return { text: "Đã tìm xong, xem kết quả bên dưới.", warn: false };
   return { text: "Chưa tìm thấy sản phẩm này trong dữ liệu Open Food Facts.", warn: false };
 }
 
@@ -368,8 +372,9 @@ function ocrEndpoint(base) {
 
 /**
  * Gửi ảnh tới <base>/ocr kèm token đăng nhập.
- * Trả { ok: true, items, ms, candidates } hoặc { ok: false, kind, message, retryAfter, serverMessage, status }
- * (candidates: ứng viên máy chủ đã kiểm dạng, luôn là mảng, [] khi không có; đợt kho-lon vòng 4).
+ * Trả { ok: true, items, ms, candidates, nhom } hoặc { ok: false, kind, message, retryAfter, serverMessage, status }
+ * (candidates: ứng viên máy chủ đã kiểm dạng, luôn là mảng, [] khi không có; đợt kho-lon vòng 4. nhom: món nhóm đã kiểm
+ * dạng bằng nhomCandidates, luôn là mảng; đợt kho-nhom vòng 6).
  * kind: auth | daily | rate | busy | tooBig | badType | timeout | network | aborted | other.
  * - Token rỗng: kind auth, KHÔNG gọi mạng.
  * - Hết timeoutMs (kể cả lúc đọc body): hủy bằng AbortController, kind timeout.
@@ -419,7 +424,10 @@ export async function sendOcr({
     if (res.status === 200) {
       // kho-lon vòng 4: candidates = ứng viên máy chủ đã làm sạch (front-server.js), luôn là mảng ([] khi máy chủ cũ /
       // không có danh mục / tìm lỗi: main.js đi đường cũ).
-      if (body && Array.isArray(body.items)) return { ok: true, items: body.items, ms: Date.now() - t0, candidates: serverCandidates(body) };
+      // kho-nhom vòng 6: nhom = món nhóm đã làm sạch (front-nhom.js), luôn là mảng ([] khi không có khóa / kho tắt / lỗi).
+      if (body && Array.isArray(body.items)) {
+        return { ok: true, items: body.items, ms: Date.now() - t0, candidates: serverCandidates(body), nhom: nhomCandidates(body) };
+      }
       return fail("other", "Máy chủ trả dữ liệu không đúng dạng. Thử lại sau.", { status: 200 });
     }
     return failFromStatus(res.status, retryAfter, serverMessage);
