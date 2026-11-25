@@ -15,6 +15,12 @@ và đọc tay các file `LICENSE*` / `MODEL_LICENSES.md` / `LICENSES_bundled.tx
 | PP-OCRv6 small det | `PP-OCRv6_det_small.onnx` (9.929.594 byte) | `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f` | Apache-2.0 | PaddleOCR (Baidu), RapidOCR đổi sang ONNX; nằm sẵn trong wheel `rapidocr==3.10.0` (`rapidocr/models/`); ghi ở `rapidocr-3.10.0.dist-info/licenses/MODEL_LICENSES.md` mục 6 |
 | PP-OCRv6 small rec | `PP-OCRv6_rec_small.onnx` (21.234.383 byte) | `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884` | Apache-2.0 | như trên |
 
+| CLIP ViT-B/32 (phần ảnh) int8 — kho nhóm (đợt `kho-nhom`) | `vision_model_quantized.onnx` (89.117.001 byte; ảnh Docker: `/app/models/clip/`, tải lúc build) | `583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299` | MIT | OpenAI CLIP (`openai/clip-vit-base-patch32`, MIT), bản ONNX lượng tử int8 của Xenova: https://huggingface.co/Xenova/clip-vit-base-patch32 revision `6b7c523703ae26e39be4b03774966f8571c7f523`, file `onnx/vision_model_quantized.onnx` (`MODEL_URL` / `MODEL_SHA256` của `clip_engine.py`) |
+
+Model CLIP: giấy phép MIT (thẻ model của `Xenova/clip-vit-base-patch32` và repo gốc `openai/CLIP`); phân phối lại trong ảnh
+Docker công khai thì giữ ghi chú bản quyền + văn bản MIT (file này). Không thêm gói Python nào cho kho nhóm (`hmac`,
+`hashlib` là thư viện chuẩn; `onnxruntime`, `numpy` đã có).
+
 `MODEL_LICENSES.md` của RapidOCR: mã RapidOCR thuộc RapidOCR Authors, trọng số model thuộc Baidu / PaddleOCR, cả hai phát hành theo Apache-2.0; phân phối lại thì kèm bản Apache-2.0 và giữ ghi chú nguồn. Model cls (`ch_ppocr_mobile_v2.0_cls_mobile.onnx`, Apache-2.0) có trong wheel nhưng máy chủ KHÔNG dùng (`Global.use_cls=False`).
 
 ## Dữ liệu: danh mục sản phẩm (đợt kho-lon)

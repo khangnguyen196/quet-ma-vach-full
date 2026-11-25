@@ -218,6 +218,37 @@ cách sửa ảnh như trên chắc hơn). App vẫn chạy với máy chủ cũ
 
 Không chạy `az`, không cần khóa Azure: mọi bước làm bằng tay trên Portal.
 
+### 4c. Kho nhóm (đợt kho-nhom): khóa ký KHO_NHOM_HMAC_KEY
+
+Ảnh của đợt `kho-nhom` có thêm model CLIP (luôn nạp, `/health` báo `"clip":{"loaded":true,…}`) và 2 đường mới: `POST
+/embed` (tính + ký vector ảnh khi thêm món vào kho nhóm) và khóa `nhom` trong `/ocr` (≤ 3 món nhóm giống ảnh nhất).
+Kho nhóm chỉ BẬT khi có khóa ký **`KHO_NHOM_HMAC_KEY`** (đúng 64 ký tự hex). Không đặt khóa thì máy chủ vẫn chạy như cũ
+(`"nhom":{"enabled":false}`, `/embed` trả 503).
+
+**Tạo khóa (chủ dự án làm, trên Windows, MỘT lần)** — máy không tạo / đọc / in khóa thật:
+
+```powershell
+D:\tmp\may-chu-1\venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Ra 64 ký tự 0-9 a-f. Chép vào 2 nơi, **CÙNG MỘT khóa** (khác nhau thì vector thêm từ máy này bị máy kia bỏ):
+1. `server/.env` (máy chủ chạy thử trên máy): thêm dòng `KHO_NHOM_HMAC_KEY=<64 ký tự>` (file này không lên git).
+2. Container App (lúc trỏ tag mới của đợt, làm cùng các bước 1–4 của mục 4b):
+   - **Settings** → **Secrets** → **+ Add**: Key = `kho-nhom-hmac-key`, Type = **Container Apps Secret**, Value = khóa → **Add**.
+   - **Application** → **Containers** → **Edit and deploy** → container `ocr` → **Environment variables** → **+ Add**:
+     Name = `KHO_NHOM_HMAC_KEY`, Source = **Reference a secret**, Value = `kho-nhom-hmac-key` → **Save** → **Create**.
+   - Giữ **1 CPU core, 2 Gi memory** (CLIP thêm ~120 MiB; đo RAM đỉnh ở `server/README.md` mục "Số đo kho nhóm"); không
+     hạ CPU / RAM.
+3. Kiểm `https://<địa chỉ app>/health`: `"clip":{"loaded":true,"model":"clip-vit-b32-int8-cat"}` và `"nhom":{"enabled":true}`.
+   `enabled` false: xem **Log stream** dòng "kho nhóm TẮT: …" (chỉ nêu tên biến: thiếu / sai dạng, cần AUTH_MODE=supabase,
+   hoặc CLIP chưa nạp).
+
+Không dán khóa vào chat, issue, ảnh chụp màn hình, `.env.example` hay GitHub Secrets (workflow tự sinh khóa THỬ riêng).
+
+**Khóa lộ thì đổi khóa**: tạo khóa mới, thay ở CẢ 2 nơi trên (Secret của Container App: sửa giá trị rồi tạo revision mới).
+Đổi khóa = MỌI vector cũ trong bảng `nhom_anh` thành sai chữ ký và bị máy chủ bỏ (kho nhóm coi như rỗng): phải nạp lại ảnh
+(xóa món / ảnh cũ rồi thêm lại qua app, để máy chủ ký lại bằng khóa mới).
+
 ## 5. Tạm tắt
 
 Container App → **Overview** → nút **Stop** (Dừng). Bật lại: **Start**. Khi dừng không có bản nào chạy, không tốn gì.

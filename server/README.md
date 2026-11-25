@@ -83,6 +83,9 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 | `ALLOWED_ORIGINS` | (trống = chỉ `https://khangnguyen196.github.io`) | nguồn (trang web) được gọi máy chủ, cách nhau dấu phẩy, dạng `http(s)://tên-miền[:cổng]`; bỏ khoảng trắng, phần tử rỗng, "/" cuối, nguồn trùng; đổi về chữ thường, bỏ cổng mặc định. `*`, có đường dẫn / `?` / `#` / tên đăng nhập -> từ chối khởi động. Có giá trị thì THAY mặc định (muốn giữ github.io phải ghi vào danh sách). Azure: `https://khangnguyen196.github.io,https://localhost:5173` |
 | `CORS_ALLOW_LOCALHOST` | 0 | 1 = cho thêm `http(s)://localhost` / `127.0.0.1` (mọi cổng), **cộng thêm** với `ALLOWED_ORIGINS` (không thay). `chay-thu.ps1` luôn đặt 1, nên chạy trên máy = `ALLOWED_ORIGINS` (mặc định github.io) + mọi localhost; ảnh Docker đặt 0 |
 | `CATALOG_PATH` | (trống; ảnh Docker `/app/catalog-index`) | (đợt `kho-lon`) THƯ MỤC chỉ mục dựng sẵn (`python catalog_search.py build <danh mục .jsonl.gz> <thư mục>`: mảng `.npy` + `meta.json` + `lines.jsonl`; nạp bằng mmap, (c) 0,04 giây) HOẶC file danh mục .jsonl / .jsonl.gz (`{code, name, brand, img, text, grp}` mỗi dòng; dựng trong RAM lúc khởi động, (c) ~17 giây: chỉ để test / thử). Trống = không nạp, `/ocr` trả **y hệt** trước (không có khóa `candidates`). Có giá trị: nạp MỘT lần trong lifespan TRƯỚC khi nhận yêu cầu (máy chủ scale về 0: lượt đầu sau khi thức đã có ứng viên), `/ocr` thêm `candidates` (mục "Hợp đồng API ứng viên"), `/health` báo `catalog`; nạp lỗi -> 1 dòng log tên lỗi, OCR vẫn chạy, không có `candidates`. Ảnh Docker dựng chỉ mục mức (c) LÚC BUILD và đặt sẵn biến; `-e CATALOG_PATH=` để tắt |
+| `CLIP_MODEL_PATH` | (trống; ảnh Docker `/app/models/clip/vision_model_quantized.onnx`) | (đợt `kho-nhom`) file model CLIP ViT-B/32 int8 (`clip_engine.py`; sha256 kiểm lúc nạp). Có thì nạp MỘT lần trong lifespan (~4 giây, ~120 MiB), `/health` báo `clip`; nạp lỗi -> 1 dòng log tên lỗi, kho nhóm tắt, OCR vẫn chạy. Trống = không nạp |
+| `KHO_NHOM_HMAC_KEY` | (trống) | (đợt `kho-nhom`) khóa ký vector kho nhóm: ĐÚNG 64 ký tự hex (32 byte, `bytes.fromhex`). BÍ MẬT: chỉ ở `server/.env` và Secrets của Container App (cùng một khóa), không bao giờ ở repo / log. Thiếu / sai dạng -> kho nhóm TẮT (1 dòng log chỉ nêu tên biến), máy chủ vẫn khởi động. Kho nhóm BẬT chỉ khi: `AUTH_MODE=supabase` + khóa hợp lệ + CLIP đã nạp |
+| `NHOM_SONG_SONG` | 0 | (đợt `kho-nhom`) 1 = tính vector CLIP trong luồng riêng CÙNG LÚC với OCR; 0 = sau OCR. Số đo: mục "Hợp đồng API kho nhóm" |
 | `PORT` | 8080 | cổng máy chủ nghe TRONG Docker (`CMD` của Dockerfile đọc `${PORT:-8080}`, `HEALTHCHECK` cũng đọc). `chay-thu.ps1` không đọc biến này (dùng tham số `-Port`, mặc định 8765) |
 
 ## API
@@ -90,8 +93,12 @@ Thử nhanh: `curl.exe -F "image=@D:\quet-ma-vach-full\test-ocr\photos\893457226
 ### `GET /health`
 
 ```json
-{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0", "commit": "a295a86", "catalog": { "loaded": true, "n": 532732 } }
+{ "ok": true, "modelLoaded": true, "engine": { "name": "rapidocr", "version": "3.10.0", "model": "PP-OCRv6 small det+rec, no cls" }, "version": "0.1.0", "commit": "a295a86", "catalog": { "loaded": true, "n": 532732 }, "clip": { "loaded": true, "model": "clip-vit-b32-int8-cat" }, "nhom": { "enabled": true } }
 ```
+
+`clip` / `nhom` (đợt `kho-nhom` vòng 4): `clip.loaded` = đã nạp model CLIP (`model` = `MODEL_ID`, chưa nạp thì `null`);
+`nhom.enabled` = kho nhóm đang bật (`AUTH_MODE=supabase` + `KHO_NHOM_HMAC_KEY` hợp lệ + CLIP đã nạp). Không lộ khóa /
+đường dẫn.
 
 `catalog` (đợt `kho-lon` vòng 3): `loaded` = đã nạp danh mục ứng viên (`CATALOG_PATH`), `n` = số sản phẩm (không nạp /
 nạp lỗi: `{"loaded": false, "n": 0}`); không lộ đường dẫn.
@@ -171,6 +178,78 @@ Chỉ khi đặt `CATALOG_PATH` và nạp được danh mục. Phản hồi `/oc
   (b) 12,0 MB, (c) 134,4 MB (lines.jsonl 92,6 MB). Mức chọn theo luật: (c).
 - Log `/ocr` (vòng 3): dòng có sẵn thêm `tìm <ms>ms` (chỉ phần `catalog.search`) hoặc `tìm -`; không ghi chữ OCR.
 
+### Hợp đồng API kho nhóm (`/embed`, `nhom` của `/ocr`, đợt `kho-nhom` vòng 4)
+
+Bảng Supabase + bucket: `server/kho-nhom.sql`. Vector KHÔNG tin app: app chỉ lưu vector máy chủ tính + ký; máy chủ bỏ mọi
+dòng sai chữ ký khi nạp kho.
+
+**`POST /embed`** — `multipart/form-data`: trường file `image` (như `/ocr`: JPEG / PNG / HEIC ≤ 5 MB) + trường chữ
+`duong_dan` = đường dẫn ảnh trong bucket `nhom-anh` mà app SẼ tải lên, dạng `<uid>/<uuid ảnh>.jpg|png|webp` (≤ 128 ký
+tự). Trả:
+
+```json
+{ "model": "clip-vit-b32-int8-cat", "vec": [0.0123456789, "… 512 số"], "ky": "<64 ký tự hex thường>" }
+```
+
+- `vec`: 512 số = vector CLIP float32 chuẩn L2 của ảnh đã giải mã giống HỆT `/ocr` (xoay EXIF, RGB, cạnh dài ≤ 1.600).
+  Mỗi số in bằng float64 của chính số float32 (vd `0.10000000149011612`): đọc JSON rồi đổi float32 ra ĐÚNG số đã ký. App
+  ghi nguyên `vec`, `model`, `ky` vào bảng `nhom_anh` (Postgres lưu `real[]`; in lại dạng ngắn `0.1` vẫn kiểm ký đạt).
+- `ky` = HMAC-SHA256(khóa `KHO_NHOM_HMAC_KEY`, `b"kho-nhom-v1" 0x00 duong_dan(UTF-8) 0x00 model(UTF-8) 0x00` + 512
+  float32 little-endian), hex thường; trùng comment cột `ky` của `kho-nhom.sql`. Chữ ký phủ `duong_dan` (có uid): chép
+  `vec` + `ky` sang đường dẫn khác thì bị bỏ.
+- Thứ tự kiểm: kho nhóm tắt -> **503** "Kho nhóm chưa bật trên máy chủ." (không đọc token, không tính lượt) -> giới hạn IP
+  -> token (thiếu / sai **401**, Supabase lỗi 503) -> giới hạn người dùng phút + ngày -> hàng đợi -> đọc ảnh + `duong_dan`
+  (thiếu / quá dài / gửi 2 lần **400**) -> sai dạng **400** "Đường dẫn ảnh sai dạng …" -> phần trước "/" khác uid (`sub`)
+  của token **403** "Đường dẫn ảnh phải nằm trong thư mục của chính tài khoản đang đăng nhập." -> ảnh lỗi 413 / 415, ảnh
+  quá hẹp (cạnh dài > 20 × cạnh ngắn) 400.
+- **Có tính vào lượt**: `/embed` dùng CHUNG bộ đếm với `/ocr` (IP / phút, người / phút, người / ngày `DAILY_LIMIT_PER_USER`):
+  thêm 1 ảnh vào kho = 1 lượt. Tính vector chạy trong cùng hàng đợi `MAX_CONCURRENT` với OCR.
+
+**`nhom` của `/ocr`** — khóa thêm, các khóa cũ giữ nguyên:
+
+```json
+"nhom": [ { "san_pham_id": "<uuid>", "ten": "…", "thuong_hieu": "…" , "ma_vach": "8934563163150", "diem": 0.9312 } ]
+```
+
+- CHỈ có khi kho nhóm bật VÀ kho (sau lọc) có ≥ 1 dòng VÀ tính vector được. Tắt / kho rỗng / Supabase lỗi hoặc quá 3
+  giây / lỗi CLIP -> KHÔNG có khóa `nhom` (không có dạng `"nhom": []`), không tính vector, chữ + `candidates` trả như cũ.
+  App coi "không có khóa" là "không có ứng viên nhóm".
+- ≤ 3 mục, mỗi sản phẩm lấy ảnh giống nhất; `diem` = tích vô hướng 2 vector chuẩn 1 (= cos), làm tròn 4 số, giảm dần
+  (bằng điểm thì món xuất hiện trước trong kho trước). `thuong_hieu` / `ma_vach` có thể `null`. Máy chủ KHÔNG có ngưỡng:
+  `NHOM_THRESHOLD` ở app.
+- Nạp kho: `GET <SUPABASE_URL>/rest/v1/nhom_anh?select=id,san_pham_id,duong_dan,vec,model,ky,nhom_san_pham(ten,thuong_hieu,ma_vach)&order=id&limit=1000&offset=…`
+  theo trang 1.000 dòng, tối đa 10 trang, header `apikey` = publishable key, `Authorization` = token của CHÍNH request
+  (RLS; không service_role). Bắt đầu ngay sau khi token đã kiểm hợp lệ, song song với đọc ảnh + OCR. Cache DÙNG CHUNG 60
+  giây (RLS cho mọi người đăng nhập thấy cùng dữ liệu); lỗi nhớ 2 giây. Bỏ dòng: `model` khác `MODEL_ID`, `vec` không
+  đúng 512 số hữu hạn / chuẩn lệch 1 quá 1e-3, `ky` sai dạng / HMAC sai, `duong_dan` sai dạng, thiếu món. Log chỉ số dòng
+  nạp / bỏ theo lý do (không token, khóa, tên món, đường dẫn).
+- Số đo (`do_kho_nhom.py`, cách đo ở đầu file): xem mục "Số đo kho nhóm" ngay dưới.
+
+#### Số đo kho nhóm
+
+Đo 26/11/2026 bằng `do_kho_nhom.py` (cách đo ở đầu file; Windows 10, máy dự án; mã b35a92c + thay đổi vòng 4 chưa
+commit). Máy không có Docker nên giới hạn 1 vCPU = ghim tiến trình máy chủ vào MỘT nhân (psutil `cpu_affinity([0])`) +
+`OCR_THREADS=1` + CLIP 1 luồng ORT. Kho giả 300 vector (100 món × 3 ảnh) đã ký, Supabase giả trong tiến trình. n = 30
+ảnh bộ B (front.jpg gốc) + 1 ảnh JPEG CMYK nhiều lượt quét 40 MP; mọi lượt 200; bật thì mọi lượt có `nhom` 3 mục.
+
+| Cấu hình | trung vị /ocr (s) | p95 (s) | RAM đỉnh (MiB) | RSS sau nạp (MB) |
+|---|---|---|---|---|
+| goc: không CLIP, không khóa (như trước đợt) | 6,27 | 8,57 | 635,5 | 102,2 |
+| tat: CLIP nạp, không khóa (kho nhóm tắt) | 7,53 | 10,63 | 729,4 | 224,9 |
+| noi: bật, CLIP sau OCR (`NHOM_SONG_SONG=0`, mặc định) | 8,39 | 12,58 | 739,7 | 232,4 |
+| song: bật, CLIP song song OCR (`NHOM_SONG_SONG=1`) | 6,40 | 9,50 | 745,8 | 231,8 |
+
+- Thời gian /ocr cả lượt trên máy này DAO ĐỘNG khoảng ±1 giây giữa các lần chạy (goc và tat làm cùng một việc cho mỗi
+  ảnh mà trung vị lệch 1,26 giây), nên hiệu cả lượt giữa các cấu hình KHÔNG đọc được thành "thêm bao nhiêu". Số thêm đọc
+  từ đo riêng `do_kho_nhom.py clip` (1 tiến trình ghim 1 nhân, ảnh giải mã như /ocr, lượt đầu làm nóng không tính, n = 30):
+  vector CLIP + so kho 300 vector + chọn 3 món **trung vị 205 ms, p95 221 ms, lớn nhất 266 ms** / ảnh (mục tiêu ≤ ~1 giây:
+  đạt). Nạp + kiểm chữ ký 300 dòng 344 ms, mỗi 60 giây một lần, chạy song song với đọc ảnh + OCR.
+- Song song không giảm việc CPU phải làm trên 1 vCPU (2 luồng chia 1 nhân); số "song" nhanh hơn "tat" nằm trong độ dao
+  động, không coi là lợi. Mặc định giữ NỐI TIẾP (`NHOM_SONG_SONG=0`): đơn giản hơn, RAM đỉnh thấp hơn 6 MiB.
+- RAM đỉnh (max peak_wset / peak_pagefile, gồm cả ảnh 40 MP): CLIP thêm ~94 MiB (goc 635,5 -> tat 729,4), kho 300 vector
+  + tính vector thêm ~10–16 MiB; cao nhất 745,8 MiB < trần 1.536 MiB. Số Linux trong Docker (memory.peak) xem Summary
+  của workflow.
+
 ### Lỗi
 
 Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm traceback.
@@ -185,7 +264,8 @@ Mọi lỗi trả JSON `{ "error": "<câu tiếng Việt>" }`, không kèm trace
 | 401 | (`AUTH_MODE=supabase`) thiếu token, token sai / hết hạn / alg không nhận; có `WWW-Authenticate: Bearer` |
 | 429 | quá `RATE_LIMIT_PER_MIN` lượt / phút / IP, quá `RATE_LIMIT_USER_PER_MIN` lượt / phút / người dùng, hoặc quá `DAILY_LIMIT_PER_USER` ảnh / người / ngày UTC; có `Retry-After` (giới hạn ngày: số giây tới 00:00 UTC) |
 | 500 | lỗi lạ trong lúc xử lý ảnh (JSON "Lỗi máy chủ, thử lại sau.", có CORS, log chỉ tên lỗi); lỗi lạ trong lúc kiểm token ("Lỗi khi kiểm đăng nhập trên máy chủ.", có CORS, log chỉ tên lỗi, không bao giờ cho qua); cấu hình đăng nhập sai lọt qua bước khởi động ("Cấu hình đăng nhập sai trên máy chủ.", không bao giờ cho qua) |
-| 503 | hàng đợi đầy, chưa nạp xong model, hoặc (`AUTH_MODE=supabase`) chưa kiểm được token vì Supabase lỗi / không trả lời; có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
+| 403 | (`/embed`) `duong_dan` không nằm trong thư mục uid của chính token |
+| 503 | (`/embed`) kho nhóm chưa bật (không có `Retry-After`); hàng đợi đầy, chưa nạp xong model, hoặc (`AUTH_MODE=supabase`) chưa kiểm được token vì Supabase lỗi / không trả lời; có `Retry-After` (JSON, có CORS). Riêng khi quá 16 kết nối cùng lúc (`--limit-concurrency 16`) thì chính uvicorn trả 503 dạng chữ `Service Unavailable`, KHÔNG có CORS (trang trên github.io chỉ thấy "lỗi mạng") |
 
 ## Đăng nhập (`AUTH_MODE=supabase`, đợt `dang-nhap`)
 
