@@ -6,8 +6,10 @@ import {
   renderAllergyOptions, renderAllergyAlert, renderAllergyBox, ALLERGY_ALERT_ID,
   renderCompare, renderCompareButton, renderHistoryOptions, renderImportSummary, profileNames, renderAuthBox,
   FRONT_TEXT_ID, renderPhotoShell, renderPhotoDone, renderPhotoOthers, renderPhotoNone, renderFrontEdit,
-  PHOTO_CONFIRM_ID, PHOTO_NONE_ID
+  PHOTO_CONFIRM_ID, PHOTO_NONE_ID, renderNhomProduct, renderNhomShell, renderNhomLoading, renderNhomError
 } from "./render.js";
+import { nhomOutcome, nhomProductView, NHOM_CONFIRM_STATUS } from "./front-nhom.js";
+import { fetchNhomProduct, nhomImageUrl } from "./nhom-data.js";
 import {
   ocrServerUrl, prepareImage, sendOcr, frontButtonState, after401View, frontErrorView, afterResultScroll, frontPickBlock,
   photoOutcome, photoMessage, photoFollowMessage, isUnconfirmed, confirmStatusText, confirmAction, OFF_WAIT_TEXT,
@@ -267,19 +269,24 @@ let photoPending = null;
 let shownLookupId = 0;
 // #frontMsg đang là câu KẾT QUẢ của "Chụp mặt trước" (sau khi tìm xong) chứ không phải câu tiến độ / lỗi gửi ảnh.
 let frontMsgIsResult = false;
+// Đợt kho-nhom vòng 6: số lượt (current) của trang MÓN NHÓM đang tải / đang hiện trong #result; 0 khi #result không phải
+// trang món nhóm. clearPhotoResult (chọn ảnh mới / đăng xuất) dọn trang này như sản phẩm tự mở chưa xác nhận.
+let nhomPage = 0;
 
 /** Vẽ lại CHỈ khung cảnh báo đầu kết quả (không vẽ lại cả kết quả: giữ chữ đang gõ trong form tủ đồ).
- *  Còn "chưa xác nhận" thì giữ dòng nhắc (đổi hồ sơ / đổi ở tab khác cũng vậy). */
+ *  Còn "chưa xác nhận" thì giữ dòng nhắc (đổi hồ sơ / đổi ở tab khác cũng vậy). Món nhóm (shownProduct.nhom): câu dị ứng
+ *  nói đúng nguồn (dữ liệu nhóm nhập). */
 function redrawAllergyAlert() {
   const box = document.getElementById(ALLERGY_ALERT_ID);
   if (!shownProduct || !box) return;
   box.innerHTML = renderAllergyAlert(matchAllergies(shownProduct, allergyProfile), allergyProfile.length,
-    { unconfirmed: isUnconfirmed(photoPending, shownLookupId) });
+    { unconfirmed: isUnconfirmed(photoPending, shownLookupId), nhom: shownProduct.nhom === true });
 }
 
-/** Mã sản phẩm đang hiện mà còn "chưa xác nhận" (tự mở từ ảnh), không thì null: màn So sánh thêm dòng nhắc cho mã này. */
+/** Mã sản phẩm đang hiện mà còn "chưa xác nhận" (tự mở từ ảnh), không thì null: màn So sánh thêm dòng nhắc cho mã này.
+ *  Món nhóm (không phải sản phẩm Open Food Facts) → null: màn So sánh chỉ tra Open Food Facts. */
 function unconfirmedShownCode() {
-  return shownProduct && isUnconfirmed(photoPending, shownLookupId) ? shownProduct.code : null;
+  return shownProduct && !shownProduct.nhom && isUnconfirmed(photoPending, shownLookupId) ? shownProduct.code : null;
 }
 
 /** Vẽ ô tick + số nhóm của khung "Hồ sơ dị ứng" theo biến allergyProfile. */
@@ -351,7 +358,9 @@ async function lookup(raw, { photo = null } = {}) {
   const code = cleanCode(raw);
   if (!code) { setMsg("Mã vạch cần 8–14 chữ số.", true); return; }
   const id = ++current;
-  photoPending = photo ? { code, lookupId: id, top: photo.top, others: photo.others || [] } : null;
+  // nhomList (đợt kho-nhom vòng 6): món nhóm của ảnh, hiện trong "Không, xem gợi ý khác".
+  photoPending = photo ? { code, lookupId: id, top: photo.top, others: photo.others || [], nhomList: photo.nhom || [] } : null;
+  nhomPage = 0; // #result sắp thành trang sản phẩm Open Food Facts
   // Tra không từ ảnh (quét / nhập mã / lịch sử / mã mẫu / gợi ý khác): câu kết quả "Chụp mặt trước" không còn nói về
   // trang đang hiện → xóa (vòng 5, NÊN SỬA 1 vòng 4). Câu tiến độ của lượt ảnh đang chạy (vd "Đang gửi ảnh…") giữ.
   if (!photo && frontMsgIsResult) {
@@ -792,7 +801,8 @@ compareForm.addEventListener("submit", async (ev) => {
 // ---- Tài khoản: đăng nhập Google qua Supabase (đợt dang-nhap) ----
 // KHÔNG bắt buộc: mọi tính năng ở trên chạy như cũ khi chưa đăng nhập / không tải được thư viện.
 // Thiếu biến VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY → không hiện khối, không tải thư viện.
-// Thư viện @supabase/supabase-js chỉ import động khi có biến; chỉ dùng phần auth.
+// Thư viện @supabase/supabase-js chỉ import động khi có biến; dùng phần auth + ĐỌC bảng / ảnh kho nhóm (đợt kho-nhom
+// vòng 6, src/nhom-data.js nhận chính authClient; vòng 7 thêm ghi). Không tạo client thứ hai.
 const authBox = $("#authBox");
 const authBody = $("#authBody"); // vẽ lại theo trạng thái
 const authMsg = $("#authMsg"); // dòng thông báo cố định, luôn hiện (không hidden): chỉ đổi chữ, không bao giờ thay phần tử
@@ -969,7 +979,8 @@ function updateFrontButton() {
     sayFront();
     frontBox.hidden = true;
     frontBox.innerHTML = "";
-    clearPhotoResult(); // đợt tu-dong vòng 4: sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" của người trước
+    frontNhom = []; // món nhóm của ảnh trước (dữ liệu của người đã đăng nhập)
+    clearPhotoResult(); // đợt tu-dong vòng 4: sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" / món nhóm của người trước
   }
 }
 
@@ -978,9 +989,11 @@ function updateFrontButton() {
  * tra đang chạy của nó. Sản phẩm đã bấm "Đúng" / tra bình thường thì giữ. Gọi khi chọn ảnh mới và khi đăng xuất.
  */
 function clearPhotoResult() {
-  if (!photoPending && !document.getElementById(PHOTO_NONE_ID)) return;
-  ++current; // lượt lookup tự mở đang chờ mạng (nếu có) về muộn thì bỏ
+  // Đợt kho-nhom vòng 6: cả trang món nhóm (đang tải hoặc đang hiện; dữ liệu nhóm chỉ cho người đã đăng nhập).
+  if (!photoPending && !nhomPage && !document.getElementById(PHOTO_NONE_ID)) return;
+  ++current; // lượt lookup tự mở / lượt tải món nhóm đang chờ mạng (nếu có) về muộn thì bỏ
   photoPending = null;
+  nhomPage = 0;
   shownProduct = null;
   shownLookupId = 0;
   result.innerHTML = "";
@@ -1004,6 +1017,9 @@ let frontPicks = 0; // chỉ đếm số lần chọn ảnh (đăng xuất khôn
 let frontAbort = null; // AbortController của lượt đang gửi (chọn ảnh khác thì hủy)
 // Lượt frontTurn của "Tìm lại" ĐANG CHẠY (vòng 6, NÊN SỬA 3 vòng 5); 0 khi không có. Bấm "Đúng" lúc còn chạy thì hủy.
 let retryTurn = 0;
+// Món nhóm (r.nhom của sendOcr, đã làm sạch) của ảnh đang hiện, đợt kho-nhom vòng 6: "Tìm lại" dùng lại (không gọi lại máy
+// chủ; ảnh không đổi nên điểm ảnh vẫn đúng). Chọn ảnh mới / đăng xuất → [].
+let frontNhom = [];
 let frontSearch = null; // { t1, products, rIndex } khi đã tải xong (dùng cho "Tìm lại")
 let frontSearchPromise = null;
 let frontT1Tries = 0;
@@ -1077,7 +1093,7 @@ function bindFrontImages(el) {
  * server (kho-lon vòng 4): ứng viên máy chủ (r.candidates của sendOcr). Có phần tử → gộp bằng serverMerge, không chờ /
  * không dùng kho phụ (extraP null), không câu chờ kho phụ. Không có / rỗng → đường cũ (photoMerge + kho phụ extraP).
  */
-async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded, extraP = null, server = null }) {
+async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, reencoded, extraP = null, server = null, nhom = [] }) {
   const stale = () => id !== frontTurn || current !== lookupMark;
   const useServer = Array.isArray(server) && server.length > 0;
   // Vòng 5 (gợi ý 1 vòng 4): đã chọn ảnh khác / tra mã khác trong lúc chờ máy chủ OCR → thôi, KHÔNG gọi Open Food Facts.
@@ -1126,7 +1142,10 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   const { merged, offFailed } = useServer
     ? serverMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products }, found, off, server, { called: queries.length > 0 })
     : photoMerge({ t1: s.t1, rIndex: s.rIndex, products: s.products, xi }, found, off, { called: queries.length > 0 });
-  const outcome = photoOutcome(merged);
+  // Đợt kho-nhom vòng 6: món nhóm (nhom = r.nhom của sendOcr) qua nhomOutcome với ngưỡng MẶC ĐỊNH NHOM_THRESHOLD của
+  // src/front-nhom.js (không truyền ngưỡng ở đây; hiện Infinity: món nhóm chỉ vào gợi ý khác / "Chưa tìm thấy…").
+  // nhom rỗng → outcome y hệt photoOutcome (thêm nhom: [], nhomTop: null): mọi luồng như cũ.
+  const outcome = nhomOutcome(photoOutcome(merged), nhom);
   if (!fromRetry) {
     frontBox.innerHTML = renderFrontEdit({ lines: found.lines, reencoded });
     frontBox.hidden = false;
@@ -1135,13 +1154,17 @@ async function showPhotoResult({ id, lookupMark, s, found, fromRetry = false, re
   sayFront(note.text, note.warn, true);
   if (outcome.kind === "open") {
     lookup(outcome.top.code, { photo: outcome }); // vẽ khung NGAY (trước khi gọi mạng), trang sản phẩm vẽ sau
+  } else if (outcome.kind === "openNhom") {
+    // Tự mở MÓN NHÓM (chỉ khi NHOM_THRESHOLD đổi khỏi Infinity): khung xác nhận + trang món nhóm (chưa xác nhận).
+    showNhom(outcome.nhomTop.san_pham_id, { photo: outcome });
   } else {
     ++current; // lượt tra đang chạy (nếu có) về muộn thì bỏ
     photoPending = null;
     shownProduct = null;
     shownLookupId = 0; // như clearPhotoResult (vòng 6, gợi ý 4 vòng 5)
+    nhomPage = 0;
     setMsg();
-    result.innerHTML = renderPhotoNone({ lines: found.lines });
+    result.innerHTML = renderPhotoNone({ lines: found.lines, nhom: outcome.nhom });
   }
   // Lần chọn ảnh (không phải "Tìm lại"): cuộn ít nhất để khung xác nhận / câu "Chưa tìm thấy…" hiện trong màn hình.
   const to = afterResultScroll({ kind: outcome.kind, fromRetry });
@@ -1166,7 +1189,11 @@ function confirmPhoto() {
     // sớm lookup(p.code) bên dưới (trang tự mở lỗi), để #frontMsg không kẹt.
     sayFront();
   }
-  if (!shownProduct || shownLookupId !== p.lookupId || p.lookupId !== current) { lookup(p.code); return; }
+  // Trang chưa tải được → mở lại như người dùng tự chọn (món nhóm: tải lại món; sản phẩm OFF: tra lại mã).
+  if (!shownProduct || shownLookupId !== p.lookupId || p.lookupId !== current) {
+    if (p.nhomId) showNhom(p.nhomId); else lookup(p.code);
+    return;
+  }
   photoPending = null;
   redrawAllergyAlert();
   // #frontMsg không còn nhắc kiểm tra sau khi đã xác nhận (vòng 5, NÊN SỬA 1 vòng 4).
@@ -1175,12 +1202,15 @@ function confirmPhoto() {
     sayFront(m.text, m.warn);
   }
   // Lưu TRƯỚC, câu báo theo kết quả (vòng 5, gợi ý 5 vòng 4): addHistory nuốt lỗi ghi (storage.js) nên đọc lại để biết.
+  // Món nhóm (đợt kho-nhom vòng 6): KHÔNG lưu lịch sử tra cứu (lịch sử tra theo mã Open Food Facts).
   let saved = false;
-  try {
-    renderHistory(addHistory(shownProduct.code, shownProduct.name));
-    saved = getHistory().some((x) => x.code === shownProduct.code);
-  } catch (e) {
-    console.error(e);
+  if (!p.nhomId) {
+    try {
+      renderHistory(addHistory(shownProduct.code, shownProduct.name));
+      saved = getHistory().some((x) => x.code === shownProduct.code);
+    } catch (e) {
+      console.error(e);
+    }
   }
   const box = document.getElementById(PHOTO_CONFIRM_ID);
   if (box) {
@@ -1190,8 +1220,59 @@ function confirmPhoto() {
     if (others) { others.hidden = true; others.innerHTML = ""; }
     box.focus({ preventScroll: true }); // nút vừa bấm đã mất: giữ focus trong khung
     const status = box.querySelector(".photo-status");
-    if (status) status.textContent = confirmStatusText(saved);
+    if (status) status.textContent = p.nhomId ? NHOM_CONFIRM_STATUS : confirmStatusText(saved);
   }
+}
+
+/**
+ * Mở một MÓN CỦA KHO NHÓM vào #result (đợt kho-nhom vòng 6): đọc Supabase bằng authClient (fetchNhomProduct + URL ký ảnh
+ * nhomImageUrl, src/nhom-data.js), vẽ bằng renderNhomProduct (render.js; main.js không ghép HTML món nhóm).
+ * - Không opts.photo: người dùng tự bấm một món nhóm trong gợi ý → không có dòng "chưa xác nhận"; cuộn tới #result.
+ * - opts.photo (kind openNhom của nhomOutcome, chỉ khi NHOM_THRESHOLD < điểm): khung xác nhận (renderNhomShell) + trang món
+ *   nhóm chưa xác nhận trong .photo-body; "Đúng" KHÔNG lưu lịch sử tra cứu.
+ * Theo lượt: dùng chung biến current với lookup (quét / nhập mã / lịch sử / chọn ảnh mới / đăng xuất trong lúc chờ → bỏ).
+ * Tải lỗi → câu "Không tải được món của nhóm. Thử lại sau." (không đỏ).
+ */
+async function showNhom(nhomId, { photo = null } = {}) {
+  const id = ++current;
+  photoPending = photo
+    ? { code: null, lookupId: id, top: { name: photo.nhomTop.ten, brand: photo.nhomTop.thuong_hieu }, others: photo.others || [], nhomList: photo.nhom || [], nhomId }
+    : null;
+  if (!photo && frontMsgIsResult) {
+    const m = photoFollowMessage("notPhoto");
+    sayFront(m.text, m.warn);
+  }
+  shownProduct = null;
+  shownLookupId = 0;
+  nhomPage = id;
+  setMsg();
+  let out = result;
+  if (photo) {
+    result.innerHTML = renderNhomShell(photo.nhomTop);
+    out = result.querySelector(".photo-body") || result;
+  } else {
+    result.innerHTML = renderNhomLoading();
+    scrollToEl(result, "nearest");
+  }
+  const client = authClient;
+  const [got, imgUrl] = client
+    ? await Promise.all([fetchNhomProduct(client, nhomId), nhomImageUrl(client, nhomId)])
+    : [{ ok: false }, null];
+  if (id !== current) return;
+  if (!got.ok) {
+    out.innerHTML = renderNhomError();
+    if (photo && photoPending?.lookupId === id) {
+      const m = photoFollowMessage("openFailed");
+      sayFront(m.text, m.warn, true);
+    }
+    return;
+  }
+  const view = nhomProductView(got.row);
+  out.innerHTML = renderNhomProduct(view, {
+    imgUrl, unconfirmed: isUnconfirmed(photoPending, id), profile: allergyProfile, supabaseUrl: authCfg?.url || ""
+  });
+  shownProduct = view;
+  shownLookupId = id;
 }
 
 /** "Không, xem gợi ý khác": hiện tối đa 4 mục còn lại + khối "Không chắc chắn…" + 3 nút cũ. */
@@ -1199,7 +1280,7 @@ function showPhotoOthers(btn) {
   const p = photoPending;
   const box = document.getElementById("photoOthers");
   if (!p || !box) return;
-  box.innerHTML = renderPhotoOthers(p.others);
+  box.innerHTML = renderPhotoOthers(p.others, p.nhomList); // kho-nhom vòng 6: + món nhóm (rỗng → như cũ)
   box.hidden = false;
   bindFrontImages(box);
   btn.setAttribute("aria-expanded", "true");
@@ -1218,6 +1299,9 @@ function onFrontClick(ev) {
   if (no) { showPhotoOthers(no); return; }
   const pick = ev.target.closest("button[data-front-code]");
   if (pick) { lookup(pick.dataset.frontCode); return; } // không tự chọn thay người dùng: chỉ khi bấm
+  // Đợt kho-nhom vòng 6: bấm một món nhóm (khối "Món nhóm đã thêm có ảnh giống") → tải + vẽ món đó.
+  const nhomBtn = ev.target.closest("button[data-nhom-id]");
+  if (nhomBtn) { showNhom(nhomBtn.dataset.nhomId); return; }
   const act = ev.target.closest("button[data-front-action]");
   if (act) {
     if (act.dataset.frontAction === "scan") {
@@ -1241,7 +1325,8 @@ function onFrontClick(ev) {
   // kho phụ chưa tải (hoặc lần trước lỗi) thì "Tìm lại" cũng bắt đầu tải (vòng 7)
   const extraP = loadFrontExtra();
   extraP.catch(() => {});
-  showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true, extraP })
+  // kho-nhom vòng 6: giữ món nhóm của ảnh đó (frontNhom), không gọi lại máy chủ.
+  showPhotoResult({ id, lookupMark: current, s: frontSearch, found: rankFromText(frontSearch.t1, frontSearch.rIndex, text), fromRetry: true, extraP, nhom: frontNhom })
     .catch((e) => { console.error(e); if (id === frontTurn) sayFront("Có lỗi khi tìm lại. Thử lại.", true); })
     .finally(() => { if (retryTurn === id) retryTurn = 0; });
 }
@@ -1269,7 +1354,8 @@ frontFile.addEventListener("change", async (ev) => {
   const stale = () => id !== frontTurn;
   frontBox.hidden = true;
   frontBox.innerHTML = "";
-  clearPhotoResult(); // sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" của ảnh trước
+  clearPhotoResult(); // sản phẩm tự mở chưa xác nhận / "Chưa tìm thấy…" / món nhóm của ảnh trước
+  frontNhom = []; // món nhóm của ảnh trước
   const lookupMark = current; // quét / nhập mã / bấm lịch sử trong lúc chờ → không tự mở (showPhotoResult)
   sayFront("Đang chuẩn bị ảnh…");
 
@@ -1352,6 +1438,8 @@ frontFile.addEventListener("change", async (ev) => {
   // Rỗng (máy chủ cũ / danh mục không nạp / tìm lỗi) → đường cũ: lúc này mới bắt đầu tải kho phụ (một lần mỗi lượt; lỗi
   // chỉ ghi console trong loadFrontExtra). Đánh đổi: mạng chậm thì kho phụ có thể hết giờ ở lượt này (lần sau dùng được).
   const serverCands = Array.isArray(r.candidates) ? r.candidates : [];
+  // Đợt kho-nhom vòng 6: món nhóm (đã làm sạch trong sendOcr, luôn là mảng); giữ cho "Tìm lại".
+  frontNhom = Array.isArray(r.nhom) ? r.nhom : [];
   let extraP = null;
   if (!serverCands.length) {
     extraP = loadFrontExtra();
@@ -1373,7 +1461,7 @@ frontFile.addEventListener("change", async (ev) => {
   // "nearest"; không đổi focus.)
   // Vòng 5 (NÊN SỬA 2 vòng 4): lỗi bất ngờ khi tìm / gộp / vẽ không để dòng trạng thái kẹt ở "Đang tìm thêm…".
   try {
-    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded, extraP, server: serverCands });
+    await showPhotoResult({ id, lookupMark, s, found: rankFromItems(s.t1, s.rIndex, r.items), fromRetry: false, reencoded: prep.reencoded, extraP, server: serverCands, nhom: frontNhom });
   } catch (e) {
     console.error(e);
     if (id === frontTurn) sayFront("Có lỗi khi tìm sản phẩm. Chọn ảnh lại.", true);

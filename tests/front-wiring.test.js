@@ -442,6 +442,39 @@ describe("main.js: luật nối Chụp mặt trước (đọc nguồn)", () => {
     ]) assert.notDeepEqual(rule17(code), [], label);
   });
 
+  // Đợt kho-nhom vòng 6: kho sản phẩm của nhóm
+  test("(18) ngưỡng món nhóm chỉ ở src/front-nhom.js (main.js không truyền / không chứa ngưỡng); nhomCandidates( chỉ trong front-photo.js; HTML món nhóm chỉ qua render.js", () => {
+    assert.deepEqual(rule18(SRC_ALL), []);
+  });
+  test("(18) luật bắt được chuỗi mẫu sai", () => {
+    const fn = "export const NHOM_THRESHOLD = Infinity;\nexport function nhomCandidates(body) { return []; }\nexport function nhomOutcome(o, n, { threshold = NHOM_THRESHOLD } = {}) { return o; }";
+    const fp = "export async function sendOcr() { return { ok: true, nhom: nhomCandidates(body) }; }";
+    const sn = (body = "  out.innerHTML = renderNhomError();\n  out.innerHTML = renderNhomProduct(view, { imgUrl });") =>
+      `async function showNhom(nhomId, { photo = null } = {}) {\n  result.innerHTML = renderNhomShell(photo.nhomTop);\n${body}\n}`;
+    const main = (extra = "", call = "const outcome = nhomOutcome(photoOutcome(merged), nhom);") =>
+      `async function showPhotoResult({ nhom = [] }) {\n  ${call}\n}\n${sn()}\n${extra}`;
+    const good = { "front-nhom.js": fn, "front-photo.js": fp, "main.js": main(), "render.js": "export function renderNhomHits(n) { return `<div class=\"nhom-hits\">Do nhóm thêm</div>`; }" };
+    assert.deepEqual(rule18(good), []);
+    for (const [label, files] of [
+      ["main.js truyền threshold", { ...good, "main.js": main("", "const outcome = nhomOutcome(photoOutcome(merged), nhom, { threshold: 0.8 });") }],
+      ["main.js truyền tham số 3 qua biến", { ...good, "main.js": main("", "const outcome = nhomOutcome(photoOutcome(merged), nhom, opts);") }],
+      ["main.js chứa chữ threshold", { ...good, "main.js": main("const threshold = 0.8;") }],
+      ["main.js gán NHOM_THRESHOLD", { ...good, "main.js": main("NHOM_THRESHOLD = 0.8;") }],
+      ["main.js nhắc NHOM_THRESHOLD", { ...good, "main.js": main("console.log(NHOM_THRESHOLD);") }],
+      ["main.js không gọi nhomOutcome", { ...good, "main.js": main("", "const outcome = photoOutcome(merged);") }],
+      ["file khác gán NHOM_THRESHOLD", { ...good, "front-extra.js": "export const NHOM_THRESHOLD = 0.8;" }],
+      ["front-nhom.js gán 2 lần", { ...good, "front-nhom.js": fn + "\nlet NHOM_THRESHOLD = 0.5;" }],
+      ["front-nhom.js không có", { ...good, "front-nhom.js": fn.replace("export const NHOM_THRESHOLD = Infinity;", "") }],
+      ["nhomCandidates( trong main.js", { ...good, "main.js": main("const nh = nhomCandidates(body);") }],
+      ["nhomCandidates( ngoài front-photo.js", { ...good, "front-server.js": "const x = nhomCandidates(b);" }],
+      ["front-photo.js không gọi nhomCandidates(", { ...good, "front-photo.js": "export async function sendOcr() {}" }],
+      ["main.js ghép HTML món nhóm (chuỗi)", { ...good, "main.js": main("result.innerHTML = `<p class=\"nhom-note\">x</p>`;") }],
+      ["main.js ghép HTML có chữ Do nhóm thêm", { ...good, "main.js": main("el.innerHTML = '<b>' + 'Do nhóm thêm' + '</b>';") }],
+      ["showNhom gán innerHTML không qua renderNhom*", { ...good, "main.js": main().replace("out.innerHTML = renderNhomError();", "out.innerHTML = \"<p>\" + esc(view.name) + \"</p>\";") }],
+      ["không có showNhom", { ...good, "main.js": main().replace("async function showNhom", "async function moMon") }],
+    ]) assert.notDeepEqual(rule18(files), [], label);
+  });
+
   test("(11) #frontMsg không nói sai: lookup báo lượt tự mở lỗi + xóa câu khi tra không từ ảnh; confirmPhoto đổi câu", () => {
     const body = lookupBody(CODE);
     assert.match(body, /\bphotoFollowMessage\s*\(\s*["']openFailed["']\s*\)/, "lookup: lượt tự mở lỗi → photoFollowMessage(\"openFailed\")");
@@ -601,6 +634,69 @@ function rule17(code) {
   const at = code.indexOf(sp);
   for (const m of code.matchAll(/\bserverMerge\s*\(/g)) {
     if (m.index < at || m.index > at + sp.length) out.push(`dòng ${lineOf(code, m.index)}: serverMerge( ngoài showPhotoResult`);
+  }
+  return out;
+}
+
+/** Các chuỗi ('…', "…", `…`) trong code (đã bỏ comment), như stripComments (không hiểu regex). */
+function stringLiterals(code) {
+  const out = [];
+  let i = 0;
+  while (i < code.length) {
+    const q = code[i];
+    if (q !== "'" && q !== '"' && q !== "`") { i++; continue; }
+    let j = i + 1;
+    while (j < code.length && code[j] !== q) j += code[j] === "\\" ? 2 : 1;
+    out.push(code.slice(i + 1, j));
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Luật (18) (đợt kho-nhom vòng 6): files = { tên file: mã đã bỏ comment } (mọi src/*.js).
+ *  - NHOM_THRESHOLD chỉ được gán đúng 1 lần, ở front-nhom.js (export const NHOM_THRESHOLD = …).
+ *  - main.js: không nhắc NHOM_THRESHOLD, không có chữ threshold; có ≥ 1 lời gọi nhomOutcome(, mọi lời gọi đúng 2 tham số
+ *    (ngưỡng luôn là mặc định của front-nhom.js).
+ *  - nhomCandidates( (trừ khai báo) chỉ ở front-photo.js, ≥ 1 lần.
+ *  - main.js không ghép HTML món nhóm: không chuỗi nào vừa có "<" vừa có "nhom" / "nhóm"; mọi phép gán .innerHTML trong
+ *    showNhom đi qua renderNhom…( của render.js. */
+function rule18(files) {
+  const out = [];
+  const assigns = [];
+  const isDecl = (code, i) => /\bfunction\s+$/.test(code.slice(Math.max(0, i - 20), i));
+  let cands = 0;
+  for (const [name, code] of Object.entries(files)) {
+    for (const m of code.matchAll(/\bNHOM_THRESHOLD\s*=(?!=)/g)) assigns.push([name, code.slice(Math.max(0, m.index - 20), m.index)]);
+    for (const m of code.matchAll(/\bnhomCandidates\s*\(/g)) {
+      if (isDecl(code, m.index)) continue;
+      if (name !== "front-photo.js") out.push(`${name} dòng ${lineOf(code, m.index)}: nhomCandidates( ngoài front-photo.js`);
+      else cands++;
+    }
+  }
+  if (assigns.length !== 1 || assigns[0][0] !== "front-nhom.js" || !/\bexport\s+const\s+$/.test(assigns[0][1])) {
+    out.push(`NHOM_THRESHOLD phải được gán đúng 1 lần ở front-nhom.js (export const); thấy: ${assigns.map((a) => a[0]).join(", ") || "không có"}`);
+  }
+  if (!cands) out.push("front-photo.js phải gọi nhomCandidates(");
+  const main = files["main.js"] || "";
+  if (/\bNHOM_THRESHOLD\b/.test(main)) out.push("main.js nhắc NHOM_THRESHOLD");
+  if (/threshold/i.test(main)) out.push("main.js có chữ threshold (không được truyền / chứa ngưỡng)");
+  const calls = [...main.matchAll(/\bnhomOutcome\s*\(/g)];
+  if (!calls.length) out.push("main.js phải gọi nhomOutcome(");
+  for (const c of calls) {
+    const args = topArgs(main, c.index + c[0].length - 1);
+    if (args.length !== 2) out.push(`main.js dòng ${lineOf(main, c.index)}: nhomOutcome( ${args.length} tham số (chỉ được 2)`);
+  }
+  for (const s of stringLiterals(main)) {
+    if (s.includes("<") && /nh(o|ó)m/i.test(s)) out.push(`main.js ghép HTML món nhóm: ${s.slice(0, 60)}`);
+  }
+  for (const s of stringLiterals(main)) if (/Do nhóm thêm/.test(s)) out.push("main.js có chữ 'Do nhóm thêm' (phải ở render.js)");
+  const body = bodyAfterParams(main, "showNhom");
+  if (!body) out.push("main.js phải có function showNhom(…)");
+  else {
+    for (const m of body.matchAll(/\.innerHTML\s*=(?!=)\s*/g)) {
+      const rhs = body.slice(m.index + m[0].length);
+      if (!/^renderNhom\w*\s*\(/.test(rhs)) out.push(`showNhom gán innerHTML không qua renderNhom…( (${rhs.slice(0, 40)})`);
+    }
   }
   return out;
 }
