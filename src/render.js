@@ -798,7 +798,9 @@ function errAttr(name, errors) {
  * Form "Thêm vào kho nhóm". values: { ten, thuong_hieu, khoi_luong, ma_vach, thanh_phan, dinh_duong: { khóa: chuỗi },
  * di_ung: [mã], nguon } (nhomFormFromOff / giá trị người dùng đang gõ); errors: nhomRowFromForm(…).errors (+ "anh" cho
  * ảnh). opts.previews: [{ url, name }] ảnh đã chọn (URL blob: của main.js); opts.saving: khóa nút Lưu.
- * maxlength khớp CHECK của SQL (đếm theo đơn vị UTF-16 nên chặt hơn cho emoji; nhomRowFromForm kiểm lại).
+ * maxlength khớp CHECK của SQL (đếm theo đơn vị UTF-16 nên chặt hơn cho emoji; nhomRowFromForm kiểm lại). Riêng ô
+ * ma_vach maxlength 32 (vòng 9): mã dán kèm dấu cách ("8 934563 163150" = 15 ký tự) không bị cắt; nhomRowFromForm bỏ
+ * khoảng trắng rồi kiểm 8–14 số + số kiểm tra.
  */
 export function renderNhomAddForm(values = {}, errors = {}, { previews = [], saving = false } = {}) {
   const v = values && typeof values === "object" ? values : {};
@@ -832,7 +834,7 @@ ${fieldErr(key, e)}</div>`;
 <div class="nhom-previews">${pics}</div>
 ${fieldErr("anh", e)}</fieldset>
 <fieldset class="nhom-group"><legend>Mã vạch (nếu có)</legend>
-${text("ma_vach", "Số mã vạch", { max: 14, mode: "numeric" })}
+${text("ma_vach", "Số mã vạch", { max: 32, mode: "numeric" })}
 <div class="actions nhom-code-actions"><label class="btn">Chụp ảnh mã vạch<input id="nhomAddCodeFile" type="file" accept="image/*" capture="environment"></label>
 <button type="button" class="btn" data-nhom-add="off">Lấy thông tin từ Open Food Facts</button></div>
 <p class="nhom-add-status" role="status" aria-live="polite"></p></fieldset>

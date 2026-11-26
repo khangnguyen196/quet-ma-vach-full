@@ -894,7 +894,7 @@ async function initAuth() {
 let manualSignOuts = 0;
 // Đợt kho-nhom vòng 8: bấm "Đăng xuất" trong lúc đang lưu vào kho nhóm → KHÔNG đăng xuất (lượt lưu đang ghi Supabase,
 // đăng xuất giữa chừng dễ để lại món lưu dở), chỉ nhắc. Thư viện tự đăng xuất (hết phiên) vẫn đi đường "cancelled".
-const NHOM_LOGOUT_WAIT_TEXT = "Đang lưu vào kho nhóm, chờ lưu xong rồi đăng xuất.";
+const NHOM_LOGOUT_WAIT_TEXT = "Đang lưu vào kho nhóm, chờ lưu xong rồi đăng xuất (mạng treo lâu thì tải lại trang).";
 
 authBox.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("button[data-auth]");

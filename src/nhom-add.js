@@ -18,6 +18,24 @@ const chars = (s) => [...s].length;
 const cut = (s, max) => [...s].slice(0, max).join("");
 const str = (v) => (typeof v === "string" ? v : "");
 
+/** Độ dài mã có số kiểm tra GTIN chuẩn (EAN-8, UPC-A, EAN-13, GTIN-14). */
+const GTIN_LENGTHS = new Set([8, 12, 13, 14]);
+
+/**
+ * Số cuối (số kiểm tra) của mã vạch đúng không (vòng 9, NÊN SỬA 1). code: chuỗi CHỈ chữ số, 8–14 số (sai dạng → false).
+ * Mã 8 / 12 / 13 / 14 số: tính mod 10 — nhân 3 / 1 xen kẽ, bắt đầu nhân 3 ở chữ số SÁT số cuối rồi đi về bên trái;
+ * số cuối phải bằng (10 − tổng mod 10) mod 10. Mã 9–11 số: không có số kiểm tra chuẩn → true (giữ luật cũ).
+ * Ví dụ: 8934563163150 → 5·3 + 1·1 + 3·3 + 6·1 + 1·3 + 3·1 + 6·3 + 5·1 + 4·3 + 3·1 + 9·3 + 8·1 = 110 → số cuối 0 → true;
+ *   gtinCheckOk("8934563163151") → false; gtinCheckOk("96385074") → true; gtinCheckOk("1234567890") → true (10 số).
+ */
+export function gtinCheckOk(code) {
+  if (typeof code !== "string" || !CODE_RE.test(code)) return false;
+  if (!GTIN_LENGTHS.has(code.length)) return true;
+  let sum = 0;
+  for (let i = code.length - 2, w = 3; i >= 0; i--, w = 4 - w) sum += Number(code[i]) * w;
+  return (10 - (sum % 10)) % 10 === Number(code[code.length - 1]);
+}
+
 /** Mã dị ứng hợp lệ (14 mã của SQL = ALLERGEN_KEYS), bỏ trùng, theo thứ tự ALLERGEN_KEYS. */
 function cleanAllergens(list) {
   const set = new Set(Array.isArray(list) ? list.filter((k) => typeof k === "string") : []);
@@ -95,7 +113,8 @@ function parseNutrient(v) {
  * Giá trị form → dòng để insert vào nhom_san_pham, kiểm ĐÚNG các CHECK của server/kho-nhom.sql:
  * { ok: true, row } hoặc { ok: false, errors: { <tên ô>: câu tiếng Việt } } (ô dinh dưỡng: tên ô = khóa, vd "fat_100g").
  * - ten: bỏ khoảng trắng hai đầu, 1–200 ký tự (bắt buộc).
- * - thuong_hieu / khoi_luong: ≤ 200 ký tự, rỗng → null. ma_vach: 8–14 chữ số hoặc rỗng → null.
+ * - thuong_hieu / khoi_luong: ≤ 200 ký tự, rỗng → null. ma_vach: bỏ MỌI khoảng trắng, rồi 8–14 chữ số hoặc rỗng → null;
+ *   mã 8 / 12 / 13 / 14 số còn phải đúng số kiểm tra (gtinCheckOk), sai → lỗi "sai số cuối".
  * - thanh_phan: ≤ 5.000 ký tự, rỗng → null.
  * - dinh_duong: chữ người gõ, nhận "1,5"; ô rỗng → bỏ khóa; âm / không phải số → lỗi ô đó; không còn khóa nào → null.
  * - di_ung: chỉ 14 mã, bỏ trùng (mã lạ bị bỏ). nguon: tay | off | ocr-mat-sau (khác → tay).
@@ -122,6 +141,8 @@ export function nhomRowFromForm(form) {
   // vòng 8 (gợi ý 4): bỏ MỌI khoảng trắng (người dùng gõ / dán "8 934563 163150" như in dưới mã vạch)
   let ma_vach = str(f.ma_vach).replace(/\s+/g, "") || null;
   if (ma_vach && !CODE_RE.test(ma_vach)) errors.ma_vach = "Mã vạch cần 8–14 chữ số (hoặc để trống).";
+  // vòng 9 (NÊN SỬA 1): đủ độ dài nhưng sai số kiểm tra (gõ / dán nhầm, hoặc bị cắt bớt) → không lưu mã sai vào kho chung
+  else if (ma_vach && !gtinCheckOk(ma_vach)) errors.ma_vach = "Mã vạch sai số cuối (số kiểm tra), xem lại từng số (hoặc để trống).";
 
   let thanh_phan = str(f.thanh_phan).trim() || null;
   if (thanh_phan && chars(thanh_phan) > NHOM_INGREDIENTS_MAX) {
