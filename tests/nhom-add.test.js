@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   nhomFormFromOff, nhomFormFromBackText, nhomRowFromForm, nhomImagePath, newUuid, NHOM_NAME_MAX, NHOM_INGREDIENTS_MAX
 } from "../src/nhom-add.js";
+import * as nhomAdd from "../src/nhom-add.js";
 import { normalize, NO_NAME, ALLERGEN_KEYS } from "../src/off.js";
 import { NHOM_NUTRIENT_KEYS } from "../src/front-nhom.js";
 
@@ -95,7 +96,8 @@ describe("nhomRowFromForm (khớp CHECK của server/kho-nhom.sql)", () => {
     }
   });
   test("mã vạch 8–14 chữ số hoặc rỗng", () => {
-    for (const ok of ["12345678", "12345678901234", " 8934563163150 "]) assert.equal(nhomRowFromForm({ ten: "A", ma_vach: ok }).row.ma_vach, ok.trim());
+    // vòng 9: mã 8 / 14 số phải đúng số kiểm tra (12345678 / 12345678901234 sai số cuối → đổi sang mã đúng)
+    for (const ok of ["96385074", "08934563163150", " 8934563163150 "]) assert.equal(nhomRowFromForm({ ten: "A", ma_vach: ok }).row.ma_vach, ok.trim());
     for (const bad of ["1234567", "123456789012345", "12345678a", "1234 567", "-12345678", "١٢٣٤٥٦٧٨"]) {
       assert.ok(nhomRowFromForm({ ten: "A", ma_vach: bad }).errors.ma_vach, bad);
     }
@@ -103,9 +105,48 @@ describe("nhomRowFromForm (khớp CHECK của server/kho-nhom.sql)", () => {
     assert.equal(nhomRowFromForm({ ten: "A", ma_vach: " \t " }).row.ma_vach, null);
   });
   test("vòng 8 (gợi ý 4): mã vạch bỏ MỌI khoảng trắng trước khi kiểm (gõ / dán '8 934563 163150')", () => {
-    for (const [inp, out] of [["8 934563 163150", "8934563163150"], ["1234 5678", "12345678"], ["8934 563\t163150\n", "8934563163150"]]) {
+    for (const [inp, out] of [["8 934563 163150", "8934563163150"], ["9638 5074", "96385074"],["8934 563\t163150\n", "8934563163150"]]) {
       assert.equal(nhomRowFromForm({ ten: "A", ma_vach: inp }).row.ma_vach, out, inp);
     }
+  });
+  test("vòng 9 (NÊN SỬA 1): mã 8 / 12 / 13 / 14 số phải đúng số kiểm tra GTIN; mã 9–11 số giữ luật cũ", () => {
+    const CHECK = "Mã vạch sai số cuối (số kiểm tra), xem lại từng số (hoặc để trống).";
+    // dán "8 934563 163150" (15 ký tự) → đủ 13 số, không bị cắt
+    assert.equal(nhomRowFromForm({ ten: "A", ma_vach: "8 934563 163150" }).row.ma_vach, "8934563163150");
+    // bị maxlength cũ cắt còn "8 934563 16315" → "893456316315" (12 số) → lỗi số cuối, không lưu mã sai
+    assert.deepEqual(nhomRowFromForm({ ten: "A", ma_vach: "8 934563 16315" }), { ok: false, errors: { ma_vach: CHECK } });
+    const { gtinCheckOk } = nhomAdd;
+    assert.equal(typeof gtinCheckOk, "function", "nhom-add.js phải export gtinCheckOk");
+    assert.equal(nhomRowFromForm({ ten: "A", ma_vach: "893456316315" }).errors?.ma_vach, CHECK);
+    for (const ok of ["96385074", "9638 5074", "8934563163150", "8993175532457", "036000291452", "08934563163150", "10012345678902"]) {
+      const r = nhomRowFromForm({ ten: "A", ma_vach: ok });
+      assert.equal(r.ok, true, ok);
+      assert.equal(r.row.ma_vach, ok.replace(/\s+/g, ""), ok);
+      assert.equal(gtinCheckOk(ok.replace(/\s+/g, "")), true, ok);
+    }
+    // đổi số cuối của mỗi mã đúng → lỗi số cuối (cả 9 số cuối khác)
+    for (const good of ["96385074", "036000291452", "8934563163150", "8993175532457", "08934563163150"]) {
+      for (let d = 0; d <= 9; d++) {
+        const c = good.slice(0, -1) + d;
+        if (c === good) continue;
+        assert.equal(gtinCheckOk(c), false, c);
+        assert.equal(nhomRowFromForm({ ten: "A", ma_vach: c }).errors?.ma_vach, CHECK, c);
+      }
+    }
+    for (const bad of ["12345678", "12345678901234", "8934563163151", "8993175532450"]) {
+      assert.equal(nhomRowFromForm({ ten: "A", ma_vach: bad }).errors?.ma_vach, CHECK, bad);
+    }
+    // 9–11 số: không có số kiểm tra chuẩn → luật cũ (chỉ cần chữ số)
+    for (const ok of ["1234567890", "0000000001", "123456789", "12345678901"]) {
+      assert.equal(gtinCheckOk(ok), true, ok);
+      assert.equal(nhomRowFromForm({ ten: "A", ma_vach: ok }).row.ma_vach, ok, ok);
+    }
+    // sai độ dài / không phải chữ số → câu cũ, gtinCheckOk false
+    for (const bad of ["1234567", "123456789012345", "9638507a", "١٢٣٤٥٦٧٨"]) {
+      assert.equal(nhomRowFromForm({ ten: "A", ma_vach: bad }).errors.ma_vach, "Mã vạch cần 8–14 chữ số (hoặc để trống).", bad);
+      assert.equal(gtinCheckOk(bad), false, bad);
+    }
+    for (const x of [null, undefined, 96385074, "", " 96385074"]) assert.equal(gtinCheckOk(x), false, String(x));
   });
   test("vòng 8 (gợi ý 5): số dinh dưỡng rất nhỏ / rất lớn không ra dạng 1e-7 / 1e21 (bỏ ô đó)", () => {
     const f = nhomFormFromOff({ nutriments: { fat_100g: 1e-7, sugars_100g: 1e21, proteins_100g: 0.000001, salt_100g: 2.5 } }, "");

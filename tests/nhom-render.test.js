@@ -184,7 +184,9 @@ describe("trang món nhóm", () => {
     assert.match(html, /<textarea id="nhomAdd-thanh_phan" name="thanh_phan" rows="4" maxlength="5000">&lt;\/textarea&gt;&lt;script&gt;/);
     assert.match(html, /name="thuong_hieu" maxlength="200"/);
     assert.match(html, /name="khoi_luong" maxlength="200"/);
-    assert.match(html, /name="ma_vach" maxlength="14" value="8934563163150" inputmode="numeric"/);
+    // vòng 9 (NÊN SỬA 1): ô mã vạch đủ chỗ cho mã dán có dấu cách ("8 934563 163150" = 15 ký tự), không bị cắt
+    const ml = Number(/name="ma_vach" maxlength="(\d+)" value="8934563163150" inputmode="numeric"/.exec(html)?.[1]);
+    assert.ok(ml >= 20, `maxlength ô ma_vach = ${ml}, cần ≥ 20`);
     assert.equal((html.match(/name="dd:/g) || []).length, 8);
     assert.match(html, /name="dd:fat_100g" inputmode="decimal" maxlength="20" value="1,5" autocomplete="off" aria-invalid="true"/);
     assert.match(html, /name="dd:energy-kcal_100g" inputmode="decimal" maxlength="20" value="450"/);
