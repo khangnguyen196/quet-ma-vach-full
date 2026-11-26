@@ -1632,12 +1632,15 @@ async function fillNhomFromOff() {
     data = await getProduct(code);
   } catch (e) {
     console.error(e);
-    if (turn === nhomAddTurn && !nhomAdd.saving) nhomStatus(".nhom-add-status", "Không tra được Open Food Facts (mạng hoặc máy chủ lỗi). Thử lại hoặc tự gõ thông tin.", true);
+    if (turn === nhomAddTurn) {
+      nhomStatus(".nhom-add-status", nhomAdd.saving ? "" : "Không tra được Open Food Facts (mạng hoặc máy chủ lỗi). Thử lại hoặc tự gõ thông tin.", !nhomAdd.saving);
+    }
     return;
   }
-  // Vòng 8 (NÊN SỬA 5): người dùng bấm "Lưu" trong lúc chờ OFF → bỏ kết quả tra (không vẽ lại form đang khóa: vẽ lại sẽ
-  // thay form mà saveNhomAdd đang giữ, form mới kẹt nút mờ sau khi lưu lỗi).
-  if (turn !== nhomAddTurn || !nhomForm() || nhomAdd.saving) return;
+  if (turn !== nhomAddTurn || !nhomForm()) return;
+  // Vòng 8 (NÊN SỬA 5): người dùng bấm "Lưu" trong lúc chờ OFF → bỏ kết quả tra, xóa câu "Đang tra…" (không vẽ lại form
+  // đang khóa: vẽ lại sẽ thay form mà saveNhomAdd đang giữ, form mới kẹt nút mờ sau khi lưu lỗi).
+  if (nhomAdd.saving) { nhomStatus(".nhom-add-status", ""); return; }
   const now = readNhomForm(nhomForm()); // người dùng có thể đã gõ thêm trong lúc chờ
   if (!data) {
     nhomStatus(".nhom-add-status", NHOM_OFF_MISSING_TEXT, true);
